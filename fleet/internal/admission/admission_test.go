@@ -99,3 +99,28 @@ func TestConfigAndRequestValidation(t *testing.T) {
 		t.Fatalf("zero capacity: got %v", err)
 	}
 }
+
+func TestStatusReportsLimitsAndQuotasChangeLive(t *testing.T) {
+	controller := mustController(t, Config{Capacity: 10, Reserved: map[Priority]int{Interactive: 2},
+		EndpointBudgets: map[string]EndpointBudget{"policy": {TokensPerMinute: 1000, TokensPerEnvMinute: 100}}})
+	request := Request{Tenant: "lab", Priority: Training, Endpoint: "policy"}
+	admitN(t, controller, request, 3)
+	if err := controller.SetTenantQuota("lab", 3); err != nil {
+		t.Fatalf("set quota: %v", err)
+	}
+	if err := controller.TryAdmit(request); !errors.Is(err, ErrTenantQuota) {
+		t.Fatalf("admit past a lowered quota: got %v, want ErrTenantQuota", err)
+	}
+	status := controller.Status()
+	if status.Capacity != 10 || status.Reserved[Interactive] != 2 || status.TenantQuotas["lab"] != 3 ||
+		status.EndpointMaxEnvs["policy"] != 10 || status.Usage.ByTenant["lab"] != 3 || status.Usage.Total != 3 {
+		t.Fatalf("unexpected status %+v", status)
+	}
+	if err := controller.SetTenantQuota("lab", -1); err == nil {
+		t.Fatal("a negative quota was accepted")
+	}
+	if err := controller.SetTenantQuota("lab", 0); err != nil {
+		t.Fatalf("clear quota: %v", err)
+	}
+	admitN(t, controller, request, 1)
+}

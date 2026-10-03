@@ -68,10 +68,20 @@ type Request struct {
 
 // Usage reports envs in use.
 type Usage struct {
-	Total      int
-	ByClass    map[Priority]int
-	ByTenant   map[string]int
-	ByEndpoint map[string]int
+	Total      int              `json:"total"`
+	ByClass    map[Priority]int `json:"by_class"`
+	ByTenant   map[string]int   `json:"by_tenant"`
+	ByEndpoint map[string]int   `json:"by_endpoint"`
+}
+
+// Status is what the admin console shows: every limit next to what is in use against it.
+type Status struct {
+	Capacity           int              `json:"capacity"`
+	Reserved           map[Priority]int `json:"reserved"`
+	DefaultTenantQuota int              `json:"default_tenant_quota"`
+	TenantQuotas       map[string]int   `json:"tenant_quotas"`
+	EndpointMaxEnvs    map[string]int   `json:"endpoint_max_envs"`
+	Usage              Usage            `json:"usage"`
 }
 
 // Controller tracks envs in use and admits new ones.
@@ -196,12 +206,48 @@ func decrement[Key comparable](counts map[Key]int, key Key) {
 func (controller *Controller) Usage() Usage {
 	controller.mu.Lock()
 	defer controller.mu.Unlock()
+	return controller.usage()
+}
+
+func (controller *Controller) usage() Usage {
 	return Usage{
 		Total:      controller.totalInUse(),
 		ByClass:    copyCounts(controller.inUseByClass),
 		ByTenant:   copyCounts(controller.inUseByTenant),
 		ByEndpoint: copyCounts(controller.inUseByEndpoint),
 	}
+}
+
+// Status reports the limits together with the usage.
+func (controller *Controller) Status() Status {
+	controller.mu.Lock()
+	defer controller.mu.Unlock()
+	endpointMaxEnvs := make(map[string]int, len(controller.config.EndpointBudgets))
+	for endpoint, budget := range controller.config.EndpointBudgets {
+		endpointMaxEnvs[endpoint] = budget.MaxEnvs()
+	}
+	return Status{
+		Capacity:           controller.config.Capacity,
+		Reserved:           copyCounts(controller.config.Reserved),
+		DefaultTenantQuota: controller.config.DefaultTenantQuota,
+		TenantQuotas:       copyCounts(controller.config.TenantQuotas),
+		EndpointMaxEnvs:    endpointMaxEnvs,
+		Usage:              controller.usage(),
+	}
+}
+
+// SetTenantQuota changes one tenant's concurrent env quota, zero meaning unlimited; running envs are never evicted.
+func (controller *Controller) SetTenantQuota(tenant string, quota int) error {
+	if tenant == "" || quota < 0 {
+		return fmt.Errorf("a tenant quota needs a tenant and a quota of zero or more, got %q and %d", tenant, quota)
+	}
+	controller.mu.Lock()
+	defer controller.mu.Unlock()
+	if controller.config.TenantQuotas == nil {
+		controller.config.TenantQuotas = map[string]int{}
+	}
+	controller.config.TenantQuotas[tenant] = quota
+	return nil
 }
 
 func copyCounts[Key comparable](counts map[Key]int) map[Key]int {

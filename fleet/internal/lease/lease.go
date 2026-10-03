@@ -76,6 +76,11 @@ func NewManager(controller *admission.Controller, managerClock clock.Clock, defa
 	return &Manager{admission: controller, clock: managerClock, defaultTTL: defaultTTL, leases: map[string]Lease{}}
 }
 
+// Admission is the controller that admits this manager's leases.
+func (manager *Manager) Admission() *admission.Controller {
+	return manager.admission
+}
+
 // OnRelease registers a hook that runs for every lease that ends.
 func (manager *Manager) OnRelease(hook ReleaseHook) {
 	manager.mu.Lock()
