@@ -14,6 +14,7 @@ import itertools
 import threading
 import time
 from collections import defaultdict
+from operator import attrgetter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict
 from typing import Any, Literal
@@ -21,6 +22,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from rlworld.analysis.failures import FailureLabel, LlmFailureLabeler, analyze_failures
+from rlworld.judge.calibration import LabeledVerdict, agreement_report, calibration_problems
 from rlworld.rewards.diff import diff_states
 from rlworld.rewards.records import RewardRecord, StateChange
 from rlworld.services.experiments import UnknownRecordError
@@ -85,7 +87,7 @@ class ReviewRequest(BaseModel):
 
 class ReviewItem(BaseModel):
     item_id: str
-    action: ReviewAction | Literal["bug_ticket"]
+    action: ReviewAction | Literal["bug_ticket", "gate_failure", "alert"]
     queue: str
     run_id: str
     episode_ids: list[str]
@@ -96,7 +98,41 @@ class ReviewItem(BaseModel):
     status: Literal["open", "resolved", "dismissed"] = "open"
     created_by: str = ""
     created_at: float
-    source: Literal["console", "failure_analysis"] = "console"
+    resolved_by: str = ""
+    resolved_at: float | None = None
+    source: Literal["console", "failure_analysis", "gates", "alert"] = "console"
+
+
+class ReviewUpdate(BaseModel):
+    status: Literal["open", "resolved", "dismissed"] | None = None
+    note: str | None = None
+    label: dict[str, Any] | None = None
+
+
+class FiledItem(BaseModel):
+    """What platform jobs file: tasks failing gates and episodes behind alerts."""
+
+    source: Literal["gates", "alert"]
+    queue: str = "review"
+    run_id: str = ""
+    episode_ids: list[str] = Field(default_factory=list)
+    title: str = Field(min_length=1)
+    note: str = ""
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class VerifierAgreement(BaseModel):
+    labels: int
+    precision: float | None
+    recall: float | None
+    false_passes: int
+    false_fails: int
+
+
+class CalibrationReport(BaseModel):
+    verifier: VerifierAgreement
+    judge: dict[str, dict[str, Any]]
+    judge_problems: list[str]
 
 
 class ComparisonRow(BaseModel):
@@ -270,6 +306,67 @@ class ReviewService:
         return self.add_item(action=request.action, queue=QUEUE_BY_ACTION[request.action], run_id=run_id,
                              episode_ids=[episode_id], title=titles[request.action], note=request.note,
                              label=request.label, payload=payload, created_by=request.created_by)
+
+    def item(self, item_id: str) -> ReviewItem:
+        with self.lock:
+            if item_id not in self.items:
+                raise UnknownRecordError(item_id)
+            return self.items[item_id]
+
+    def update_item(self, item_id: str, update: ReviewUpdate, actor: str) -> ReviewItem:
+        """Resolve or dismiss an item; labelers record their label as they resolve a labeling item."""
+        current = self.item(item_id)
+        if update.label is not None and current.queue != "labeling":
+            raise ReviewError("only labeling items take labels")
+        changes: dict[str, Any] = {name: value for name, value in update.model_dump().items() if value is not None}
+        if update.status in ("resolved", "dismissed"):
+            changes.update(resolved_by=actor, resolved_at=self.clock())
+        updated = current.model_copy(update=changes)
+        with self.lock:
+            self.items[item_id] = updated
+        return updated
+
+    def file_item(self, filed: FiledItem, actor: str) -> ReviewItem:
+        return self.add_item(action="gate_failure" if filed.source == "gates" else "alert", queue=filed.queue,
+                             run_id=filed.run_id, episode_ids=filed.episode_ids, title=filed.title, note=filed.note,
+                             payload=filed.payload, created_by=actor, source=filed.source)
+
+    def calibration(self, run_id: str | None = None) -> CalibrationReport:
+        """Verifier precision and recall against human verdicts, judge agreement per rubric item."""
+        latest_labels: dict[tuple[str, str], dict[str, Any]] = {}
+        for item in sorted(self.list_items(queue="labeling", run_id=run_id), key=attrgetter("created_at")):
+            if item.label:
+                for episode_id in item.episode_ids:
+                    latest_labels[(item.run_id, episode_id)] = item.label
+        true_passes = false_passes = false_fails = verdicts = 0
+        judge_labels: list[LabeledVerdict] = []
+        judged_episodes: set[str] = set()
+        for (labeled_run_id, episode_id), label in latest_labels.items():
+            episode = self.views.episode(labeled_run_id, episode_id)
+            if label.get("verdict") in ("success", "failure"):
+                verdicts += 1
+                verifier_passed = episode.termination == "success"
+                human_passed = label["verdict"] == "success"
+                true_passes += verifier_passed and human_passed
+                false_passes += verifier_passed and not human_passed
+                false_fails += human_passed and not verifier_passed
+            judge_checks = {check.name: check.passed for check in (episode.reward.checks if episode.reward else ())
+                            if check.tier == "judge"}
+            for item_id, human_passed in (label.get("items") or {}).items():
+                if item_id in judge_checks:
+                    judge_labels.append(LabeledVerdict(episode_id, item_id, judge_checks[item_id], bool(human_passed)))
+                    judged_episodes.add(episode_id)
+        judge_report = agreement_report(judge_labels) if judge_labels else {}
+        return CalibrationReport(
+            verifier=VerifierAgreement(
+                labels=verdicts,
+                precision=true_passes / (true_passes + false_passes) if true_passes + false_passes else None,
+                recall=true_passes / (true_passes + false_fails) if true_passes + false_fails else None,
+                false_passes=false_passes, false_fails=false_fails),
+            judge={item_id: asdict(stats) for item_id, stats in judge_report.items()},
+            judge_problems=(calibration_problems(judge_report, episode_count=len(judged_episodes))
+                            if judge_report else []),
+        )
 
     def list_items(self, queue: str | None = None, status: str | None = None, run_id: str | None = None,
                    episode_id: str | None = None) -> list[ReviewItem]:
