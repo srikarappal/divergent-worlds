@@ -13,6 +13,7 @@ or down when a template has none there.
 import random
 import threading
 from collections.abc import Mapping, Sequence
+from operator import itemgetter
 from dataclasses import dataclass
 from typing import Literal
 
@@ -177,7 +178,7 @@ class CurriculumSampler:
             (self.random_generator.random() ** (1 / self.task_weight(candidate, policy_version)), candidate)
             for candidate in candidates
         ]
-        keyed_candidates.sort(key=lambda keyed_candidate: keyed_candidate[0], reverse=True)
+        keyed_candidates.sort(key=itemgetter(0), reverse=True)
         return [candidate for _, candidate in keyed_candidates[:batch_size]]
 
 
