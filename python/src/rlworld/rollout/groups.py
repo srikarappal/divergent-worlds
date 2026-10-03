@@ -66,6 +66,7 @@ class LeaseSettings:
     policy_endpoint: str
     shape: EnvShape
     licenses: tuple[str, ...] = ()
+    world_time: str | None = None
 
 
 @dataclass(frozen=True)
@@ -161,6 +162,8 @@ class GroupRunner:
             cost_center=self.settings.cost_center,
             ttl_seconds=shape.lease_ttl_seconds,
             host_scoped_licenses=shape.host_scoped_licenses,
+            world_time=self.settings.world_time,
+            observation_kinds=tuple(instance.task.observation),
         )
         source = self.call_with_backpressure(self.fleet.lease_group, request)[0]
         try:

@@ -18,10 +18,11 @@ from rlworld.gateway.errors import (
 from rlworld.gateway.gateway import EndpointHeadroom, ModelGateway
 from rlworld.gateway.messages import ChatRequest, ChatResponse, TokenTrace, Usage
 from rlworld.gateway.metering import CallRecord, UsageMeter, UsageSummary
-from rlworld.gateway.openai_compatible import OpenAICompatibleTransport, PassthroughImageResolver
+from rlworld.gateway.openai_compatible import BlobImageResolver, OpenAICompatibleTransport, PassthroughImageResolver
 from rlworld.gateway.secrets import EnvironmentSecretStore, SecretStore, SecretVault, StaticSecretStore
 
 __all__ = [
+    "BlobImageResolver",
     "CacheMissError",
     "CallRecord",
     "ChatRequest",

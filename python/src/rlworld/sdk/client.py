@@ -80,6 +80,8 @@ class LeaseGroupRequest:
     cost_center: str = ""
     ttl_seconds: int = 300
     host_scoped_licenses: tuple[str, ...] = ()
+    world_time: str | None = None
+    observation_kinds: tuple[str, ...] = ()
 
 
 def parse_observation(payload: Any) -> Observation | dict[str, Any]:
@@ -127,7 +129,10 @@ class FleetClient:
             "group_size": request.group_size,
             "ttl_seconds": request.ttl_seconds,
             "host_scoped_licenses": list(request.host_scoped_licenses),
+            "observation_kinds": list(request.observation_kinds),
         }
+        if request.world_time is not None:
+            body["world_time"] = request.world_time
         return lease_infos(self.request("POST", "/v1/leases", body))
 
     def heartbeat(self, lease_id: str) -> LeaseInfo:

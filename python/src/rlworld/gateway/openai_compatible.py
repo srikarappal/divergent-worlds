@@ -4,6 +4,7 @@ Token level output follows the vLLM OpenAI server extensions: logprobs plus
 return_token_ids, which add prompt_token_ids and per choice token_ids.
 """
 
+import base64
 from typing import Any, Protocol
 
 import httpx
@@ -11,9 +12,11 @@ import httpx
 from rlworld.gateway.config import EndpointConfig
 from rlworld.gateway.errors import UpstreamError
 from rlworld.gateway.messages import ChatRequest, TokenTrace, Usage
+from rlworld.trajectories.object_store import ObjectStore, get_blob
 
 RETRYABLE_STATUS_CODES = frozenset({408, 409, 429, 500, 502, 503, 504})
 PASSTHROUGH_IMAGE_SCHEMES = ("http://", "https://", "data:")
+BLOB_SCHEME = "blob:"
 
 
 class ImageResolver(Protocol):
@@ -27,6 +30,28 @@ class PassthroughImageResolver:
         if not image_uri.startswith(PASSTHROUGH_IMAGE_SCHEMES):
             raise ValueError(f"no resolver for image uri {image_uri}; presign it or inline it as a data URL")
         return image_uri
+
+
+class BlobImageResolver:
+    """Frames the node agents stored as blobs travel inline as data URLs; other URIs pass through."""
+
+    def __init__(self, object_store: ObjectStore, fallback: ImageResolver | None = None) -> None:
+        self.object_store = object_store
+        self.fallback = fallback or PassthroughImageResolver()
+
+    def resolve(self, image_uri: str) -> str:
+        if not image_uri.startswith(BLOB_SCHEME):
+            return self.fallback.resolve(image_uri)
+        frame = get_blob(self.object_store, image_uri.removeprefix(BLOB_SCHEME))
+        return f"data:{image_media_type(frame)};base64,{base64.b64encode(frame).decode('ascii')}"
+
+
+def image_media_type(frame: bytes) -> str:
+    if frame.startswith(b"\x89PNG"):
+        return "image/png"
+    if frame.startswith(b"\xff\xd8"):
+        return "image/jpeg"
+    return "image/webp"
 
 
 def convert_content(content: Any, image_resolver: ImageResolver) -> Any:
