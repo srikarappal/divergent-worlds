@@ -34,6 +34,7 @@ type GuestChannel interface {
 	ScreenHash(ctx context.Context, vmID string) (string, error)
 	Observe(ctx context.Context, vmID string) (json.RawMessage, error)
 	Inject(ctx context.Context, vmID string, payload json.RawMessage) error
+	Extract(ctx context.Context, vmID string, apps []string) (json.RawMessage, error)
 }
 
 // CommandRunner runs one argv on the host; tests record instead.
@@ -247,6 +248,26 @@ func (agent *Agent) Inject(ctx context.Context, envID string, payload json.RawMe
 	return agent.guest.Inject(ctx, envID, payload)
 }
 
+// Checkpoint pauses an env and writes a full snapshot of it.
+func (agent *Agent) Checkpoint(ctx context.Context, envID, statePath, memoryPath string) (vmm.SnapshotRef, error) {
+	if _, err := agent.lookup(envID); err != nil {
+		return vmm.SnapshotRef{}, err
+	}
+	snapshot, err := agent.driver.Snapshot(ctx, envID, vmm.Full, statePath, memoryPath)
+	if err == nil {
+		agent.setState(envID, vmm.Paused)
+	}
+	return snapshot, err
+}
+
+// Extract reads normalized app state for verifiers; the env must already be frozen by the caller.
+func (agent *Agent) Extract(ctx context.Context, envID string, apps []string) (json.RawMessage, error) {
+	if _, err := agent.lookup(envID); err != nil {
+		return nil, err
+	}
+	return agent.guest.Extract(ctx, envID, apps)
+}
+
 // Destroy removes the VM, its network and its overlay, and frees the clone slot.
 func (agent *Agent) Destroy(ctx context.Context, envID string) error {
 	target, err := agent.lookup(envID)
@@ -305,6 +326,15 @@ func (agent *Agent) Fork(ctx context.Context, envID string, count int, checkpoin
 
 // Step runs one turn: resume, act, wait for the screen to settle, observe, pause.
 func (agent *Agent) Step(ctx context.Context, envID string, action json.RawMessage) (StepResult, error) {
+	return agent.turn(ctx, envID, action)
+}
+
+// Observe runs a turn without an action, for the first observation after a reset.
+func (agent *Agent) Observe(ctx context.Context, envID string) (StepResult, error) {
+	return agent.turn(ctx, envID, nil)
+}
+
+func (agent *Agent) turn(ctx context.Context, envID string, action json.RawMessage) (StepResult, error) {
 	if _, err := agent.lookup(envID); err != nil {
 		return StepResult{}, err
 	}
@@ -319,8 +349,10 @@ func (agent *Agent) Step(ctx context.Context, envID string, action json.RawMessa
 }
 
 func (agent *Agent) actAndObserve(ctx context.Context, envID string, action json.RawMessage) (StepResult, error) {
-	if err := agent.guest.Act(ctx, envID, action); err != nil {
-		return StepResult{}, fmt.Errorf("act in %s: %w", envID, err)
+	if action != nil {
+		if err := agent.guest.Act(ctx, envID, action); err != nil {
+			return StepResult{}, fmt.Errorf("act in %s: %w", envID, err)
+		}
 	}
 	settleDuration, capped, err := agent.waitForSettle(ctx, envID)
 	if err != nil {

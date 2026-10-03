@@ -64,6 +64,10 @@ func (guest *scriptedGuest) Inject(_ context.Context, _ string, payload json.Raw
 	return nil
 }
 
+func (guest *scriptedGuest) Extract(_ context.Context, _ string, apps []string) (json.RawMessage, error) {
+	return json.RawMessage(`{"apps": "` + strings.Join(apps, ",") + `"}`), nil
+}
+
 func newTestAgent(guest *scriptedGuest) (*Agent, *fake.Driver, *recordingCommands, *clock.Fake) {
 	driver := fake.New()
 	commands := &recordingCommands{}
@@ -225,6 +229,23 @@ func TestInjectReachesTheGuest(t *testing.T) {
 	}
 	if err := agent.Inject(context.Background(), "env_9", json.RawMessage(`{}`)); !errors.Is(err, ErrUnknownEnv) {
 		t.Fatalf("inject into an unknown env: %v", err)
+	}
+}
+
+func TestObserveCheckpointAndExtract(t *testing.T) {
+	guest := &scriptedGuest{hashes: []string{"a"}}
+	agent, driver, _, _ := newTestAgent(guest)
+	agent.Start(context.Background(), startRequest("env_1"))
+	if _, err := agent.Observe(context.Background(), "env_1"); err != nil || len(guest.actions) != 0 {
+		t.Fatalf("observe must not act: %v %v", err, guest.actions)
+	}
+	snapshot, err := agent.Checkpoint(context.Background(), "env_1", "/checkpoints/a.state", "/checkpoints/a.memory")
+	if err != nil || snapshot.Kind != vmm.Full || driver.State("env_1") != vmm.Paused {
+		t.Fatalf("checkpoint: %+v %v", snapshot, err)
+	}
+	state, err := agent.Extract(context.Background(), "env_1", []string{"mail", "files"})
+	if err != nil || string(state) != `{"apps": "mail,files"}` {
+		t.Fatalf("extract: %s %v", state, err)
 	}
 }
 
