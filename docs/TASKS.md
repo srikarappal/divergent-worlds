@@ -42,7 +42,7 @@ Status is one of todo, doing or done.
 19. [done] Env client SDK and MCP facade.
 20. [done] Reward service: the finish pipeline (freeze, extract, verify, judge, compose, record).
 21. [done] experimentd: specs, experiments, sweeps, preflight, dry run, launch, control and event stream; trainer launcher with Kubernetes and Slurm renderers; run tokens.
-22. [todo] Rollout worker library: episode loop, group forks, adapters, gateway calls, trajectory writes; trainer adapter shims.
+22. [done] Rollout worker library: episode loop, group forks, adapters, gateway calls, trajectory writes; trainer adapter shims.
 
 ### Web console
 
