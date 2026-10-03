@@ -27,7 +27,7 @@ Status is one of todo, doing or done.
 10. [done] Failure clustering: labeler protocol, cluster rollups per template and policy version, verifier false negative routing.
 11. [done] Worlds: seeded synthetic organization generator, app integration contract, reference mail integration, world digests.
 12. [done] Identity and entitlements broker: identity and seat pools, per episode session minting, leases with TTL, audit log.
-13. [todo] Network world renderers: DNS overrides, private CA issuance, egress allowlist rules, netem fault commands.
+13. [done] Network world renderers: DNS overrides, private CA issuance, egress allowlist rules, netem fault commands.
 
 ### Go fleet
 
