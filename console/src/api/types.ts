@@ -222,3 +222,119 @@ export interface LiveTile {
 }
 
 export type FrameSize = "full" | "thumbnail";
+
+export type EpisodeFilter = {
+  termination?: string;
+  task_id?: string;
+  template?: string;
+  difficulty_key?: string;
+  category?: string;
+  policy_version?: number;
+  limit?: number;
+};
+
+export interface CohortEpisode {
+  episode: EpisodeRecord;
+  frames: Array<string | null>;
+  category: string | null;
+}
+
+export interface EpisodeProvenance {
+  episode_id: string;
+  reward: RewardRecord | null;
+  initial_state: Record<string, unknown>;
+  final_state: Record<string, unknown> | null;
+  world_diff: StateChange[];
+}
+
+export interface FailureLabel {
+  category: string;
+  summary: string;
+  confidence: number;
+  evidence_step: number | null;
+  source: "rules" | "llm" | "fallback";
+}
+
+export interface FailureCluster {
+  template: string;
+  policy_version: number;
+  category: string;
+  episode_ids: string[];
+  share_of_failures: number;
+  example_summaries: string[];
+}
+
+export interface BugTicket {
+  queue: string;
+  template: string;
+  policy_version: number;
+  category: string;
+  title: string;
+  episode_ids: string[];
+  evidence: string[];
+}
+
+export interface FailureAnalysis {
+  run_id: string;
+  analyzed_at: number;
+  labels: Record<string, FailureLabel>;
+  clusters: FailureCluster[];
+  tickets: BugTicket[];
+  unlabeled_episode_ids: string[];
+}
+
+export interface EvalBreakdown {
+  episodes: number;
+  successes: number;
+  success_rate: number;
+  interval_low: number;
+  interval_high: number;
+  mean_total: number;
+  terminations: Record<string, number>;
+}
+
+export interface EvalReport {
+  overall: EvalBreakdown;
+  by_template: Record<string, EvalBreakdown>;
+  by_difficulty: Record<string, EvalBreakdown>;
+  pass_at_k: Record<string, number>;
+  excluded_env_errors: number;
+  excluded_human_intervened: number;
+}
+
+export interface ComparisonRow {
+  task_id: string;
+  template: string;
+  episodes: Record<string, number>;
+  success_rates: Record<string, number>;
+}
+
+export interface Comparison {
+  reports: Record<string, EvalReport>;
+  shared_tasks: ComparisonRow[];
+}
+
+export type ReviewAction = "flag" | "label" | "verifier_bug" | "task_draft" | "audit_sample";
+
+export interface ReviewItem {
+  item_id: string;
+  action: ReviewAction | "bug_ticket";
+  queue: string;
+  run_id: string;
+  episode_ids: string[];
+  title: string;
+  note: string;
+  label: Record<string, unknown> | null;
+  payload: Record<string, unknown>;
+  status: "open" | "resolved" | "dismissed";
+  created_by: string;
+  created_at: number;
+  source: "console" | "failure_analysis";
+}
+
+export type ReviewItemFilter = {
+  queue?: string;
+  status?: string;
+  run_id?: string;
+  episode_id?: string;
+};

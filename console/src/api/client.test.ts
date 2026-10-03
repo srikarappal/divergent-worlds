@@ -9,6 +9,7 @@ const PATH_VALUES: Record<string, string> = {
   experiment_id: "experiment_000001",
   run_id: "experiment_000001_run_000",
   episode_id: "b00000_g00000_s000_a0",
+  step_index: "2",
   frame_digest: "ab12",
   kind: "images",
   name: "byo_judge",
@@ -30,7 +31,8 @@ class RecordingTransport implements FetchTransport {
     this.requests.push({ url: input, init });
     return this.responses.shift() ?? new Response(JSON.stringify({ digest: "sha256:abc", yaml: "", runs: [],
                                                                    entries: [], endpoints: [], episodes: [],
-                                                                   tiles: [], episode_id: "e" }));
+                                                                   tiles: [], items: [], messages: [],
+                                                                   episode_id: "e" }));
   }
 }
 
@@ -57,7 +59,16 @@ function sampleArguments(operationName: string): unknown[] {
     case "set_endpoint_key":
       return [PATH_VALUES.name, "sk_123"];
     case "get_episode":
+    case "get_step_prompt":
       return [PATH_VALUES.run_id, PATH_VALUES.episode_id, 2];
+    case "get_provenance":
+      return [PATH_VALUES.run_id, PATH_VALUES.episode_id];
+    case "review_episode":
+      return [PATH_VALUES.run_id, PATH_VALUES.episode_id, "flag"];
+    case "compare_runs":
+      return [[PATH_VALUES.run_id, "experiment_000001_run_001"]];
+    case "list_review_items":
+      return [];
     case "list_runs":
     case "list_endpoints":
       return [];

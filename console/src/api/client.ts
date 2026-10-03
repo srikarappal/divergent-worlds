@@ -2,15 +2,24 @@
 import { fillPath, operation } from "./operations";
 import type {
   CatalogEntry,
+  CohortEpisode,
+  Comparison,
   DryRun,
   EndpointRegistration,
   EndpointView,
+  EpisodeFilter,
+  EpisodeProvenance,
   EpisodeRecord,
+  EvalReport,
   ExperimentPreflight,
   ExperimentRecord,
+  FailureAnalysis,
   FrameSize,
   LiveTile,
   ProbeResult,
+  ReviewAction,
+  ReviewItem,
+  ReviewItemFilter,
   RunEvent,
   RunRecord,
 } from "./types";
@@ -49,6 +58,17 @@ export interface ConsoleApi {
   liveWall(runId: string, limit?: number): Promise<LiveTile[]>;
   getFrame(frameDigest: string, size?: FrameSize): Promise<Blob>;
   frameUrl(frameDigest: string, size: FrameSize): string;
+  cohort(runId: string, filter?: EpisodeFilter): Promise<CohortEpisode[]>;
+  getProvenance(runId: string, episodeId: string): Promise<EpisodeProvenance>;
+  getStepPrompt(runId: string, episodeId: string, stepIndex: number): Promise<Record<string, unknown>[]>;
+  reviewEpisode(runId: string, episodeId: string, action: ReviewAction, note?: string,
+                label?: Record<string, unknown>): Promise<ReviewItem>;
+  analyzeFailures(runId: string): Promise<FailureAnalysis>;
+  getFailures(runId: string): Promise<FailureAnalysis>;
+  runReport(runId: string): Promise<EvalReport>;
+  compareRuns(runIds: readonly string[]): Promise<Comparison>;
+  comparePolicyVersions(runId: string): Promise<Comparison>;
+  listReviewItems(filter?: ReviewItemFilter): Promise<ReviewItem[]>;
   listCatalog(kind: string): Promise<CatalogEntry[]>;
   listEndpoints(): Promise<EndpointView[]>;
   registerEndpoint(endpoint: EndpointRegistration): Promise<EndpointView>;
@@ -225,6 +245,49 @@ export class ApiClient implements ConsoleApi {
   // Frames go straight into img elements; content addressed, so browsers cache them for good.
   frameUrl(frameDigest: string, size: FrameSize): string {
     return `${this.baseUrl}${fillPath(operation("get_frame").path, { frame_digest: frameDigest })}?size=${size}`;
+  }
+
+  async cohort(runId: string, filter: EpisodeFilter = {}): Promise<CohortEpisode[]> {
+    return (await this.call("cohort", { path: { run_id: runId }, query: filter })).episodes;
+  }
+
+  getProvenance(runId: string, episodeId: string): Promise<EpisodeProvenance> {
+    return this.call("get_provenance", { path: { run_id: runId, episode_id: episodeId } });
+  }
+
+  async getStepPrompt(runId: string, episodeId: string, stepIndex: number): Promise<Record<string, unknown>[]> {
+    const path = { run_id: runId, episode_id: episodeId, step_index: String(stepIndex) };
+    return (await this.call("get_step_prompt", { path })).messages;
+  }
+
+  reviewEpisode(runId: string, episodeId: string, action: ReviewAction, note = "",
+                label?: Record<string, unknown>): Promise<ReviewItem> {
+    return this.call("review_episode", { path: { run_id: runId, episode_id: episodeId },
+                                         body: { action, note, label: label ?? null } });
+  }
+
+  analyzeFailures(runId: string): Promise<FailureAnalysis> {
+    return this.call("analyze_failures", { path: { run_id: runId } });
+  }
+
+  getFailures(runId: string): Promise<FailureAnalysis> {
+    return this.call("get_failures", { path: { run_id: runId } });
+  }
+
+  runReport(runId: string): Promise<EvalReport> {
+    return this.call("run_report", { path: { run_id: runId } });
+  }
+
+  compareRuns(runIds: readonly string[]): Promise<Comparison> {
+    return this.call("compare_runs", { query: { run_ids: runIds.join(",") } });
+  }
+
+  comparePolicyVersions(runId: string): Promise<Comparison> {
+    return this.call("compare_policy_versions", { path: { run_id: runId } });
+  }
+
+  async listReviewItems(filter: ReviewItemFilter = {}): Promise<ReviewItem[]> {
+    return (await this.call("list_review_items", { query: filter })).items;
   }
 
   async listCatalog(kind: string): Promise<CatalogEntry[]> {

@@ -2,15 +2,24 @@
 import { ApiError, type ConsoleApi, type RunEventListener } from "../api/client";
 import type {
   CatalogEntry,
+  CohortEpisode,
+  Comparison,
   DryRun,
   EndpointRegistration,
   EndpointView,
+  EpisodeFilter,
+  EpisodeProvenance,
   EpisodeRecord,
+  EvalReport,
   ExperimentPreflight,
   ExperimentRecord,
+  FailureAnalysis,
   FrameSize,
   LiveTile,
   ProbeResult,
+  ReviewAction,
+  ReviewItem,
+  ReviewItemFilter,
   RunEvent,
   RunRecord,
 } from "../api/types";
@@ -63,6 +72,13 @@ export class FakeApi implements ConsoleApi {
   liveTiles: LiveTile[] = [];
   preflightReport: ExperimentPreflight = { is_valid: true, points: {}, estimated_cost_usd: null, budget_usd: 2500,
                                            errors: [] };
+  cohortMembers: CohortEpisode[] = [];
+  provenance: EpisodeProvenance | null = null;
+  prompts: Record<number, Record<string, unknown>[]> = {};
+  failureAnalysis: FailureAnalysis | null = null;
+  report: EvalReport | null = null;
+  comparison: Comparison = { reports: {}, shared_tasks: [] };
+  reviewItems: ReviewItem[] = [];
   saveFailure: ApiError | null = null;
   launchFailure: ApiError | null = null;
   digest = "sha256:abc123";
@@ -192,6 +208,83 @@ export class FakeApi implements ConsoleApi {
 
   frameUrl(frameDigest: string, size: FrameSize): string {
     return `/frames/${frameDigest}?size=${size}`;
+  }
+
+  async cohort(runId: string, filter?: EpisodeFilter): Promise<CohortEpisode[]> {
+    this.record("cohort", runId, filter);
+    return this.cohortMembers;
+  }
+
+  async getProvenance(runId: string, episodeId: string): Promise<EpisodeProvenance> {
+    this.record("getProvenance", runId, episodeId);
+    if (this.provenance === null) {
+      throw new ApiError(404, "not_found", episodeId, []);
+    }
+    return this.provenance;
+  }
+
+  async getStepPrompt(runId: string, episodeId: string, stepIndex: number): Promise<Record<string, unknown>[]> {
+    this.record("getStepPrompt", runId, episodeId, stepIndex);
+    return this.prompts[stepIndex] ?? [];
+  }
+
+  async reviewEpisode(runId: string, episodeId: string, action: ReviewAction, note?: string,
+                      label?: Record<string, unknown>): Promise<ReviewItem> {
+    this.record("reviewEpisode", runId, episodeId, action, note, label);
+    if (action === "label" && label === undefined) {
+      throw new ApiError(400, "invalid_request", "rejected", ["a label needs a verdict or a failure category"]);
+    }
+    const queues: Record<ReviewAction, string> = { flag: "review", label: "labeling", verifier_bug: "verifier",
+                                                   task_draft: "factory", audit_sample: "audit" };
+    const item: ReviewItem = {
+      item_id: `review_${this.reviewItems.length + 1}`, action, queue: queues[action], run_id: runId,
+      episode_ids: [episodeId], title: `${action} ${episodeId}`, note: note ?? "", label: label ?? null, payload: {},
+      status: "open", created_by: "", created_at: 0, source: "console",
+    };
+    this.reviewItems = [...this.reviewItems, item];
+    return item;
+  }
+
+  async analyzeFailures(runId: string): Promise<FailureAnalysis> {
+    this.record("analyzeFailures", runId);
+    this.failureAnalysis = {
+      run_id: runId, analyzed_at: 0, labels: {}, unlabeled_episode_ids: [], tickets: [],
+      clusters: [{ template: "tasks.finance.reconcile_invoices", policy_version: 3, category: "grounding",
+                   episode_ids: ["episode_b", "episode_c"], share_of_failures: 0.5,
+                   example_summaries: ["clicked the wrong cell"] }],
+    };
+    return this.failureAnalysis;
+  }
+
+  async getFailures(runId: string): Promise<FailureAnalysis> {
+    this.record("getFailures", runId);
+    if (this.failureAnalysis === null) {
+      throw new ApiError(404, "not_found", runId, []);
+    }
+    return this.failureAnalysis;
+  }
+
+  async runReport(runId: string): Promise<EvalReport> {
+    this.record("runReport", runId);
+    if (this.report === null) {
+      throw new ApiError(404, "not_found", runId, []);
+    }
+    return this.report;
+  }
+
+  async compareRuns(runIds: readonly string[]): Promise<Comparison> {
+    this.record("compareRuns", runIds);
+    return this.comparison;
+  }
+
+  async comparePolicyVersions(runId: string): Promise<Comparison> {
+    this.record("comparePolicyVersions", runId);
+    return this.comparison;
+  }
+
+  async listReviewItems(filter?: ReviewItemFilter): Promise<ReviewItem[]> {
+    this.record("listReviewItems", filter);
+    return this.reviewItems;
   }
 
   async listCatalog(kind: string): Promise<CatalogEntry[]> {
