@@ -201,7 +201,7 @@ func (service *Service) abandon(admitted []lease.Lease, unadmittedHostIDs []stri
 		service.mu.Lock()
 		_, bound := service.bindings[created.ID]
 		service.mu.Unlock()
-		_, _ = service.leases.Release(created.ID)
+		service.leases.Release(created.ID)
 		if !bound {
 			service.scheduler.Free(created.HostID, perVM)
 		}

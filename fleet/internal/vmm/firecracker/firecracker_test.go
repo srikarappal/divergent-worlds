@@ -76,11 +76,11 @@ func (fake *fakeFirecracker) serve(writer http.ResponseWriter, request *http.Req
 	fake.mu.Unlock()
 	if request.URL.Path == failPath {
 		writer.WriteHeader(http.StatusBadRequest)
-		_, _ = writer.Write([]byte(`{"fault_message": "snapshot file is from another vmm version"}`))
+		writer.Write([]byte(`{"fault_message": "snapshot file is from another vmm version"}`))
 		return
 	}
 	if request.Method == http.MethodGet {
-		_, _ = writer.Write([]byte(`{"id": "vm_1", "state": "Running", "vmm_version": "1.9.0"}`))
+		writer.Write([]byte(`{"id": "vm_1", "state": "Running", "vmm_version": "1.9.0"}`))
 		return
 	}
 	writer.WriteHeader(http.StatusNoContent)
