@@ -26,6 +26,11 @@ type Config struct {
 // Dialer opens the QMP channel; tests swap in a fake.
 type Dialer func(ctx context.Context, socketPath string) (QMP, error)
 
+// DialQMPChannel is the default Dialer: a real QMP client.
+func DialQMPChannel(ctx context.Context, socketPath string) (QMP, error) {
+	return DialQMP(ctx, socketPath)
+}
+
 type instance struct {
 	process vmm.Process
 	qmp     QMP
@@ -45,7 +50,7 @@ type Driver struct {
 // NewDriver returns a driver; a nil dialer uses the real QMP client.
 func NewDriver(config Config, runner vmm.ProcessRunner, dial Dialer) *Driver {
 	if dial == nil {
-		dial = func(ctx context.Context, socketPath string) (QMP, error) { return DialQMP(ctx, socketPath) }
+		dial = DialQMPChannel
 	}
 	if config.SocketWaitTimeout <= 0 {
 		config.SocketWaitTimeout = 10 * time.Second

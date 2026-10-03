@@ -12,7 +12,8 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"sort"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -400,6 +401,10 @@ func (agent *Agent) Envs() []EnvInfo {
 		infos = append(infos, EnvInfo{EnvID: envID, State: current.state, Namespace: current.network.Namespace,
 			CloneAddress: current.network.CloneAddress.String()})
 	}
-	sort.Slice(infos, func(first, second int) bool { return infos[first].EnvID < infos[second].EnvID })
+	slices.SortFunc(infos, compareEnvIDs)
 	return infos
+}
+
+func compareEnvIDs(first, second EnvInfo) int {
+	return strings.Compare(first.EnvID, second.EnvID)
 }

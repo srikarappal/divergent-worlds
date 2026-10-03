@@ -17,44 +17,58 @@ import (
 	"rlworld/fleet/internal/vmm"
 )
 
-// serveFakeQMP answers like QEMU: a greeting, an event before some replies and errors for "fail".
+// fakeQMPServer answers like QEMU: a greeting, an event before some replies and errors for "fail".
+type fakeQMPServer struct {
+	directory string
+	listener  net.Listener
+}
+
+func (server *fakeQMPServer) serve() {
+	connection, err := server.listener.Accept()
+	if err != nil {
+		return
+	}
+	defer connection.Close()
+	connection.Write([]byte(`{"QMP": {"version": {"qemu": {"major": 9}}, "capabilities": []}}` + "\r\n"))
+	scanner := bufio.NewScanner(connection)
+	for scanner.Scan() {
+		var command struct {
+			Execute string `json:"execute"`
+		}
+		json.Unmarshal(scanner.Bytes(), &command)
+		switch command.Execute {
+		case "query-status":
+			connection.Write([]byte(`{"event": "RESUME", "timestamp": {"seconds": 1}}` + "\r\n"))
+			connection.Write([]byte(`{"return": {"status": "running", "running": true}}` + "\r\n"))
+		case "fail":
+			connection.Write([]byte(`{"error": {"class": "GenericError", "desc": "nope"}}` + "\r\n"))
+		default:
+			connection.Write([]byte(`{"return": {}}` + "\r\n"))
+		}
+	}
+}
+
+func (server *fakeQMPServer) close() {
+	server.listener.Close()
+	os.RemoveAll(server.directory)
+}
+
+// serveFakeQMP starts a fake QMP server on a short unix socket path and returns that path.
 func serveFakeQMP(t *testing.T) string {
 	t.Helper()
 	directory, err := os.MkdirTemp("/tmp", "qmp")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.RemoveAll(directory) })
 	socketPath := filepath.Join(directory, "vm.qmp")
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
+		os.RemoveAll(directory)
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { listener.Close() })
-	go func() {
-		connection, err := listener.Accept()
-		if err != nil {
-			return
-		}
-		defer connection.Close()
-		connection.Write([]byte(`{"QMP": {"version": {"qemu": {"major": 9}}, "capabilities": []}}` + "\r\n"))
-		scanner := bufio.NewScanner(connection)
-		for scanner.Scan() {
-			var command struct {
-				Execute string `json:"execute"`
-			}
-			json.Unmarshal(scanner.Bytes(), &command)
-			switch command.Execute {
-			case "query-status":
-				connection.Write([]byte(`{"event": "RESUME", "timestamp": {"seconds": 1}}` + "\r\n"))
-				connection.Write([]byte(`{"return": {"status": "running", "running": true}}` + "\r\n"))
-			case "fail":
-				connection.Write([]byte(`{"error": {"class": "GenericError", "desc": "nope"}}` + "\r\n"))
-			default:
-				connection.Write([]byte(`{"return": {}}` + "\r\n"))
-			}
-		}
-	}()
+	server := &fakeQMPServer{directory: directory, listener: listener}
+	t.Cleanup(server.close)
+	go server.serve()
 	return socketPath
 }
 
@@ -99,6 +113,10 @@ func (fake *fakeQMP) Execute(_ context.Context, command string, arguments any) (
 	return json.RawMessage(`{}`), nil
 }
 
+func (fake *fakeQMP) dial(context.Context, string) (QMP, error) {
+	return fake, nil
+}
+
 func (fake *fakeQMP) Close() error {
 	fake.closed = true
 	return nil
@@ -127,8 +145,7 @@ func (runner *recordingRunner) Start(_ context.Context, argv []string) (vmm.Proc
 func newTestDriver(channel *fakeQMP) (*Driver, *recordingRunner) {
 	runner := &recordingRunner{}
 	driver := NewDriver(Config{QEMUPath: "qemu-system-x86_64", MachineType: "pc-q35-9.0", CPUModel: "fleet_baseline",
-		RunDir: "/run/rlworld", MigrationPollDelay: time.Millisecond}, runner,
-		func(context.Context, string) (QMP, error) { return channel, nil })
+		RunDir: "/run/rlworld", MigrationPollDelay: time.Millisecond}, runner, channel.dial)
 	return driver, runner
 }
 

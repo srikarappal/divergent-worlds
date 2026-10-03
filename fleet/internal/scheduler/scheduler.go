@@ -180,24 +180,56 @@ func (scheduler *Scheduler) eligible(state *hostState, request Request, seatsLef
 
 // rankedHosts orders eligible hosts best first; ties go to the fuller host to keep others free, then by id.
 func (scheduler *Scheduler) rankedHosts(request Request, seatsLeft map[string]int) []*hostState {
-	var candidates []*hostState
+	ranking := hostRanking{}
 	for _, state := range scheduler.hosts {
 		if scheduler.eligible(state, request, seatsLeft) {
-			candidates = append(candidates, state)
+			ranking.hosts = append(ranking.hosts, state)
+			ranking.scores = append(ranking.scores, scheduler.score(state, request))
 		}
 	}
-	sort.Slice(candidates, func(first, second int) bool {
-		firstScore, secondScore := scheduler.score(candidates[first], request), scheduler.score(candidates[second], request)
-		if firstScore != secondScore {
-			return firstScore > secondScore
-		}
-		firstFree, secondFree := candidates[first].free().MemoryMiB, candidates[second].free().MemoryMiB
-		if firstFree != secondFree {
-			return firstFree < secondFree
-		}
-		return candidates[first].host.ID < candidates[second].host.ID
-	})
-	return candidates
+	sort.Sort(ranking)
+	return ranking.hosts
+}
+
+// hostRanking sorts hosts by score, then by least free memory, then by id.
+type hostRanking struct {
+	hosts  []*hostState
+	scores []int
+}
+
+func (ranking hostRanking) Len() int { return len(ranking.hosts) }
+
+func (ranking hostRanking) Swap(first, second int) {
+	ranking.hosts[first], ranking.hosts[second] = ranking.hosts[second], ranking.hosts[first]
+	ranking.scores[first], ranking.scores[second] = ranking.scores[second], ranking.scores[first]
+}
+
+func (ranking hostRanking) Less(first, second int) bool {
+	if ranking.scores[first] != ranking.scores[second] {
+		return ranking.scores[first] > ranking.scores[second]
+	}
+	firstFree, secondFree := ranking.hosts[first].free().MemoryMiB, ranking.hosts[second].free().MemoryMiB
+	if firstFree != secondFree {
+		return firstFree < secondFree
+	}
+	return ranking.hosts[first].host.ID < ranking.hosts[second].host.ID
+}
+
+// roomiestFirst sorts hosts by most free memory, then by id.
+type roomiestFirst []*hostState
+
+func (hosts roomiestFirst) Len() int { return len(hosts) }
+
+func (hosts roomiestFirst) Swap(first, second int) {
+	hosts[first], hosts[second] = hosts[second], hosts[first]
+}
+
+func (hosts roomiestFirst) Less(first, second int) bool {
+	firstFree, secondFree := hosts[first].free().MemoryMiB, hosts[second].free().MemoryMiB
+	if firstFree != secondFree {
+		return firstFree > secondFree
+	}
+	return hosts[first].host.ID < hosts[second].host.ID
 }
 
 // Place reserves resources for all of the request's VMs, or for none of them.
@@ -314,13 +346,7 @@ func (scheduler *Scheduler) PlanPrefetch(snapshotDigest, pool string, hostsWante
 			candidates = append(candidates, state)
 		}
 	}
-	sort.Slice(candidates, func(first, second int) bool {
-		firstFree, secondFree := candidates[first].free().MemoryMiB, candidates[second].free().MemoryMiB
-		if firstFree != secondFree {
-			return firstFree > secondFree
-		}
-		return candidates[first].host.ID < candidates[second].host.ID
-	})
+	sort.Sort(roomiestFirst(candidates))
 	var hostIDs []string
 	for _, state := range candidates[:min(hostsWanted, len(candidates))] {
 		hostIDs = append(hostIDs, state.host.ID)

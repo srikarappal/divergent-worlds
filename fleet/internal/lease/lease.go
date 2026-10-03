@@ -10,7 +10,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -202,6 +204,10 @@ func (manager *Manager) Active(runID string) []Lease {
 			activeLeases = append(activeLeases, current)
 		}
 	}
-	sort.Slice(activeLeases, func(first, second int) bool { return activeLeases[first].ID < activeLeases[second].ID })
+	slices.SortFunc(activeLeases, compareLeaseIDs)
 	return activeLeases
+}
+
+func compareLeaseIDs(first, second Lease) int {
+	return strings.Compare(first.ID, second.ID)
 }

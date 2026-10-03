@@ -64,15 +64,22 @@ func TestHeartbeatsKeepLeasesAlive(t *testing.T) {
 	}
 }
 
+// releaseRecorder keeps every lease its hook saw end.
+type releaseRecorder struct {
+	mu    sync.Mutex
+	ended []Lease
+}
+
+func (recorder *releaseRecorder) record(endedLease Lease) {
+	recorder.mu.Lock()
+	defer recorder.mu.Unlock()
+	recorder.ended = append(recorder.ended, endedLease)
+}
+
 func TestReleaseRunsHooksAndFreesCapacity(t *testing.T) {
 	manager, _ := newTestManager(t, 1)
-	var mu sync.Mutex
-	var ended []Lease
-	manager.OnRelease(func(endedLease Lease) {
-		mu.Lock()
-		defer mu.Unlock()
-		ended = append(ended, endedLease)
-	})
+	recorder := &releaseRecorder{}
+	manager.OnRelease(recorder.record)
 	first, _ := manager.Admit(trainingRequest("run_1"), "host_a")
 	if _, err := manager.Admit(trainingRequest("run_1"), "host_a"); !errors.Is(err, admission.ErrFleetFull) {
 		t.Fatalf("second admit on a full fleet: got %v", err)
@@ -81,8 +88,8 @@ func TestReleaseRunsHooksAndFreesCapacity(t *testing.T) {
 	if err != nil || released.State != Released {
 		t.Fatalf("release: %+v %v", released, err)
 	}
-	if len(ended) != 1 || ended[0].ID != first.ID {
-		t.Fatalf("hooks saw %+v", ended)
+	if len(recorder.ended) != 1 || recorder.ended[0].ID != first.ID {
+		t.Fatalf("hooks saw %+v", recorder.ended)
 	}
 	if _, err := manager.Admit(trainingRequest("run_1"), "host_a"); err != nil {
 		t.Fatalf("admit after release: %v", err)
@@ -105,16 +112,18 @@ func TestActiveListsLeasesPerRun(t *testing.T) {
 	}
 }
 
+func runReaperUntilDone(ctx context.Context, manager *Manager, done chan<- struct{}) {
+	manager.RunReaper(ctx, time.Millisecond)
+	close(done)
+}
+
 func TestReaperLoopStopsWithItsContext(t *testing.T) {
 	manager, fakeClock := newTestManager(t, 4)
 	manager.Admit(trainingRequest("run_1"), "host_a")
 	fakeClock.Advance(2 * time.Minute)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	go func() {
-		manager.RunReaper(ctx, time.Millisecond)
-		close(done)
-	}()
+	go runReaperUntilDone(ctx, manager, done)
 	deadline := time.Now().Add(2 * time.Second)
 	for len(manager.Active("")) > 0 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)

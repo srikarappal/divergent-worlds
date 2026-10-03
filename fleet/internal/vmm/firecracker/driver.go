@@ -46,7 +46,7 @@ type Driver struct {
 // NewDriver returns a driver; a nil factory uses the real API client.
 func NewDriver(config Config, runner vmm.ProcessRunner, newAPI APIFactory) *Driver {
 	if newAPI == nil {
-		newAPI = func(socketPath string) API { return NewAPIClient(socketPath) }
+		newAPI = NewAPI
 	}
 	if config.SocketWaitTimeout <= 0 {
 		config.SocketWaitTimeout = 10 * time.Second

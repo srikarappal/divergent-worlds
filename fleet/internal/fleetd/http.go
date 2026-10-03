@@ -98,114 +98,139 @@ func stepPayload(result nodeagent.StepResult) stepResponse {
 		SettleSeconds: result.SettleDuration.Seconds(), SettleCapped: result.SettleCapped}
 }
 
+// httpAPI holds the service for the handler methods below.
+type httpAPI struct {
+	service *Service
+}
+
 // NewHandler exposes the service as the env API.
 func NewHandler(service *Service) http.Handler {
+	api := &httpAPI{service: service}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(writer http.ResponseWriter, _ *http.Request) {
-		writeJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
-	})
-	mux.HandleFunc("POST /v1/leases", func(writer http.ResponseWriter, request *http.Request) {
-		var body leaseGroupBody
-		if !decode(writer, request, &body) {
-			return
-		}
-		if body.GroupSize < 1 {
-			body.GroupSize = 1
-		}
-		infos, err := service.LeaseGroup(request.Context(), GroupRequest{
-			RunID: body.RunID, Tenant: body.Tenant, CostCenter: body.CostCenter, Pool: body.Pool,
-			Priority: body.Priority, Endpoint: body.Endpoint, Snapshot: body.Snapshot,
-			PerVM: scheduler.Resources{CPUMillicores: body.CPUMillicores, MemoryMiB: body.MemoryMiB, GPUs: body.GPUs},
-			VCPUs: body.VCPUs, GroupSize: body.GroupSize, TTL: time.Duration(body.TTLSeconds) * time.Second,
-			HostScopedLicenses: body.HostScopedLicenses,
-		})
-		if err != nil {
-			writeError(writer, err)
-			return
-		}
-		writeJSON(writer, http.StatusCreated, map[string]any{"leases": infos})
-	})
-	mux.HandleFunc("GET /v1/leases", func(writer http.ResponseWriter, request *http.Request) {
-		writeJSON(writer, http.StatusOK, map[string]any{"leases": service.Leases(request.URL.Query().Get("run_id"))})
-	})
-	mux.HandleFunc("POST /v1/leases/{leaseID}/heartbeat", func(writer http.ResponseWriter, request *http.Request) {
-		info, err := service.Heartbeat(request.PathValue("leaseID"))
-		if err != nil {
-			writeError(writer, err)
-			return
-		}
-		writeJSON(writer, http.StatusOK, info)
-	})
-	mux.HandleFunc("POST /v1/leases/{leaseID}/reset", func(writer http.ResponseWriter, request *http.Request) {
-		result, err := service.Reset(request.Context(), request.PathValue("leaseID"))
-		if err != nil {
-			writeError(writer, err)
-			return
-		}
-		writeJSON(writer, http.StatusOK, stepPayload(result))
-	})
-	mux.HandleFunc("POST /v1/leases/{leaseID}/step", func(writer http.ResponseWriter, request *http.Request) {
-		var body stepBody
-		if !decode(writer, request, &body) {
-			return
-		}
-		result, err := service.Step(request.Context(), request.PathValue("leaseID"), body.Action)
-		if err != nil {
-			writeError(writer, err)
-			return
-		}
-		writeJSON(writer, http.StatusOK, stepPayload(result))
-	})
-	mux.HandleFunc("POST /v1/leases/{leaseID}/fork", func(writer http.ResponseWriter, request *http.Request) {
-		var body forkBody
-		if !decode(writer, request, &body) {
-			return
-		}
-		infos, err := service.Fork(request.Context(), request.PathValue("leaseID"), max(1, body.Count))
-		if err != nil {
-			writeError(writer, err)
-			return
-		}
-		writeJSON(writer, http.StatusCreated, map[string]any{"leases": infos})
-	})
-	mux.HandleFunc("POST /v1/leases/{leaseID}/checkpoint", func(writer http.ResponseWriter, request *http.Request) {
-		snapshot, err := service.Checkpoint(request.Context(), request.PathValue("leaseID"))
-		if err != nil {
-			writeError(writer, err)
-			return
-		}
-		writeJSON(writer, http.StatusOK, map[string]string{"state_path": snapshot.StatePath,
-			"memory_path": snapshot.MemoryPath, "kind": string(snapshot.Kind)})
-	})
-	mux.HandleFunc("POST /v1/leases/{leaseID}/finish", func(writer http.ResponseWriter, request *http.Request) {
-		var body finishBody
-		if !decode(writer, request, &body) {
-			return
-		}
-		finalState, err := service.Finish(request.Context(), request.PathValue("leaseID"), body.Apps)
-		if err != nil {
-			writeError(writer, err)
-			return
-		}
-		writeJSON(writer, http.StatusOK, map[string]any{"frozen": true, "final_state": finalState})
-	})
-	mux.HandleFunc("POST /v1/leases/{leaseID}/inject", func(writer http.ResponseWriter, request *http.Request) {
-		var payload json.RawMessage
-		if !decode(writer, request, &payload) {
-			return
-		}
-		if err := service.Inject(request.Context(), request.PathValue("leaseID"), payload); err != nil {
-			writeError(writer, err)
-			return
-		}
-		writer.WriteHeader(http.StatusNoContent)
-	})
-	mux.HandleFunc("DELETE /v1/leases/{leaseID}", func(writer http.ResponseWriter, request *http.Request) {
-		if err := service.Close(request.PathValue("leaseID")); err != nil {
-			writeError(writer, err)
-			return
-		}
-		writer.WriteHeader(http.StatusNoContent)
-	})
+	mux.HandleFunc("GET /healthz", api.health)
+	mux.HandleFunc("POST /v1/leases", api.leaseGroup)
+	mux.HandleFunc("GET /v1/leases", api.listLeases)
+	mux.HandleFunc("POST /v1/leases/{leaseID}/heartbeat", api.heartbeat)
+	mux.HandleFunc("POST /v1/leases/{leaseID}/reset", api.reset)
+	mux.HandleFunc("POST /v1/leases/{leaseID}/step", api.step)
+	mux.HandleFunc("POST /v1/leases/{leaseID}/fork", api.fork)
+	mux.HandleFunc("POST /v1/leases/{leaseID}/checkpoint", api.checkpoint)
+	mux.HandleFunc("POST /v1/leases/{leaseID}/finish", api.finish)
+	mux.HandleFunc("POST /v1/leases/{leaseID}/inject", api.inject)
+	mux.HandleFunc("DELETE /v1/leases/{leaseID}", api.close)
 	return mux
+}
+
+func (api *httpAPI) health(writer http.ResponseWriter, _ *http.Request) {
+	writeJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (api *httpAPI) leaseGroup(writer http.ResponseWriter, request *http.Request) {
+	var body leaseGroupBody
+	if !decode(writer, request, &body) {
+		return
+	}
+	infos, err := api.service.LeaseGroup(request.Context(), GroupRequest{
+		RunID: body.RunID, Tenant: body.Tenant, CostCenter: body.CostCenter, Pool: body.Pool,
+		Priority: body.Priority, Endpoint: body.Endpoint, Snapshot: body.Snapshot,
+		PerVM: scheduler.Resources{CPUMillicores: body.CPUMillicores, MemoryMiB: body.MemoryMiB, GPUs: body.GPUs},
+		VCPUs: body.VCPUs, GroupSize: max(1, body.GroupSize), TTL: time.Duration(body.TTLSeconds) * time.Second,
+		HostScopedLicenses: body.HostScopedLicenses,
+	})
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusCreated, map[string]any{"leases": infos})
+}
+
+func (api *httpAPI) listLeases(writer http.ResponseWriter, request *http.Request) {
+	writeJSON(writer, http.StatusOK, map[string]any{"leases": api.service.Leases(request.URL.Query().Get("run_id"))})
+}
+
+func (api *httpAPI) heartbeat(writer http.ResponseWriter, request *http.Request) {
+	info, err := api.service.Heartbeat(request.PathValue("leaseID"))
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, info)
+}
+
+func (api *httpAPI) reset(writer http.ResponseWriter, request *http.Request) {
+	result, err := api.service.Reset(request.Context(), request.PathValue("leaseID"))
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, stepPayload(result))
+}
+
+func (api *httpAPI) step(writer http.ResponseWriter, request *http.Request) {
+	var body stepBody
+	if !decode(writer, request, &body) {
+		return
+	}
+	result, err := api.service.Step(request.Context(), request.PathValue("leaseID"), body.Action)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, stepPayload(result))
+}
+
+func (api *httpAPI) fork(writer http.ResponseWriter, request *http.Request) {
+	var body forkBody
+	if !decode(writer, request, &body) {
+		return
+	}
+	infos, err := api.service.Fork(request.Context(), request.PathValue("leaseID"), max(1, body.Count))
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusCreated, map[string]any{"leases": infos})
+}
+
+func (api *httpAPI) checkpoint(writer http.ResponseWriter, request *http.Request) {
+	snapshot, err := api.service.Checkpoint(request.Context(), request.PathValue("leaseID"))
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]string{"state_path": snapshot.StatePath,
+		"memory_path": snapshot.MemoryPath, "kind": string(snapshot.Kind)})
+}
+
+func (api *httpAPI) finish(writer http.ResponseWriter, request *http.Request) {
+	var body finishBody
+	if !decode(writer, request, &body) {
+		return
+	}
+	finalState, err := api.service.Finish(request.Context(), request.PathValue("leaseID"), body.Apps)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"frozen": true, "final_state": finalState})
+}
+
+func (api *httpAPI) inject(writer http.ResponseWriter, request *http.Request) {
+	var payload json.RawMessage
+	if !decode(writer, request, &payload) {
+		return
+	}
+	if err := api.service.Inject(request.Context(), request.PathValue("leaseID"), payload); err != nil {
+		writeError(writer, err)
+		return
+	}
+	writer.WriteHeader(http.StatusNoContent)
+}
+
+func (api *httpAPI) close(writer http.ResponseWriter, request *http.Request) {
+	if err := api.service.Close(request.PathValue("leaseID")); err != nil {
+		writeError(writer, err)
+		return
+	}
+	writer.WriteHeader(http.StatusNoContent)
 }

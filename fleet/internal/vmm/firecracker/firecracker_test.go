@@ -86,13 +86,20 @@ func (fake *fakeFirecracker) serve(writer http.ResponseWriter, request *http.Req
 	writer.WriteHeader(http.StatusNoContent)
 }
 
+// directoryRemover deletes a temporary directory when a test ends.
+type directoryRemover string
+
+func (directory directoryRemover) remove() {
+	os.RemoveAll(string(directory))
+}
+
 func newTestDriver(t *testing.T) (*Driver, *fakeFirecracker) {
 	t.Helper()
 	chrootBase, err := os.MkdirTemp("/tmp", "fc")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.RemoveAll(chrootBase) })
+	t.Cleanup(directoryRemover(chrootBase).remove)
 	fake := &fakeFirecracker{}
 	driver := NewDriver(Config{JailerPath: "/usr/bin/jailer", FirecrackerPath: "/usr/bin/firecracker",
 		ChrootBaseDir: chrootBase, UID: 1000, GID: 1000, SocketWaitTimeout: 2 * time.Second}, fake, nil)

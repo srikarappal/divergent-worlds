@@ -42,15 +42,25 @@ type APIClient struct {
 	httpClient *http.Client
 }
 
+// unixSocketDialer sends every HTTP connection to one unix socket.
+type unixSocketDialer struct {
+	socketPath string
+}
+
+func (socketDialer unixSocketDialer) dial(ctx context.Context, _, _ string) (net.Conn, error) {
+	var dialer net.Dialer
+	return dialer.DialContext(ctx, "unix", socketDialer.socketPath)
+}
+
 // NewAPIClient returns a client bound to one API socket.
 func NewAPIClient(socketPath string) *APIClient {
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			var dialer net.Dialer
-			return dialer.DialContext(ctx, "unix", socketPath)
-		},
-	}
+	transport := &http.Transport{DialContext: unixSocketDialer{socketPath: socketPath}.dial}
 	return &APIClient{httpClient: &http.Client{Transport: transport, Timeout: 60 * time.Second}}
+}
+
+// NewAPI is the default APIFactory: a real client on the socket.
+func NewAPI(socketPath string) API {
+	return NewAPIClient(socketPath)
 }
 
 func (client *APIClient) call(ctx context.Context, method, path string, body any, decoded any) error {
