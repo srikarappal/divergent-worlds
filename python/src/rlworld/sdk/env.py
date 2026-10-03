@@ -59,7 +59,8 @@ class ComputerUseEnv:
         reward = self.reward_function(final_state, outcome) if self.reward_function else 0.0
         return reward, {"final_state": final_state, "outcome": outcome}
 
-    def step(self, action: ActionModel) -> tuple[Observation | dict[str, Any] | None, float, bool, bool, dict[str, Any]]:
+    def step(self, action: ActionModel) -> tuple[Observation | dict[str, Any] | None, float, bool, bool,
+                                                 dict[str, Any]]:
         if self.finished:
             raise RuntimeError("the episode already finished; call reset or close")
         ensure_actions_allowed([action], self.allowed_modalities)

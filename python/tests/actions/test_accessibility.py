@@ -23,7 +23,8 @@ def test_offscreen_and_hidden_subtrees_are_dropped():
 
 
 def test_document_order_depth_and_parents_are_kept():
-    root = node("window", None, node("toolbar", (0, 0, 1280, 40), node("save", (0, 0, 20, 20))), node("grid", (0, 40, 1280, 700)))
+    root = node("window", None, node("toolbar", (0, 0, 1280, 40), node("save", (0, 0, 20, 20))),
+                node("grid", (0, 40, 1280, 700)))
     pruned = prune_accessibility_tree(root, VIEWPORT)
     assert [(item.node_id, item.depth, item.parent_id) for item in pruned] == [
         ("window", 0, None),

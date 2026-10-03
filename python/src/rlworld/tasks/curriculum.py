@@ -83,7 +83,8 @@ def mixed_group_probability(pass_rate: float, group_size: int) -> float:
 
 
 class PassRateTracker:
-    def __init__(self, decay_per_version: float = 0.7, prior_successes: float = 1.0, prior_failures: float = 1.0) -> None:
+    def __init__(self, decay_per_version: float = 0.7, prior_successes: float = 1.0,
+                 prior_failures: float = 1.0) -> None:
         if not 0 < decay_per_version <= 1:
             raise ValueError("decay_per_version must be in (0, 1]")
         self.decay_per_version = decay_per_version
@@ -247,7 +248,8 @@ class CurriculumPlanner:
             too_hard = [difficulty for difficulty, rate in rated_difficulties if rate < lowest_rate]
             if in_band:
                 requests.extend(
-                    GenerationRequest(template, difficulty, "frontier", self.tasks_per_request) for difficulty in in_band
+                    GenerationRequest(template, difficulty, "frontier", self.tasks_per_request)
+                    for difficulty in in_band
                 )
             elif too_easy:
                 harder_difficulty = harder(max(too_easy, key=difficulty_score))

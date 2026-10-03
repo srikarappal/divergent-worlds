@@ -85,7 +85,8 @@ class TrajectoryStore:
 
     def list_episode_ids(self, run_id: str) -> list[str]:
         episode_keys = self.object_store.list_keys(f"runs/{check_identifier(run_id)}/episodes/")
-        return sorted({episode_key.split("/")[3] for episode_key in episode_keys if episode_key.endswith("/episode.json")})
+        return sorted({episode_key.split("/")[3] for episode_key in episode_keys
+                       if episode_key.endswith("/episode.json")})
 
     def iter_episodes(self, run_id: str, with_steps: bool = False) -> Iterator[EpisodeRecord]:
         for episode_id in self.list_episode_ids(run_id):
@@ -108,7 +109,8 @@ class TrajectoryWriter:
     def write_step(self, step: StepRecord) -> None:
         if step.step_index != self.next_step_index:
             raise ValueError(f"expected step {self.next_step_index}, got {step.step_index}")
-        step_key = f"{episode_prefix(self.episode.key.run_id, self.episode.episode_id)}/steps/{step.step_index:06d}.json"
+        prefix = episode_prefix(self.episode.key.run_id, self.episode.episode_id)
+        step_key = f"{prefix}/steps/{step.step_index:06d}.json"
         self.trajectory_store.object_store.put_bytes(step_key, step.model_dump_json().encode("utf-8"))
         self.next_step_index += 1
 

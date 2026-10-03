@@ -56,7 +56,8 @@ def render_nftables_ruleset(plan: NetworkPlan) -> str:
                 f"ip daddr {plan.proxy_address} ct state new limit rate over "
                 f"{LIVE_NEW_CONNECTIONS_PER_SECOND}/second drop"
             )
-        forward_rules.append(f"ip saddr {plan.guest_address} ip daddr {plan.proxy_address} tcp dport {PROXY_PORT} accept")
+        forward_rules.append(f"ip saddr {plan.guest_address} ip daddr {plan.proxy_address}"
+                             f" tcp dport {PROXY_PORT} accept")
     forward_rules.append('log prefix "rlworld egress drop: " drop')
     rule_lines = "\n".join(f"    {rule}" for rule in forward_rules)
     return (

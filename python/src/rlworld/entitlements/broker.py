@@ -221,7 +221,8 @@ class EntitlementBroker:
         """Heartbeat: push the lease, its sessions and its secrets out by one TTL together."""
         with self.lock:
             lease = self.leases[lease_id]
-        renewed_sessions = tuple(self.session_minter.renew(session, self.lease_ttl_seconds) for session in lease.sessions)
+        renewed_sessions = tuple(self.session_minter.renew(session, self.lease_ttl_seconds)
+                                 for session in lease.sessions)
         renewed_secrets = tuple(self.secret_issuer.renew(issued_secret, self.lease_ttl_seconds)
                                 for issued_secret in lease.secrets)
         renewed_lease = EntitlementLease(lease.lease_id, lease.request, lease.licenses, renewed_sessions,

@@ -112,7 +112,8 @@ def observation_fingerprint(observation: Observation) -> tuple[Any, ...]:
     return screenshot_hash, accessibility_signature, terminal_signature
 
 
-def measure_divergence(recorded_steps: Sequence[StepRecord], rerun_observations: Sequence[Observation]) -> DivergenceReport:
+def measure_divergence(recorded_steps: Sequence[StepRecord],
+                       rerun_observations: Sequence[Observation]) -> DivergenceReport:
     compared_steps = min(len(recorded_steps), len(rerun_observations))
     matching_steps = 0
     first_divergent_step = None

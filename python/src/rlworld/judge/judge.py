@@ -75,7 +75,8 @@ class RubricJudge:
         self.cache.put(cache_key, checks)
         return JudgeOutcome(checks, self.judge_model, rubric.pinned_version)
 
-    def request_verdict(self, context: VerifierContext, rubric: Rubric, sample_index: int, temperature: float) -> Verdict:
+    def request_verdict(self, context: VerifierContext, rubric: Rubric, sample_index: int,
+                        temperature: float) -> Verdict:
         request = self.prompt_builder.build(context, rubric, self.judge_model, sample_index, temperature)
         last_error: JudgeVerdictError | None = None
         for _ in range(self.max_attempts):

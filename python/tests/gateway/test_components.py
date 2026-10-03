@@ -18,7 +18,8 @@ from rlworld.gateway.resilience import CircuitBreaker, TokenBucket, retry_delay
 
 IMAGE_MESSAGE = {
     "role": "user",
-    "content": [{"type": "text", "text": "What is on screen?"}, {"type": "image", "uri": "https://f.example.com/1.webp"}],
+    "content": [{"type": "text", "text": "What is on screen?"},
+                {"type": "image", "uri": "https://f.example.com/1.webp"}],
 }
 
 
@@ -45,7 +46,8 @@ def test_payload_conversion():
         seed=7,
     )
     payload = build_payload(request, PassthroughImageResolver())
-    assert payload["messages"][0]["content"][1] == {"type": "image_url", "image_url": {"url": "https://f.example.com/1.webp"}}
+    assert payload["messages"][0]["content"][1] == {"type": "image_url",
+                                                    "image_url": {"url": "https://f.example.com/1.webp"}}
     assert payload["tools"] == [{"type": "function", "function": request.tools[0]}]
     assert payload["response_format"]["json_schema"]["schema"] == {"type": "object"}
     assert (payload["logprobs"], payload["return_token_ids"], payload["seed"]) == (True, True, 7)
@@ -118,7 +120,8 @@ def test_registry_resolves_names_and_urls(tmp_path):
     with pytest.raises(ValueError):
         EndpointConfig(name="judge_api", base_url="https://x", allowed_models=("judge_latest",))
     registry_path = tmp_path / "endpoints.yaml"
-    registry_path.write_text("endpoints:\n  - {name: local, base_url: 'http://localhost:8000/v1', allowed_models: [m1]}\n")
+    registry_path.write_text("endpoints:\n"
+                             "  - {name: local, base_url: 'http://localhost:8000/v1', allowed_models: [m1]}\n")
     assert load_endpoint_registry(registry_path).resolve("local").allowed_models == ("m1",)
 
 

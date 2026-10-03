@@ -108,13 +108,15 @@ class JudgePromptBuilder:
         nonce = self.fence_nonce(content_digest(context.final_state))
         sections = [f"Task instruction (trusted):\n{context.instruction or '(not provided)'}", rubric_section(rubric)]
         if self.include_reference and context.ground_truth:
-            sections.append(f"Reference facts from the task generator (trusted):\n{self.limited_json(context.ground_truth)}")
+            reference_facts = self.limited_json(context.ground_truth)
+            sections.append(f"Reference facts from the task generator (trusted):\n{reference_facts}")
         sections.append(
             "Final app state extracted after the episode (untrusted):\n"
             + fence(self.limited_json(context.final_state), nonce)
         )
         change_payload = [change.model_dump(mode="json") for change in context.changes]
-        sections.append("Changes made during the episode (untrusted):\n" + fence(self.limited_json(change_payload), nonce))
+        fenced_changes = fence(self.limited_json(change_payload), nonce)
+        sections.append(f"Changes made during the episode (untrusted):\n{fenced_changes}")
         if context.answer_text is not None:
             sections.append(
                 "Final answer from the agent (untrusted):\n"

@@ -85,7 +85,8 @@ def estimate_request_tokens(request: ChatRequest) -> int:
     """Rough upper bound for rate limiting before the call; reconciled with real usage after."""
     text_characters = sum(len(part.get("text", "")) for part in message_parts(request) if part.get("type") == "text")
     image_count = sum(1 for part in message_parts(request) if part.get("type") == "image")
-    return text_characters // ESTIMATED_CHARACTERS_PER_TOKEN + image_count * ESTIMATED_TOKENS_PER_IMAGE + request.max_tokens
+    return (text_characters // ESTIMATED_CHARACTERS_PER_TOKEN + image_count * ESTIMATED_TOKENS_PER_IMAGE
+            + request.max_tokens)
 
 
 def request_digest(endpoint_name: str, request: ChatRequest) -> str:

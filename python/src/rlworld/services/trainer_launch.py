@@ -80,7 +80,8 @@ def render_kubernetes(template: TrainerTemplate, context: LaunchContext) -> Rend
     job_name = kubernetes_name(context.run_id)
     labels = {"rlworld/run": label_value(context.run_id), "rlworld/tenant": label_value(context.tenant),
               "rlworld/cost-center": label_value(context.cost_center)}
-    environment = [{"name": name, "value": value} for name, value in sorted(platform_environment(context, template).items())]
+    platform_variables = sorted(platform_environment(context, template).items())
+    environment = [{"name": name, "value": value} for name, value in platform_variables]
     environment.append({"name": "RLWORLD_RUN_TOKEN",
                         "valueFrom": {"secretKeyRef": {"name": f"{job_name}-token", "key": "run_token"}}})
     secret = {"apiVersion": "v1", "kind": "Secret", "metadata": {"name": f"{job_name}-token", "labels": labels},
@@ -120,7 +121,8 @@ def render_slurm(template: TrainerTemplate, context: LaunchContext) -> RenderedL
         f"#SBATCH --gres=gpu:{template.gpus_per_node}",
         f"#SBATCH --time={hours:02d}:00:00",
         f"#SBATCH --comment=tenant={label_value(context.tenant)},cost_center={label_value(context.cost_center)}",
-        *(f"export {name}={shlex.quote(value)}" for name, value in sorted(platform_environment(context, template).items())),
+        *(f"export {name}={shlex.quote(value)}"
+          for name, value in sorted(platform_environment(context, template).items())),
         f"export RLWORLD_RUN_TOKEN_FILE={shlex.quote(context.token_file_path)}",
         f"srun {shlex.join(template.command)}",
     ]

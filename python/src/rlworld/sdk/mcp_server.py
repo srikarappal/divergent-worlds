@@ -90,7 +90,8 @@ class EnvToolServer:
             return None
         if method == "initialize":
             requested_version = (message.get("params") or {}).get("protocolVersion")
-            version = requested_version if requested_version in SUPPORTED_PROTOCOL_VERSIONS else SUPPORTED_PROTOCOL_VERSIONS[0]
+            supported = requested_version in SUPPORTED_PROTOCOL_VERSIONS
+            version = requested_version if supported else SUPPORTED_PROTOCOL_VERSIONS[0]
             result = {"protocolVersion": version, "capabilities": {"tools": {"listChanged": False}},
                       "serverInfo": SERVER_INFO}
         elif method == "ping":

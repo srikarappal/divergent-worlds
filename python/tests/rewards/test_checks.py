@@ -88,7 +88,8 @@ def test_ids_with_digits_never_match_fuzzily():
 
 def test_url_equivalent():
     assert normalize_url("HTTPS://CRM.example.com:443/deals/?b=2&a=1#top") == "https://crm.example.com/deals?a=1&b=2"
-    assert url_equivalent("url", "https://crm.example.com/deals/?b=2&a=1", "https://crm.example.com/deals?a=1&b=2").passed
+    assert url_equivalent("url", "https://crm.example.com/deals/?b=2&a=1",
+                          "https://crm.example.com/deals?a=1&b=2").passed
     assert not url_equivalent("url", "https://crm.example.com/leads", "https://crm.example.com/deals").passed
     assert normalize_url("http://crm.example.com:8080") == "http://crm.example.com:8080/"
 

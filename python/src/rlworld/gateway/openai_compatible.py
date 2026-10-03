@@ -149,7 +149,8 @@ class OpenAICompatibleTransport:
                 url, json=build_payload(request, self.image_resolver), headers=headers, timeout=endpoint.timeout_seconds
             )
         except httpx.TimeoutException as error:
-            raise UpstreamError(f"{endpoint.name} timed out", retryable=True, counts_as_endpoint_failure=True) from error
+            raise UpstreamError(f"{endpoint.name} timed out", retryable=True,
+                                counts_as_endpoint_failure=True) from error
         except httpx.TransportError as error:
             raise UpstreamError(
                 f"{endpoint.name} connection failed: {error}", retryable=True, counts_as_endpoint_failure=True

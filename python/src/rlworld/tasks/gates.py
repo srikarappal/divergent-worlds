@@ -122,7 +122,8 @@ class TaskGateRunner:
         )
         return GateReport(task_digest=spec_digest(task), results=results)
 
-    def evaluate(self, task: TaskSpec, inputs: GateInputs, attempt: SolutionAttempt) -> tuple[RewardRecord, AttemptSummary]:
+    def evaluate(self, task: TaskSpec, inputs: GateInputs,
+                 attempt: SolutionAttempt) -> tuple[RewardRecord, AttemptSummary]:
         record = evaluate_episode(
             task,
             self.registry,
@@ -137,7 +138,8 @@ class TaskGateRunner:
         )
         return record, summarize_attempt(attempt.name, record)
 
-    def evaluate_all(self, task: TaskSpec, inputs: GateInputs, attempts: Sequence[SolutionAttempt]) -> list[AttemptSummary]:
+    def evaluate_all(self, task: TaskSpec, inputs: GateInputs,
+                     attempts: Sequence[SolutionAttempt]) -> list[AttemptSummary]:
         return [self.evaluate(task, inputs, attempt)[1] for attempt in attempts]
 
     def null_action_gate(self, task: TaskSpec, inputs: GateInputs) -> GateResult:
@@ -181,7 +183,8 @@ class TaskGateRunner:
     def alternative_solution_gate(self, task: TaskSpec, inputs: GateInputs) -> GateResult:
         if not inputs.alternative_solutions:
             return GateResult(
-                "alternative_solution", False, "no alternative valid solution was provided, so false negatives go unseen"
+                "alternative_solution", False,
+                "no alternative valid solution was provided, so false negatives go unseen"
             )
         summaries = self.evaluate_all(task, inputs, inputs.alternative_solutions)
         rejected = [summary for summary in summaries if summary.termination != "success"]

@@ -112,7 +112,8 @@ def wilson_interval(successes: int, trials: int, z_score: float = 1.96) -> tuple
     success_rate = successes / trials
     denominator = 1 + z_score**2 / trials
     center = (success_rate + z_score**2 / (2 * trials)) / denominator
-    margin = z_score * math.sqrt(success_rate * (1 - success_rate) / trials + z_score**2 / (4 * trials**2)) / denominator
+    spread = success_rate * (1 - success_rate) / trials + z_score**2 / (4 * trials**2)
+    margin = z_score * math.sqrt(spread) / denominator
     return max(0.0, center - margin), min(1.0, center + margin)
 
 
@@ -170,7 +171,8 @@ def eval_report(episodes: Iterable[EpisodeRecord], k_values: Sequence[int] = (1,
     )
 
 
-def retention_class(episode: EpisodeRecord, full_sample_rate: float, random_value: float) -> Literal["full", "thumbnail"]:
+def retention_class(episode: EpisodeRecord, full_sample_rate: float,
+                    random_value: float) -> Literal["full", "thumbnail"]:
     """Full resolution for evals, failures, interventions and a sample; thumbnails for the rest."""
     keeps_full_resolution = (
         episode.run_type == "eval"

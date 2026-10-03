@@ -175,6 +175,7 @@ def extract_world_state(app_names: Sequence[str], target: Path,
     }
 
 
-def reset_world(app_names: Sequence[str], target: Path, integrations: Mapping[str, AppIntegration] | None = None) -> None:
+def reset_world(app_names: Sequence[str], target: Path,
+                integrations: Mapping[str, AppIntegration] | None = None) -> None:
     for integration in resolve_integrations(app_names, integrations or DEFAULT_INTEGRATIONS):
         integration.reset(target)

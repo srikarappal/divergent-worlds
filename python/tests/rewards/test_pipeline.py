@@ -142,7 +142,8 @@ def test_volatile_paths_are_not_side_effects(task, registry):
 
 
 def test_env_errors_are_excluded_from_training(task, registry):
-    record = score(task, registry, final_state_with(), outcome=EpisodeOutcome(steps_taken=3, env_error="restore failed"))
+    record = score(task, registry, final_state_with(),
+                   outcome=EpisodeOutcome(steps_taken=3, env_error="restore failed"))
     assert (record.total, record.termination, record.counts_for_training) == (0.0, "env_error", False)
     assert record.error_detail == "restore failed"
     assert record.components == {}

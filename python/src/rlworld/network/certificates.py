@@ -30,7 +30,8 @@ def private_key_pem(private_key: ec.EllipticCurvePrivateKey) -> bytes:
     )
 
 
-def create_certificate_authority(common_name: str, world_time: datetime, valid_days: int = 3650) -> CertificateAuthority:
+def create_certificate_authority(common_name: str, world_time: datetime,
+                                 valid_days: int = 3650) -> CertificateAuthority:
     private_key = ec.generate_private_key(ec.SECP256R1())
     subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
     certificate = (

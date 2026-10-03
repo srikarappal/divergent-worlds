@@ -159,7 +159,8 @@ def test_the_planner_targets_the_frontier_then_steps_difficulty():
         },
         policy_version=1,
     )
-    summary = [(request.template, request.reason, request.difficulty.distractors, request.count) for request in requests]
+    summary = [(request.template, request.reason, request.difficulty.distractors, request.count)
+               for request in requests]
     assert summary == [
         ("easy_template", "harder", 2, 4),
         ("hard_template", "easier", 18, 4),

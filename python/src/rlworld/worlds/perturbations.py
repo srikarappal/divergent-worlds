@@ -45,7 +45,8 @@ def corrupt_amount(amount_text: str, random_generator: random.Random) -> str:
     return random_generator.choice(damaged_forms)
 
 
-def apply_perturbations(world: World, distractors: int, corrupted_inputs: int, seed: int) -> tuple[World, PerturbationLog]:
+def apply_perturbations(world: World, distractors: int, corrupted_inputs: int,
+                        seed: int) -> tuple[World, PerturbationLog]:
     random_generator = random.Random(seed)
     persona_email = world.agent_persona.email
     colleagues = [person for person in world.people if person.id != world.agent_persona_id]

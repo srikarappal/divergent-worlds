@@ -110,7 +110,8 @@ def evaluate_episode(
     return compose_reward(task, outcome, tuple(checks), violations, reward_policy, provenance)
 
 
-def outcome_already_lost(checks: Sequence[CheckResult], violations: Sequence[StateChange], policy: RewardPolicy) -> bool:
+def outcome_already_lost(checks: Sequence[CheckResult], violations: Sequence[StateChange],
+                         policy: RewardPolicy) -> bool:
     """In binary mode a failed check or a gated side effect decides the outcome, so the judge is skipped."""
     return any(not check.passed for check in checks) or (bool(violations) and policy.side_effect_mode == "gate")
 

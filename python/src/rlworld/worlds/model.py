@@ -140,7 +140,8 @@ def coherence_problems(world: World) -> list[str]:
         problems.extend(duplicate_ids(records, label))
     person_ids = {person.id for person in world.people}
     customer_ids = {customer.id for customer in world.customers}
-    known_addresses = {person.email for person in world.people} | {customer.contact_email for customer in world.customers}
+    known_addresses = ({person.email for person in world.people}
+                       | {customer.contact_email for customer in world.customers})
     if world.agent_persona_id not in person_ids:
         problems.append(f"agent persona {world.agent_persona_id} is not a person")
     problems.extend(
