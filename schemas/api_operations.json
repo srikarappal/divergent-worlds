@@ -44,6 +44,14 @@
       "sdk": "client.launch(\"{digest}\", budget_usd={budget_usd})"
     },
     {
+      "name": "get_experiment",
+      "method": "GET",
+      "path": "/v1/experiments/{experiment_id}",
+      "summary": "Read an experiment's budget, spend and runs",
+      "cli": "rlworld experiments get {experiment_id}",
+      "sdk": "client.get_experiment(\"{experiment_id}\")"
+    },
+    {
       "name": "approve_experiment",
       "method": "POST",
       "path": "/v1/experiments/{experiment_id}/approve",
@@ -55,7 +63,9 @@
       "name": "list_runs",
       "method": "GET",
       "path": "/v1/runs",
-      "query": ["experiment_id"],
+      "query": [
+        "experiment_id"
+      ],
       "summary": "List runs, optionally of one experiment",
       "cli": "rlworld runs list --experiment-id {experiment_id}",
       "sdk": "client.list_runs(experiment_id=\"{experiment_id}\")"
@@ -89,10 +99,57 @@
       "name": "run_events",
       "method": "GET",
       "path": "/v1/runs/{run_id}/events",
-      "query": ["follow", "after"],
+      "query": [
+        "follow",
+        "after"
+      ],
       "summary": "Stream a run's events",
       "cli": "rlworld runs events {run_id} --follow",
       "sdk": "client.run_events(\"{run_id}\", follow=True)"
+    },
+    {
+      "name": "list_episodes",
+      "method": "GET",
+      "path": "/v1/runs/{run_id}/episodes",
+      "query": [
+        "status"
+      ],
+      "summary": "List a run's episodes, running or finished",
+      "cli": "rlworld episodes list {run_id} --status {status}",
+      "sdk": "client.list_episodes(\"{run_id}\", status=\"{status}\")"
+    },
+    {
+      "name": "get_episode",
+      "method": "GET",
+      "path": "/v1/runs/{run_id}/episodes/{episode_id}",
+      "query": [
+        "first_step"
+      ],
+      "summary": "Read an episode with its steps and reward",
+      "cli": "rlworld episodes get {run_id} {episode_id} --first-step {first_step}",
+      "sdk": "client.get_episode(\"{run_id}\", \"{episode_id}\", first_step={first_step})"
+    },
+    {
+      "name": "live_wall",
+      "method": "GET",
+      "path": "/v1/runs/{run_id}/live",
+      "query": [
+        "limit"
+      ],
+      "summary": "Sampled running episodes with their latest frame",
+      "cli": "rlworld runs live {run_id} --limit {limit}",
+      "sdk": "client.live_wall(\"{run_id}\", limit={limit})"
+    },
+    {
+      "name": "get_frame",
+      "method": "GET",
+      "path": "/v1/frames/{frame_digest}",
+      "query": [
+        "size"
+      ],
+      "summary": "A frame, as a thumbnail or at full resolution",
+      "cli": "rlworld frames get {frame_digest} --size {size} --output frame.webp",
+      "sdk": "client.get_frame(\"{frame_digest}\", size=\"{size}\")"
     },
     {
       "name": "list_catalog",

@@ -24,7 +24,6 @@ from rlworld.services.catalogs import (
     EndpointService,
     UnknownCatalogError,
 )
-
 from rlworld.services.experiments import (
     TERMINAL_STATES,
     ControlError,
@@ -33,12 +32,16 @@ from rlworld.services.experiments import (
     LaunchBlockedError,
     UnknownRecordError,
 )
+from rlworld.services.trajectory_views import TrajectoryViews
 from rlworld.specs.document import SpecValidationError, dump_spec_document
 
 SERVICE_KEY = "rlworld_experiment_service"
 POLL_KEY = "rlworld_event_poll"
 CATALOGS_KEY = "rlworld_catalog_service"
 ENDPOINTS_KEY = "rlworld_endpoint_service"
+TRAJECTORIES_KEY = "rlworld_trajectory_views"
+EPISODE_STATUSES = ("running", "finished")
+FRAME_SIZES = ("full", "thumbnail")
 FINISHED_STATES = ("completed", "failed")
 
 
@@ -153,12 +156,16 @@ def preflight(digest: str):
 
 
 def dry_run(digest: str):
-    return jsonify({"episode_id": service().dry_run(digest)}), 201
+    return jsonify(service().dry_run(digest).model_dump()), 201
 
 
 def launch(digest: str):
     body = request.get_json(silent=True) or {}
     return jsonify(service().launch(digest, body.get("budget_usd")).model_dump(mode="json")), 201
+
+
+def get_experiment(experiment_id: str):
+    return jsonify(service().experiment(experiment_id).model_dump(mode="json"))
 
 
 def approve(experiment_id: str):
@@ -247,6 +254,45 @@ def set_endpoint_key(name: str):
     return "", 204
 
 
+def trajectories() -> TrajectoryViews:
+    return configured(TRAJECTORIES_KEY, "trajectories")
+
+
+def choice_argument(name: str, allowed: tuple[str, ...], default: str | None) -> str | None:
+    value = request.args.get(name, default)
+    if value is not None and value not in allowed:
+        raise RequestValidationError([f"{name}: must be one of {', '.join(allowed)}"])
+    return value
+
+
+def integer_argument(name: str, default: int) -> int:
+    try:
+        return int(request.args.get(name, default))
+    except ValueError as error:
+        raise RequestValidationError([f"{name}: must be an integer"]) from error
+
+
+def list_episodes(run_id: str):
+    episodes = trajectories().episodes(run_id, choice_argument("status", EPISODE_STATUSES, None))
+    return jsonify({"run_id": run_id, "episodes": [episode.model_dump(mode="json", exclude={"steps"})
+                                                   for episode in episodes]})
+
+
+def get_episode(run_id: str, episode_id: str):
+    episode = trajectories().episode(run_id, episode_id, integer_argument("first_step", 0))
+    return jsonify(episode.model_dump(mode="json"))
+
+
+def live_wall(run_id: str):
+    tiles = trajectories().live_wall(run_id, integer_argument("limit", 24))
+    return jsonify({"run_id": run_id, "tiles": [tile.model_dump(mode="json") for tile in tiles]})
+
+
+def get_frame(frame_digest: str):
+    frame, media_type = trajectories().frame(frame_digest, choice_argument("size", FRAME_SIZES, "full"))
+    return Response(frame, mimetype=media_type, headers={"Cache-Control": "private, max-age=31536000, immutable"})
+
+
 def verify_token():
     body = request.get_json(silent=True) or {}
     return jsonify({"run_id": service().verify_run_token(body.get("token", ""))})
@@ -259,6 +305,7 @@ ROUTES = (
     ("POST", "/v1/specs/<digest>/preflight", preflight),
     ("POST", "/v1/specs/<digest>/dry_run", dry_run),
     ("POST", "/v1/specs/<digest>/launch", launch),
+    ("GET", "/v1/experiments/<experiment_id>", get_experiment),
     ("POST", "/v1/experiments/<experiment_id>/approve", approve),
     ("GET", "/v1/runs", list_runs),
     ("GET", "/v1/runs/<run_id>", get_run),
@@ -269,6 +316,10 @@ ROUTES = (
     ("POST", "/v1/runs/<run_id>/finish", finish),
     ("GET", "/v1/runs/<run_id>/events", events),
     ("POST", "/v1/run_tokens/verify", verify_token),
+    ("GET", "/v1/runs/<run_id>/episodes", list_episodes),
+    ("GET", "/v1/runs/<run_id>/episodes/<episode_id>", get_episode),
+    ("GET", "/v1/runs/<run_id>/live", live_wall),
+    ("GET", "/v1/frames/<frame_digest>", get_frame),
     ("GET", "/v1/catalogs/<kind>", list_catalog),
     ("PUT", "/v1/catalogs/<kind>/<name>", publish_catalog_entry),
     ("GET", "/v1/endpoints", list_endpoints),
@@ -293,12 +344,14 @@ ERROR_HANDLERS = (
 
 def create_app(experiment_service: ExperimentService, poll_seconds: float = 1.0,
                sleep: Callable[[float], None] = time.sleep, catalog_service: CatalogService | None = None,
-               endpoint_service: EndpointService | None = None) -> Flask:
+               endpoint_service: EndpointService | None = None,
+               trajectory_views: TrajectoryViews | None = None) -> Flask:
     app = Flask("experimentd")
     app.extensions[SERVICE_KEY] = experiment_service
     app.extensions[POLL_KEY] = (poll_seconds, sleep)
     app.extensions[CATALOGS_KEY] = catalog_service
     app.extensions[ENDPOINTS_KEY] = endpoint_service
+    app.extensions[TRAJECTORIES_KEY] = trajectory_views
     for method, rule, view_function in ROUTES:
         app.add_url_rule(rule, endpoint=f"{method} {rule}", view_func=view_function, methods=[method])
     for error_class, handler in ERROR_HANDLERS:

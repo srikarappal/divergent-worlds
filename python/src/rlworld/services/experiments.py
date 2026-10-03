@@ -80,6 +80,13 @@ class ExperimentRecord(BaseModel):
     approved: bool
 
 
+class DryRun(BaseModel):
+    """One episode played end to end before launch, watched live at its run and episode id."""
+
+    run_id: str
+    episode_id: str
+
+
 class RunExecutor(Protocol):
     """Platform hosted rollout workers for eval and data runs."""
 
@@ -87,7 +94,7 @@ class RunExecutor(Protocol):
 
     def apply(self, run: RunRecord) -> None: ...
 
-    def dry_run(self, document: SpecDocument) -> str: ...
+    def dry_run(self, document: SpecDocument) -> DryRun: ...
 
 
 class ExperimentService:
@@ -138,7 +145,7 @@ class ExperimentService:
     def preflight(self, digest: str) -> ExperimentPreflight:
         return run_experiment_preflight(self.spec(digest)[1], self.preflight_context)
 
-    def dry_run(self, digest: str) -> str:
+    def dry_run(self, digest: str) -> DryRun:
         """One episode of the first sweep point, to watch live before the budget is committed."""
         first_point = expand_sweep(self.spec(digest)[1])[0]
         return self.executor.dry_run(first_point.document)

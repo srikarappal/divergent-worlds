@@ -7,6 +7,7 @@ from rlworld.preflight import PreflightContext, SeatPool
 from rlworld.services.experimentd_http import create_app
 from rlworld.services.experiments import (
     ControlError,
+    DryRun,
     ExperimentService,
     InvalidRunTokenError,
     LaunchBlockedError,
@@ -44,7 +45,7 @@ class RecordingExecutor:
         self.applied.append((run.run_id, run.state, run.desired_concurrency, run.priority))
 
     def dry_run(self, document):
-        return "episode_dry_000001"
+        return DryRun(run_id="dry_run_000001", episode_id="dry_run_000001_s000_a0")
 
 
 class RecordingRunner:
@@ -122,7 +123,7 @@ def test_launching_eval_starts_platform_hosted_runs(example_payload, tmp_path):
     assert failed_run.state == "failed"
     assert service.run_events(failed_run.run_id)[0].kind == "launch_failed"
     assert service.run(experiment.run_ids[0]).state == "running"
-    assert service.dry_run(service.save_spec(spec_text)) == "episode_dry_000001"
+    assert service.dry_run(service.save_spec(spec_text)).episode_id == "dry_run_000001_s000_a0"
 
 
 def test_preflight_errors_block_launch(example_spec_text, tmp_path):
