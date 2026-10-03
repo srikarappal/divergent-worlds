@@ -152,6 +152,105 @@
       "sdk": "client.get_frame(\"{frame_digest}\", size=\"{size}\")"
     },
     {
+      "name": "cohort",
+      "method": "GET",
+      "path": "/v1/runs/{run_id}/cohort",
+      "query": [
+        "termination",
+        "task_id",
+        "template",
+        "difficulty_key",
+        "category",
+        "policy_version",
+        "limit"
+      ],
+      "summary": "Finished episodes filtered for side by side scrubbing, with their filmstrips",
+      "cli": "rlworld episodes cohort {run_id} --termination {termination} --limit 50",
+      "sdk": "client.cohort(\"{run_id}\", termination=\"{termination}\", limit=50)"
+    },
+    {
+      "name": "get_provenance",
+      "method": "GET",
+      "path": "/v1/runs/{run_id}/episodes/{episode_id}/provenance",
+      "summary": "The checks, judge rationale, states and world diff behind a score",
+      "cli": "rlworld episodes provenance {run_id} {episode_id}",
+      "sdk": "client.get_provenance(\"{run_id}\", \"{episode_id}\")"
+    },
+    {
+      "name": "get_step_prompt",
+      "method": "GET",
+      "path": "/v1/runs/{run_id}/episodes/{episode_id}/steps/{step_index}/prompt",
+      "summary": "The exact model input of one step",
+      "cli": "rlworld episodes prompt {run_id} {episode_id} {step_index}",
+      "sdk": "client.get_step_prompt(\"{run_id}\", \"{episode_id}\", {step_index})"
+    },
+    {
+      "name": "review_episode",
+      "method": "POST",
+      "path": "/v1/runs/{run_id}/episodes/{episode_id}/actions",
+      "body": "json",
+      "summary": "Flag, label, file a verifier bug, draft a task or add to an audit sample",
+      "cli": "rlworld episodes review {run_id} {episode_id} {action} --note {note}",
+      "sdk": "client.review_episode(\"{run_id}\", \"{episode_id}\", \"{action}\", note=\"{note}\")"
+    },
+    {
+      "name": "analyze_failures",
+      "method": "POST",
+      "path": "/v1/runs/{run_id}/failures/analyze",
+      "summary": "Label and cluster a run's failures and file bug tickets",
+      "cli": "rlworld failures analyze {run_id}",
+      "sdk": "client.analyze_failures(\"{run_id}\")"
+    },
+    {
+      "name": "get_failures",
+      "method": "GET",
+      "path": "/v1/runs/{run_id}/failures",
+      "summary": "Failure clusters per template and policy version",
+      "cli": "rlworld failures get {run_id}",
+      "sdk": "client.get_failures(\"{run_id}\")"
+    },
+    {
+      "name": "run_report",
+      "method": "GET",
+      "path": "/v1/runs/{run_id}/report",
+      "summary": "Success rates with confidence intervals per template and difficulty, pass at k",
+      "cli": "rlworld runs report {run_id}",
+      "sdk": "client.run_report(\"{run_id}\")"
+    },
+    {
+      "name": "compare_runs",
+      "method": "GET",
+      "path": "/v1/compare/runs",
+      "query": [
+        "run_ids"
+      ],
+      "summary": "Runs side by side on the tasks they share",
+      "cli": "rlworld compare runs {run_id} {other_run_id}",
+      "sdk": "client.compare_runs([\"{run_id}\", \"{other_run_id}\"])"
+    },
+    {
+      "name": "compare_policy_versions",
+      "method": "GET",
+      "path": "/v1/runs/{run_id}/compare/policy_versions",
+      "summary": "Policy versions side by side on the same tasks",
+      "cli": "rlworld compare versions {run_id}",
+      "sdk": "client.compare_policy_versions(\"{run_id}\")"
+    },
+    {
+      "name": "list_review_items",
+      "method": "GET",
+      "path": "/v1/review_items",
+      "query": [
+        "queue",
+        "status",
+        "run_id",
+        "episode_id"
+      ],
+      "summary": "Review items by queue, status, run or episode",
+      "cli": "rlworld review list --queue {queue} --status {status}",
+      "sdk": "client.list_review_items(queue=\"{queue}\", status=\"{status}\")"
+    },
+    {
       "name": "list_catalog",
       "method": "GET",
       "path": "/v1/catalogs/{kind}",

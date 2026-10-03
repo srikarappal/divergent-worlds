@@ -32,6 +32,12 @@ from rlworld.services.experiments import (
     LaunchBlockedError,
     UnknownRecordError,
 )
+from rlworld.services.review import (
+    EpisodeFilter,
+    ReviewError,
+    ReviewRequest,
+    ReviewService,
+)
 from rlworld.services.trajectory_views import TrajectoryViews
 from rlworld.specs.document import SpecValidationError, dump_spec_document
 
@@ -40,6 +46,9 @@ POLL_KEY = "rlworld_event_poll"
 CATALOGS_KEY = "rlworld_catalog_service"
 ENDPOINTS_KEY = "rlworld_endpoint_service"
 TRAJECTORIES_KEY = "rlworld_trajectory_views"
+REVIEW_KEY = "rlworld_review_service"
+COHORT_ARGUMENTS = ("termination", "task_id", "template", "difficulty_key", "category", "policy_version", "limit")
+ITEM_FILTERS = ("queue", "status", "run_id", "episode_id")
 EPISODE_STATUSES = ("running", "finished")
 FRAME_SIZES = ("full", "thumbnail")
 FINISHED_STATES = ("completed", "failed")
@@ -293,6 +302,66 @@ def get_frame(frame_digest: str):
     return Response(frame, mimetype=media_type, headers={"Cache-Control": "private, max-age=31536000, immutable"})
 
 
+def review() -> ReviewService:
+    return configured(REVIEW_KEY, "review")
+
+
+def cohort(run_id: str):
+    filters = validated(EpisodeFilter, {name: request.args[name] for name in COHORT_ARGUMENTS if name in request.args})
+    return jsonify({"run_id": run_id, "episodes": [member.model_dump(mode="json")
+                                                   for member in review().cohort(run_id, filters)]})
+
+
+def get_provenance(run_id: str, episode_id: str):
+    return jsonify(review().provenance(run_id, episode_id).model_dump(mode="json"))
+
+
+def get_step_prompt(run_id: str, episode_id: str, step_index: str):
+    if not step_index.isdigit():
+        raise RequestValidationError(["step_index: must be a non negative integer"])
+    return jsonify({"messages": review().prompt(run_id, episode_id, int(step_index))})
+
+
+def analyze_failures(run_id: str):
+    return jsonify(review().analyze(run_id).model_dump(mode="json"))
+
+
+def get_failures(run_id: str):
+    analysis = review().analysis(run_id)
+    if analysis is None:
+        raise UnknownRecordError(f"no failure analysis for {run_id} yet")
+    return jsonify(analysis.model_dump(mode="json"))
+
+
+def run_report(run_id: str):
+    return jsonify(review().report(run_id))
+
+
+def compare_runs():
+    run_ids = [run_id for run_id in request.args.get("run_ids", "").split(",") if run_id]
+    if len(run_ids) < 2:
+        raise RequestValidationError(["run_ids: name at least two runs, separated by commas"])
+    return jsonify(review().compare_runs(run_ids).model_dump(mode="json"))
+
+
+def compare_policy_versions(run_id: str):
+    return jsonify(review().compare_policy_versions(run_id).model_dump(mode="json"))
+
+
+def review_episode(run_id: str, episode_id: str):
+    review_request = validated(ReviewRequest, request.get_json(silent=True) or {})
+    return jsonify(review().act(run_id, episode_id, review_request).model_dump(mode="json")), 201
+
+
+def list_review_items():
+    filters = {name: request.args[name] for name in ITEM_FILTERS if name in request.args}
+    return jsonify({"items": [item.model_dump(mode="json") for item in review().list_items(**filters)]})
+
+
+def invalid_review(error: ReviewError):
+    return jsonify({"code": "invalid_request", "problems": [str(error)]}), 400
+
+
 def verify_token():
     body = request.get_json(silent=True) or {}
     return jsonify({"run_id": service().verify_run_token(body.get("token", ""))})
@@ -320,6 +389,16 @@ ROUTES = (
     ("GET", "/v1/runs/<run_id>/episodes/<episode_id>", get_episode),
     ("GET", "/v1/runs/<run_id>/live", live_wall),
     ("GET", "/v1/frames/<frame_digest>", get_frame),
+    ("GET", "/v1/runs/<run_id>/cohort", cohort),
+    ("GET", "/v1/runs/<run_id>/episodes/<episode_id>/provenance", get_provenance),
+    ("GET", "/v1/runs/<run_id>/episodes/<episode_id>/steps/<step_index>/prompt", get_step_prompt),
+    ("POST", "/v1/runs/<run_id>/episodes/<episode_id>/actions", review_episode),
+    ("POST", "/v1/runs/<run_id>/failures/analyze", analyze_failures),
+    ("GET", "/v1/runs/<run_id>/failures", get_failures),
+    ("GET", "/v1/runs/<run_id>/report", run_report),
+    ("GET", "/v1/runs/<run_id>/compare/policy_versions", compare_policy_versions),
+    ("GET", "/v1/compare/runs", compare_runs),
+    ("GET", "/v1/review_items", list_review_items),
     ("GET", "/v1/catalogs/<kind>", list_catalog),
     ("PUT", "/v1/catalogs/<kind>/<name>", publish_catalog_entry),
     ("GET", "/v1/endpoints", list_endpoints),
@@ -339,19 +418,21 @@ ERROR_HANDLERS = (
     (CatalogWriteError, rejected_write),
     (DuplicateEndpointError, rejected_write),
     (ServiceUnavailableError, unavailable),
+    (ReviewError, invalid_review),
 )
 
 
 def create_app(experiment_service: ExperimentService, poll_seconds: float = 1.0,
                sleep: Callable[[float], None] = time.sleep, catalog_service: CatalogService | None = None,
-               endpoint_service: EndpointService | None = None,
-               trajectory_views: TrajectoryViews | None = None) -> Flask:
+               endpoint_service: EndpointService | None = None, trajectory_views: TrajectoryViews | None = None,
+               review_service: ReviewService | None = None) -> Flask:
     app = Flask("experimentd")
     app.extensions[SERVICE_KEY] = experiment_service
     app.extensions[POLL_KEY] = (poll_seconds, sleep)
     app.extensions[CATALOGS_KEY] = catalog_service
     app.extensions[ENDPOINTS_KEY] = endpoint_service
     app.extensions[TRAJECTORIES_KEY] = trajectory_views
+    app.extensions[REVIEW_KEY] = review_service
     for method, rule, view_function in ROUTES:
         app.add_url_rule(rule, endpoint=f"{method} {rule}", view_func=view_function, methods=[method])
     for error_class, handler in ERROR_HANDLERS:
