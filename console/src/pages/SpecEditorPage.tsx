@@ -1,6 +1,7 @@
 // Configure: the experiment builder, YAML view, presets, cloning, import, export and diff (DESIGN.md 6.14).
 // Saving creates an immutable digest; nothing configured here lives outside the spec.
 import { Component, type ChangeEvent, type ReactElement } from "react";
+import { Link } from "react-router-dom";
 
 import type { ConsoleApi } from "../api/client";
 import type { CatalogEntry } from "../api/types";
@@ -189,6 +190,7 @@ export class SpecEditorPage extends Component<SpecEditorProps, SpecEditorState> 
       <div className="spec-editor">
         {this.renderToolbar(parsed.errors.length > 0 || schemaProblems.length > 0)}
         {this.state.message ? <p className="status" role="status">{this.state.message}</p> : null}
+        {digest !== null ? <Link className="button primary" to={`/launch/${digest}`}>Preflight and launch</Link> : null}
         <div className="columns">
           <section className="forms">
             <SpecForm value={parsed.value} disabled={parsed.errors.length > 0} suggestions={this.state.suggestions}

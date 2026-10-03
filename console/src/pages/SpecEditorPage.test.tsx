@@ -1,4 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { MemoryRouter } from "react-router-dom";
 import { expect, test } from "vitest";
 import { parse } from "yaml";
 
@@ -8,6 +10,10 @@ import { catalogEntry, FakeApi } from "../test/fakeApi";
 import { SpecEditorPage } from "./SpecEditorPage";
 
 const CLONED_RUN = "experiment_000001_run_002";
+
+function editor(api: FakeApi): ReactElement {
+  return <MemoryRouter><SpecEditorPage api={api} /></MemoryRouter>;
+}
 
 function yamlBox(): HTMLTextAreaElement {
   return screen.getByLabelText("YAML") as HTMLTextAreaElement;
@@ -28,7 +34,7 @@ function clonedSpecLoaded(): void {
 async function formEditsRewriteTheYaml(): Promise<void> {
   const api = new FakeApi();
   api.catalogs.images = [catalogEntry("images", "win2025_office_v4")];
-  render(<SpecEditorPage api={api} />);
+  render(editor(api));
   await waitFor(imageSuggestionListed);
   fireEvent.change(screen.getByLabelText("Group size"), { target: { value: "16" } });
   fireEvent.change(screen.getByLabelText("Run type"), { target: { value: "eval" } });
@@ -46,7 +52,7 @@ async function formEditsRewriteTheYaml(): Promise<void> {
 test("form edits rewrite the YAML beside them and keep its comments", formEditsRewriteTheYaml);
 
 function brokenSpecsCannotBeSaved(): void {
-  render(<SpecEditorPage api={new FakeApi()} />);
+  render(editor(new FakeApi()));
   fireEvent.change(yamlBox(), { target: { value: "experiment: [\n" } });
   expect(screen.getByLabelText("YAML problems")).toBeInTheDocument();
   expect(saveButton()).toBeDisabled();
@@ -59,13 +65,14 @@ test("broken YAML and schema problems block saving", brokenSpecsCannotBeSaved);
 
 async function savingShowsTheDigestAndItsCommands(): Promise<void> {
   const api = new FakeApi();
-  render(<SpecEditorPage api={api} />);
+  render(editor(api));
   expect(screen.getByLabelText("preflight cli")).toHaveTextContent("rlworld specs preflight {digest}");
   fireEvent.click(saveButton());
   expect(await screen.findByRole("status")).toHaveTextContent("saved as sha256:abc123");
   expect(api.callsTo("saveSpec")[0][0]).toBe(PRESETS[0].yaml);
   expect(screen.getByLabelText("preflight cli")).toHaveTextContent("rlworld specs preflight sha256:abc123");
   expect(screen.getByLabelText("launch sdk")).toHaveTextContent('client.launch("sha256:abc123", budget_usd=2500)');
+  expect(screen.getByRole("link", { name: "Preflight and launch" })).toHaveAttribute("href", "/launch/sha256:abc123");
   fireEvent.change(screen.getByLabelText("Seed"), { target: { value: "7" } });
   expect(screen.getByLabelText("preflight cli")).toHaveTextContent("rlworld specs preflight {digest}");
 }
@@ -75,7 +82,7 @@ test("saving shows the immutable digest and the matching CLI and SDK calls", sav
 async function serverProblemsAreShown(): Promise<void> {
   const api = new FakeApi();
   api.saveFailure = new ApiError(400, "invalid_spec", "rejected", ["run: rl runs use the train split"]);
-  render(<SpecEditorPage api={api} />);
+  render(editor(api));
   fireEvent.click(saveButton());
   expect(await screen.findByLabelText("Server problems")).toHaveTextContent("rl runs use the train split");
 }
@@ -85,7 +92,7 @@ test("cross layer problems from the API are shown", serverProblemsAreShown);
 async function clonedRunsDiffAgainstTheirSpec(): Promise<void> {
   const api = new FakeApi();
   api.runSpecs[CLONED_RUN] = PRESETS[0].yaml.replace("group_size: 8", "group_size: 4");
-  render(<SpecEditorPage api={api} />);
+  render(editor(api));
   fireEvent.change(screen.getByLabelText("run to clone"), { target: { value: CLONED_RUN } });
   fireEvent.click(screen.getByRole("button", { name: "Clone run" }));
   await waitFor(clonedSpecLoaded);
@@ -103,7 +110,7 @@ async function clonedRunsDiffAgainstTheirSpec(): Promise<void> {
 test("a cloned run loads its spec and the diff shows every change", clonedRunsDiffAgainstTheirSpec);
 
 function sweepsAreSpecFields(): void {
-  render(<SpecEditorPage api={new FakeApi()} />);
+  render(editor(new FakeApi()));
   fireEvent.change(screen.getByLabelText("sweep path"), { target: { value: "run.group_size" } });
   fireEvent.change(screen.getByLabelText("sweep values"), { target: { value: "4, 8" } });
   fireEvent.click(screen.getByRole("button", { name: "Add sweep" }));
