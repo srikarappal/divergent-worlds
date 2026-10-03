@@ -69,7 +69,7 @@ func (fake *fakeFirecracker) Start(_ context.Context, argv []string) (vmm.Proces
 func (fake *fakeFirecracker) serve(writer http.ResponseWriter, request *http.Request) {
 	body, _ := io.ReadAll(request.Body)
 	var decoded map[string]any
-	_ = json.Unmarshal(body, &decoded)
+	json.Unmarshal(body, &decoded)
 	fake.mu.Lock()
 	fake.requests = append(fake.requests, recordedRequest{Method: request.Method, Path: request.URL.Path, Body: decoded})
 	failPath := fake.failPath

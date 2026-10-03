@@ -209,9 +209,9 @@ func (agent *Agent) Start(ctx context.Context, request StartRequest) (EnvInfo, e
 
 func (agent *Agent) cleanup(ctx context.Context, network netplan.CloneNetwork, overlayPath string) {
 	for _, argv := range network.TeardownCommands() {
-		_ = agent.commands.Run(ctx, argv)
+		agent.commands.Run(ctx, argv)
 	}
-	_ = agent.commands.Run(ctx, []string{"rm", "-f", overlayPath})
+	agent.commands.Run(ctx, []string{"rm", "-f", overlayPath})
 }
 
 func (agent *Agent) lookup(envID string) (*env, error) {
@@ -381,7 +381,7 @@ func (agent *Agent) Fork(ctx context.Context, envID string, count int, checkpoin
 		info, err := agent.Start(ctx, forkRequest)
 		if err != nil {
 			for _, started := range forks {
-				_ = agent.Destroy(ctx, started.EnvID)
+				agent.Destroy(ctx, started.EnvID)
 			}
 			return nil, err
 		}

@@ -123,12 +123,12 @@ func (driver *Driver) Restore(ctx context.Context, spec vmm.RestoreSpec) (vmm.VM
 	}
 	socketPath := driver.SocketPath(spec.VMID)
 	if err := driver.waitForSocket(ctx, socketPath); err != nil {
-		_ = process.Kill()
+		process.Kill()
 		return vmm.VM{}, err
 	}
 	api := driver.newAPI(socketPath)
 	if err := api.LoadSnapshot(ctx, spec.StatePath, spec.MemoryPath, driver.config.UseUffd, spec.Resume); err != nil {
-		_ = process.Kill()
+		process.Kill()
 		return vmm.VM{}, fmt.Errorf("load snapshot into %s: %w", spec.VMID, err)
 	}
 	state := vmm.Paused

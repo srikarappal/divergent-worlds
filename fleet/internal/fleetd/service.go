@@ -112,7 +112,7 @@ func (service *Service) onLeaseEnded(ended lease.Lease) {
 		return
 	}
 	if node, known := service.nodes[bound.hostID]; known {
-		_ = node.Destroy(context.Background(), bound.envID)
+		node.Destroy(context.Background(), bound.envID)
 	}
 	service.scheduler.Free(bound.hostID, bound.request.PerVM)
 }
@@ -240,7 +240,7 @@ func (service *Service) Reset(ctx context.Context, leaseID string) (nodeagent.St
 	if err != nil {
 		return nodeagent.StepResult{}, err
 	}
-	_ = node.Destroy(ctx, bound.envID)
+	node.Destroy(ctx, bound.envID)
 	envID := service.newEnvID()
 	service.mu.Lock()
 	bound.envID, bound.frozen = envID, false

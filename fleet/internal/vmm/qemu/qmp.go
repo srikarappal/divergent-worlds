@@ -52,7 +52,7 @@ func DialQMP(ctx context.Context, socketPath string) (*QMPClient, error) {
 	}
 	client := &QMPClient{connection: connection, reader: bufio.NewReader(connection)}
 	if deadline, hasDeadline := ctx.Deadline(); hasDeadline {
-		_ = connection.SetDeadline(deadline)
+		connection.SetDeadline(deadline)
 	}
 	if _, err := client.reader.ReadBytes('\n'); err != nil {
 		connection.Close()

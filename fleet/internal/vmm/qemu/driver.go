@@ -148,7 +148,7 @@ func (driver *Driver) Restore(ctx context.Context, spec vmm.RestoreSpec) (vmm.VM
 	}
 	channel, err := driver.dialWhenReady(ctx, driver.QMPSocketPath(spec.VMID))
 	if err != nil {
-		_ = process.Kill()
+		process.Kill()
 		return vmm.VM{}, err
 	}
 	restoreSteps := []struct {
@@ -161,21 +161,21 @@ func (driver *Driver) Restore(ctx context.Context, spec vmm.RestoreSpec) (vmm.VM
 	}
 	for _, step := range restoreSteps {
 		if _, err := channel.Execute(ctx, step.command, step.arguments); err != nil {
-			_ = channel.Close()
-			_ = process.Kill()
+			channel.Close()
+			process.Kill()
 			return vmm.VM{}, fmt.Errorf("%s for %s: %w", step.command, spec.VMID, err)
 		}
 	}
 	if err := driver.waitForMigration(ctx, channel); err != nil {
-		_ = channel.Close()
-		_ = process.Kill()
+		channel.Close()
+		process.Kill()
 		return vmm.VM{}, err
 	}
 	state := vmm.Paused
 	if spec.Resume {
 		if _, err := channel.Execute(ctx, "cont", nil); err != nil {
-			_ = channel.Close()
-			_ = process.Kill()
+			channel.Close()
+			process.Kill()
 			return vmm.VM{}, err
 		}
 		state = vmm.Running

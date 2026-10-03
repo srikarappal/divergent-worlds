@@ -63,7 +63,7 @@ type errorResponse struct {
 func writeJSON(writer http.ResponseWriter, status int, payload any) {
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(status)
-	_ = json.NewEncoder(writer).Encode(payload)
+	json.NewEncoder(writer).Encode(payload)
 }
 
 // statusFor maps errors to HTTP codes; anything unrecognized is an env error, never an agent failure.

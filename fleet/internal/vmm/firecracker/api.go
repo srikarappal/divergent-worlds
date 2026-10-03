@@ -91,7 +91,7 @@ func (client *APIClient) call(ctx context.Context, method, path string, body any
 		var fault struct {
 			FaultMessage string `json:"fault_message"`
 		}
-		_ = json.Unmarshal(responseBody, &fault)
+		json.Unmarshal(responseBody, &fault)
 		return &APIError{StatusCode: response.StatusCode, FaultMessage: fault.FaultMessage}
 	}
 	if decoded != nil && len(responseBody) > 0 {

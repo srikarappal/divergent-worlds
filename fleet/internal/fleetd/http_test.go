@@ -100,7 +100,7 @@ func (fleet *testFleet) call(t *testing.T, method, path string, body any) (int, 
 	}
 	defer response.Body.Close()
 	var decoded map[string]any
-	_ = json.NewDecoder(response.Body).Decode(&decoded)
+	json.NewDecoder(response.Body).Decode(&decoded)
 	return response.StatusCode, decoded
 }
 
