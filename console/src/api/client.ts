@@ -2,10 +2,14 @@
 import { fillPath, operation } from "./operations";
 import type {
   CatalogEntry,
+  DryRun,
   EndpointRegistration,
   EndpointView,
+  EpisodeRecord,
   ExperimentPreflight,
   ExperimentRecord,
+  FrameSize,
+  LiveTile,
   ProbeResult,
   RunEvent,
   RunRecord,
@@ -30,8 +34,9 @@ export interface ConsoleApi {
   saveSpec(specYaml: string): Promise<string>;
   getSpec(digest: string): Promise<string>;
   preflight(digest: string): Promise<ExperimentPreflight>;
-  dryRun(digest: string): Promise<string>;
+  dryRun(digest: string): Promise<DryRun>;
   launch(digest: string, budgetUsd?: number): Promise<ExperimentRecord>;
+  getExperiment(experimentId: string): Promise<ExperimentRecord>;
   approveExperiment(experimentId: string): Promise<ExperimentRecord>;
   listRuns(experimentId?: string): Promise<RunRecord[]>;
   getRun(runId: string): Promise<RunRecord>;
@@ -39,6 +44,11 @@ export interface ConsoleApi {
   controlRun(runId: string, command: string, value?: unknown): Promise<RunRecord>;
   runEvents(runId: string, listener: RunEventListener, follow?: boolean, after?: number,
             signal?: AbortSignal): Promise<void>;
+  listEpisodes(runId: string, status?: "running" | "finished"): Promise<EpisodeRecord[]>;
+  getEpisode(runId: string, episodeId: string, firstStep?: number): Promise<EpisodeRecord>;
+  liveWall(runId: string, limit?: number): Promise<LiveTile[]>;
+  getFrame(frameDigest: string, size?: FrameSize): Promise<Blob>;
+  frameUrl(frameDigest: string, size: FrameSize): string;
   listCatalog(kind: string): Promise<CatalogEntry[]>;
   listEndpoints(): Promise<EndpointView[]>;
   registerEndpoint(endpoint: EndpointRegistration): Promise<EndpointView>;
@@ -139,12 +149,16 @@ export class ApiClient implements ConsoleApi {
     return this.call("preflight", { path: { digest } });
   }
 
-  async dryRun(digest: string): Promise<string> {
-    return (await this.call("dry_run", { path: { digest } })).episode_id;
+  dryRun(digest: string): Promise<DryRun> {
+    return this.call("dry_run", { path: { digest } });
   }
 
   launch(digest: string, budgetUsd?: number): Promise<ExperimentRecord> {
     return this.call("launch", { path: { digest }, body: budgetUsd === undefined ? {} : { budget_usd: budgetUsd } });
+  }
+
+  getExperiment(experimentId: string): Promise<ExperimentRecord> {
+    return this.call("get_experiment", { path: { experiment_id: experimentId } });
   }
 
   approveExperiment(experimentId: string): Promise<ExperimentRecord> {
@@ -188,6 +202,29 @@ export class ApiClient implements ConsoleApi {
         }
       }
     }
+  }
+
+  async listEpisodes(runId: string, status?: "running" | "finished"): Promise<EpisodeRecord[]> {
+    return (await this.call("list_episodes", { path: { run_id: runId }, query: { status } })).episodes;
+  }
+
+  getEpisode(runId: string, episodeId: string, firstStep = 0): Promise<EpisodeRecord> {
+    return this.call("get_episode", { path: { run_id: runId, episode_id: episodeId },
+                                      query: { first_step: firstStep } });
+  }
+
+  async liveWall(runId: string, limit = 24): Promise<LiveTile[]> {
+    return (await this.call("live_wall", { path: { run_id: runId }, query: { limit } })).tiles;
+  }
+
+  async getFrame(frameDigest: string, size: FrameSize = "full"): Promise<Blob> {
+    const response = await this.send("get_frame", { path: { frame_digest: frameDigest }, query: { size } });
+    return response.blob();
+  }
+
+  // Frames go straight into img elements; content addressed, so browsers cache them for good.
+  frameUrl(frameDigest: string, size: FrameSize): string {
+    return `${this.baseUrl}${fillPath(operation("get_frame").path, { frame_digest: frameDigest })}?size=${size}`;
   }
 
   async listCatalog(kind: string): Promise<CatalogEntry[]> {

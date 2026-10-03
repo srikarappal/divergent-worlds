@@ -100,3 +100,125 @@ export interface ProbeResult {
   provider_kind: string;
   error: string | null;
 }
+
+export interface DryRun {
+  run_id: string;
+  episode_id: string;
+}
+
+export interface ScreenshotRef {
+  uri: string;
+  width: number;
+  height: number;
+  image_format: string;
+  sha256: string;
+}
+
+export interface Observation {
+  step_index: number;
+  screenshot: ScreenshotRef | null;
+  accessibility: unknown[] | null;
+  dom: string | null;
+  terminal: { stdout: string; stderr: string; exit_code: number } | null;
+  file_changes: Array<{ path: string; change: string }> | null;
+  user_reply: string | null;
+  native_result: unknown;
+}
+
+export interface ModelTurn {
+  prompt_ref: string | null;
+  output_text: string;
+  tool_calls: Record<string, unknown>[];
+  served_model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number | null;
+}
+
+export interface StateChange {
+  path: string;
+  kind: "added" | "removed" | "modified";
+  before: unknown;
+  after: unknown;
+}
+
+export interface StepRecord {
+  step_index: number;
+  observation: Observation;
+  model_turn: ModelTurn;
+  actions: Record<string, unknown>[];
+  parse_error: string | null;
+  state_changes: StateChange[];
+  timings: { model_seconds: number; env_seconds: number; settle_seconds: number };
+  vm_events: string[];
+}
+
+export interface CheckResult {
+  name: string;
+  tier: "exact" | "semantic" | "judge";
+  passed: boolean;
+  weight: number;
+  detail: string;
+  expected: unknown;
+  actual: unknown;
+}
+
+export interface Provenance {
+  verifier_versions: Record<string, string>;
+  judge_model: string | null;
+  rubric_version: string | null;
+  judge_skipped: boolean;
+  judge_cached: boolean;
+  state_hash: string;
+  ground_truth_digest: string;
+  reward_policy: Record<string, unknown>;
+}
+
+export interface RewardRecord {
+  total: number;
+  components: Record<string, number>;
+  termination: "success" | "failure" | "max_steps" | "agent_error" | "env_error";
+  counts_for_training: boolean;
+  checks: CheckResult[];
+  side_effect_violations: StateChange[];
+  error_detail: string | null;
+  provenance: Provenance;
+}
+
+export interface EpisodeRecord {
+  episode_id: string;
+  key: {
+    image_snapshot_digest: string;
+    world_digest: string;
+    task_digest: string;
+    run_id: string;
+    seed: number;
+    policy_version: number;
+  };
+  task_id: string;
+  task_template: string;
+  difficulty_key: string;
+  instruction: string;
+  group_id: string | null;
+  sample_index: number;
+  run_type: "rl" | "eval" | "data";
+  final_state_ref: string | null;
+  reward: RewardRecord | null;
+  human_intervened: boolean;
+  started_at: string;
+  finished_at: string | null;
+  steps: StepRecord[];
+}
+
+export interface LiveTile {
+  episode_id: string;
+  task_id: string;
+  task_template: string;
+  group_id: string | null;
+  sample_index: number;
+  step_index: number | null;
+  frame: string | null;
+  started_at: string;
+}
+
+export type FrameSize = "full" | "thumbnail";

@@ -8,6 +8,8 @@ const PATH_VALUES: Record<string, string> = {
   digest: "sha256:abc",
   experiment_id: "experiment_000001",
   run_id: "experiment_000001_run_000",
+  episode_id: "b00000_g00000_s000_a0",
+  frame_digest: "ab12",
   kind: "images",
   name: "byo_judge",
 };
@@ -27,7 +29,8 @@ class RecordingTransport implements FetchTransport {
   async fetch(input: string, init?: RequestInit): Promise<Response> {
     this.requests.push({ url: input, init });
     return this.responses.shift() ?? new Response(JSON.stringify({ digest: "sha256:abc", yaml: "", runs: [],
-                                                                   entries: [], endpoints: [], episode_id: "e" }));
+                                                                   entries: [], endpoints: [], episodes: [],
+                                                                   tiles: [], episode_id: "e" }));
   }
 }
 
@@ -53,6 +56,8 @@ function sampleArguments(operationName: string): unknown[] {
       return [{ name: "byo_judge" }];
     case "set_endpoint_key":
       return [PATH_VALUES.name, "sk_123"];
+    case "get_episode":
+      return [PATH_VALUES.run_id, PATH_VALUES.episode_id, 2];
     case "list_runs":
     case "list_endpoints":
       return [];
@@ -131,6 +136,20 @@ function eventKind(event: RunEvent): string {
 }
 
 test("run events arrive in order from the server sent event stream", runEventsArriveInOrder);
+
+async function episodeReadsAskOnlyForNewSteps(): Promise<void> {
+  const transport = new RecordingTransport();
+  const client = new ApiClient("/api", transport);
+  await client.getEpisode("run_1", "episode_1", 3);
+  await client.listEpisodes("run_1", "running");
+  await client.liveWall("run_1", 12);
+  expect(transport.requests[0].url).toBe("/api/v1/runs/run_1/episodes/episode_1?first_step=3");
+  expect(transport.requests[1].url).toBe("/api/v1/runs/run_1/episodes?status=running");
+  expect(transport.requests[2].url).toBe("/api/v1/runs/run_1/live?limit=12");
+  expect(client.frameUrl("ab12", "thumbnail")).toBe("/api/v1/frames/ab12?size=thumbnail");
+}
+
+test("episode reads ask only for new steps and frames have stable URLs", episodeReadsAskOnlyForNewSteps);
 
 function templatesShowWhatIsStillMissing(): void {
   expect(fillTemplate("rlworld specs launch {digest} --budget-usd {budget_usd}", { digest: "sha256:abc" }))
