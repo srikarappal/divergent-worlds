@@ -31,6 +31,11 @@ def episode_prefix(run_id: str, episode_id: str) -> str:
     return f"runs/{check_identifier(run_id)}/episodes/{check_identifier(episode_id)}"
 
 
+def step_number(step_key: str) -> int:
+    """steps/000012.json holds step 12."""
+    return int(step_key.rsplit("/", 1)[1].removesuffix(".json"))
+
+
 class TrajectoryStore:
     def __init__(self, object_store: ObjectStore) -> None:
         self.object_store = object_store
@@ -58,9 +63,18 @@ class TrajectoryStore:
         self.save_episode(started_episode)
         return TrajectoryWriter(self, started_episode)
 
-    def load_steps(self, run_id: str, episode_id: str) -> tuple[StepRecord, ...]:
+    def step_keys(self, run_id: str, episode_id: str, first_step: int = 0) -> list[str]:
         step_keys = self.object_store.list_keys(f"{episode_prefix(run_id, episode_id)}/steps/")
-        return tuple(StepRecord.model_validate_json(self.object_store.get_bytes(step_key)) for step_key in step_keys)
+        return [step_key for step_key in step_keys if step_number(step_key) >= first_step]
+
+    def load_steps(self, run_id: str, episode_id: str, first_step: int = 0) -> tuple[StepRecord, ...]:
+        """Steps from first_step on, so a live view fetches only what is new."""
+        return tuple(StepRecord.model_validate_json(self.object_store.get_bytes(step_key))
+                     for step_key in self.step_keys(run_id, episode_id, first_step))
+
+    def last_step(self, run_id: str, episode_id: str) -> StepRecord | None:
+        step_keys = self.step_keys(run_id, episode_id)
+        return StepRecord.model_validate_json(self.object_store.get_bytes(step_keys[-1])) if step_keys else None
 
     def load_episode(self, run_id: str, episode_id: str, with_steps: bool = True) -> EpisodeRecord:
         episode_bytes = self.object_store.get_bytes(f"{episode_prefix(run_id, episode_id)}/episode.json")
