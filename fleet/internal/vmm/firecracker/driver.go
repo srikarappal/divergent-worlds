@@ -123,12 +123,12 @@ func (driver *Driver) Restore(ctx context.Context, spec vmm.RestoreSpec) (vmm.VM
 	}
 	socketPath := driver.SocketPath(spec.VMID)
 	if err := driver.waitForSocket(ctx, socketPath); err != nil {
-		process.Kill()
+		vmm.Stop(process)
 		return vmm.VM{}, err
 	}
 	api := driver.newAPI(socketPath)
 	if err := api.LoadSnapshot(ctx, spec.StatePath, spec.MemoryPath, driver.config.UseUffd, spec.Resume); err != nil {
-		process.Kill()
+		vmm.Stop(process)
 		return vmm.VM{}, fmt.Errorf("load snapshot into %s: %w", spec.VMID, err)
 	}
 	state := vmm.Paused
@@ -204,7 +204,7 @@ func (driver *Driver) Destroy(_ context.Context, vmID string) error {
 	if err != nil {
 		return err
 	}
-	killErr := target.process.Kill()
+	killErr := vmm.Stop(target.process)
 	removeErr := os.RemoveAll(filepath.Dir(driver.JailRoot(vmID)))
 	driver.mu.Lock()
 	delete(driver.vmsByID, vmID)

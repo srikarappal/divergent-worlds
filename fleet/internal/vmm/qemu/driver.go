@@ -148,7 +148,7 @@ func (driver *Driver) Restore(ctx context.Context, spec vmm.RestoreSpec) (vmm.VM
 	}
 	channel, err := driver.dialWhenReady(ctx, driver.QMPSocketPath(spec.VMID))
 	if err != nil {
-		process.Kill()
+		vmm.Stop(process)
 		return vmm.VM{}, err
 	}
 	restoreSteps := []struct {
@@ -162,20 +162,20 @@ func (driver *Driver) Restore(ctx context.Context, spec vmm.RestoreSpec) (vmm.VM
 	for _, step := range restoreSteps {
 		if _, err := channel.Execute(ctx, step.command, step.arguments); err != nil {
 			channel.Close()
-			process.Kill()
+			vmm.Stop(process)
 			return vmm.VM{}, fmt.Errorf("%s for %s: %w", step.command, spec.VMID, err)
 		}
 	}
 	if err := driver.waitForMigration(ctx, channel); err != nil {
 		channel.Close()
-		process.Kill()
+		vmm.Stop(process)
 		return vmm.VM{}, err
 	}
 	state := vmm.Paused
 	if spec.Resume {
 		if _, err := channel.Execute(ctx, "cont", nil); err != nil {
 			channel.Close()
-			process.Kill()
+			vmm.Stop(process)
 			return vmm.VM{}, err
 		}
 		state = vmm.Running
@@ -258,9 +258,9 @@ func (driver *Driver) Destroy(ctx context.Context, vmID string) error {
 	if err != nil {
 		return err
 	}
-	_, _ = target.qmp.Execute(ctx, "quit", nil)
+	target.qmp.Execute(ctx, "quit", nil)
 	closeErr := target.qmp.Close()
-	killErr := target.process.Kill()
+	killErr := vmm.Stop(target.process)
 	driver.mu.Lock()
 	delete(driver.vmsByID, vmID)
 	driver.mu.Unlock()

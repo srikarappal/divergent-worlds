@@ -89,6 +89,13 @@ type Process interface {
 	Wait() error
 }
 
+// Stop kills a VMM process and reaps it; Wait reports the kill itself, so only the kill's error counts.
+func Stop(process Process) error {
+	killErr := process.Kill()
+	process.Wait()
+	return killErr
+}
+
 // ProcessRunner starts VMM processes; tests swap in a fake.
 type ProcessRunner interface {
 	Start(ctx context.Context, argv []string) (Process, error)
