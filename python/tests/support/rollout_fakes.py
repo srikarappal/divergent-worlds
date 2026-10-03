@@ -94,6 +94,7 @@ class FakeTaskProvider:
         self.candidate_tasks = [CandidateTask(f"task_{number:03d}", document.task.generator, document.task.difficulty)
                                 for number in range(task_count)]
         self.instanced = []
+        self.expanded = []
 
     def candidates(self):
         return self.candidate_tasks
@@ -101,6 +102,9 @@ class FakeTaskProvider:
     def instance(self, candidate):
         self.instanced.append(candidate.task_id)
         return task_instance(self.document, candidate.task_id)
+
+    def expand(self, tracker, policy_version):
+        self.expanded.append(policy_version)
 
 
 class FakeFleet:

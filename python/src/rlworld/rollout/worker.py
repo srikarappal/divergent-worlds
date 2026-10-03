@@ -44,6 +44,8 @@ class TaskProvider(Protocol):
 
     def instance(self, candidate: CandidateTask) -> TaskInstance: ...
 
+    def expand(self, tracker: PassRateTracker, policy_version: int) -> None: ...
+
 
 class RunControl(Protocol):
     def run(self, run_id: str) -> RunRecord: ...
@@ -199,9 +201,12 @@ class RolloutWorker:
                 return True
 
     def select_candidates(self, batch_index: int, policy_version: int) -> list[CandidateTask]:
-        candidates = list(self.task_provider.candidates())
+        """RL runs first let the registry grow toward the curriculum's frontier, then sample by pass rate."""
         if self.run_spec.type == "rl":
+            self.task_provider.expand(self.sampler.tracker, policy_version)
+            candidates = list(self.task_provider.candidates())
             return self.sampler.sample(candidates, self.run_spec.tasks_per_batch, policy_version)
+        candidates = list(self.task_provider.candidates())
         first_index = batch_index * self.run_spec.tasks_per_batch
         return candidates[first_index:first_index + self.run_spec.tasks_per_batch]
 
