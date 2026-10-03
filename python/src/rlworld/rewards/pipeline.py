@@ -172,3 +172,15 @@ def error_record(termination: TerminationLabel, detail: str, base_provenance: di
         error_detail=detail,
         provenance=Provenance(**base_provenance),
     )
+
+
+def env_error_record(
+    detail: str, final_state: dict[str, Any], ground_truth: dict[str, Any], policy: RewardPolicy | None = None
+) -> RewardRecord:
+    """For failures outside the pipeline, such as an extraction that never returned."""
+    base_provenance = {
+        "state_hash": content_digest(final_state),
+        "ground_truth_digest": content_digest(ground_truth),
+        "reward_policy": policy or RewardPolicy(),
+    }
+    return error_record("env_error", detail, base_provenance)
