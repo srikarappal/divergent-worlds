@@ -22,7 +22,7 @@ Status is one of todo, doing or done.
 5. [done] Task gates: null action, oracle, alternative solution, near miss, rerun stability and solvability gates with a gate report.
 6. [done] Curriculum: pass rate tracking per template, difficulty bucket and policy version; learnable band sampling; zero advantage group filtering.
 7. [done] Estimator and preflight: Little's law capacity and cost model; validation, endpoint probes and trap warnings producing a preflight report.
-8. [todo] Model gateway: endpoint registry, OpenAI compatible client, retries with jitter, circuit breaker, token bucket rate limits, response cache, metering, pinned versions, token in token out records.
+8. [done] Model gateway: endpoint registry, OpenAI compatible client, retries with jitter, circuit breaker, token bucket rate limits, response cache, metering, pinned versions, token in token out records.
 9. [todo] Trajectories: step and episode records, filesystem store behind an object store interface, exact replay, SFT and preference pair export.
 10. [todo] Failure clustering: labeler protocol, cluster rollups per template and policy version, verifier false negative routing.
 11. [todo] Worlds: seeded synthetic organization generator, app integration contract, reference mail integration, world digests.
@@ -56,3 +56,7 @@ Status is one of todo, doing or done.
 27. [todo] Linux guest agent: screenshots, input, accessibility tree, settle hashing, vsock server.
 28. [todo] Image pipeline: Dockerfile to ext4 rootfs builder, Windows Packer template and hardening scripts.
 29. [todo] Docker dev backend: local Linux GUI envs behind the VMM driver interface for an end to end loop on a laptop.
+
+## Follow ups
+
+1. Native transports for frontier computer use APIs behind the gateway Transport protocol; the OpenAI compatible transport ships first.
