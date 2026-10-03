@@ -1,0 +1,158 @@
+{
+  "adapter": "typed_actions",
+  "options": {},
+  "parse_cases": [
+    {
+      "description": "wheel button clicks are middle clicks",
+      "env_size": [1920, 1080],
+      "raw_output": [{"type": "computer_call", "action": {"type": "click", "x": 100, "y": 200, "button": "wheel"}}],
+      "expected_actions": [{"name": "click", "x": 100, "y": 200, "button": "middle"}]
+    },
+    {
+      "description": "double click",
+      "env_size": [1920, 1080],
+      "raw_output": [{"type": "computer_call", "action": {"type": "double_click", "x": 5, "y": 6}}],
+      "expected_actions": [{"name": "click", "x": 5, "y": 6, "count": 2}]
+    },
+    {
+      "description": "pixel scroll becomes wheel notches",
+      "env_size": [1920, 1080],
+      "raw_output": [
+        {"type": "computer_call", "action": {"type": "scroll", "x": 500, "y": 400, "scroll_x": 0, "scroll_y": 300}}
+      ],
+      "expected_actions": [{"name": "scroll", "x": 500, "y": 400, "delta_y": 3}]
+    },
+    {
+      "description": "a small scroll still moves one notch",
+      "env_size": [1920, 1080],
+      "raw_output": [
+        {"type": "computer_call", "action": {"type": "scroll", "x": 500, "y": 400, "scroll_x": 0, "scroll_y": -50}}
+      ],
+      "expected_actions": [{"name": "scroll", "x": 500, "y": 400, "delta_y": -1}]
+    },
+    {
+      "description": "uppercase key names normalize with modifiers first",
+      "env_size": [1920, 1080],
+      "raw_output": [
+        {"type": "computer_call", "action": {"type": "keypress", "keys": ["CTRL", "ARROWDOWN"]}},
+        {"type": "computer_call", "action": {"type": "keypress", "keys": ["CMD", "SHIFT", "Z"]}}
+      ],
+      "expected_actions": [
+        {"name": "key", "keys": ["ctrl", "down"]},
+        {"name": "key", "keys": ["shift", "meta", "z"]}
+      ]
+    },
+    {
+      "description": "drag path keeps every point",
+      "env_size": [1920, 1080],
+      "raw_output": [
+        {
+          "type": "computer_call",
+          "action": {"type": "drag", "path": [{"x": 1, "y": 2}, {"x": 30, "y": 40}, {"x": 50, "y": 60}]}
+        }
+      ],
+      "expected_actions": [{"name": "drag", "path": [{"x": 1, "y": 2}, {"x": 30, "y": 40}, {"x": 50, "y": 60}]}]
+    },
+    {
+      "description": "reasoning and message items carry no action",
+      "env_size": [1920, 1080],
+      "raw_output": [
+        {"type": "reasoning", "summary": []},
+        {"type": "computer_call", "action": {"type": "type", "text": "hello"}},
+        {"type": "message", "content": []}
+      ],
+      "expected_actions": [{"name": "type", "text": "hello"}]
+    },
+    {
+      "description": "function calls carry JSON arguments",
+      "env_size": [1920, 1080],
+      "raw_output": [
+        {"type": "function_call", "name": "goto", "arguments": "{\"url\": \"https://crm.example.com\"}"},
+        {"type": "function_call", "name": "answer", "arguments": "{\"text\": \"42\"}"}
+      ],
+      "expected_actions": [{"name": "goto", "url": "https://crm.example.com"}, {"name": "answer", "text": "42"}]
+    },
+    {
+      "description": "large screens scale down to fit 1920x1080",
+      "env_size": [2560, 1440],
+      "raw_output": [{"type": "computer_call", "action": {"type": "click", "x": 100, "y": 200, "button": "left"}}],
+      "expected_actions": [{"name": "click", "x": 133, "y": 267}]
+    },
+    {
+      "description": "wait and screenshot",
+      "env_size": [1920, 1080],
+      "raw_output": [
+        {"type": "computer_call", "action": {"type": "wait"}},
+        {"type": "computer_call", "action": {"type": "screenshot"}}
+      ],
+      "expected_actions": [{"name": "wait", "duration_ms": 1000}, {"name": "wait", "duration_ms": 0}]
+    }
+  ],
+  "parse_error_cases": [
+    {
+      "description": "back and forward mouse buttons are unsupported",
+      "env_size": [1920, 1080],
+      "raw_output": [{"type": "computer_call", "action": {"type": "click", "x": 1, "y": 1, "button": "back"}}],
+      "error_fragment": "unsupported mouse button"
+    },
+    {
+      "description": "bad JSON arguments",
+      "env_size": [1920, 1080],
+      "raw_output": [{"type": "function_call", "name": "goto", "arguments": "{url:"}],
+      "error_fragment": "not valid JSON"
+    },
+    {
+      "description": "unknown item type",
+      "env_size": [1920, 1080],
+      "raw_output": [{"type": "hologram"}],
+      "error_fragment": "unknown output item type"
+    },
+    {
+      "description": "invalid action arguments",
+      "env_size": [1920, 1080],
+      "raw_output": [{"type": "function_call", "name": "tab", "arguments": "{\"operation\": \"switch\"}"}],
+      "error_fragment": "switching tabs needs an index"
+    }
+  ],
+  "render_cases": [
+    {
+      "env_size": [1920, 1080],
+      "action": {"name": "click", "x": 100, "y": 200, "button": "middle"},
+      "expected_rendered": {"type": "computer_call", "action": {"type": "click", "x": 100, "y": 200, "button": "wheel"}}
+    },
+    {
+      "env_size": [1920, 1080],
+      "action": {"name": "click", "x": 5, "y": 6, "count": 2},
+      "expected_rendered": {"type": "computer_call", "action": {"type": "double_click", "x": 5, "y": 6}}
+    },
+    {
+      "env_size": [1920, 1080],
+      "action": {"name": "scroll", "x": 500, "y": 400, "delta_y": 3},
+      "expected_rendered": {
+        "type": "computer_call",
+        "action": {"type": "scroll", "x": 500, "y": 400, "scroll_x": 0, "scroll_y": 300}
+      }
+    },
+    {
+      "env_size": [1920, 1080],
+      "action": {"name": "key", "keys": ["ctrl", "escape"]},
+      "expected_rendered": {"type": "computer_call", "action": {"type": "keypress", "keys": ["CTRL", "ESC"]}}
+    },
+    {
+      "env_size": [1920, 1080],
+      "action": {"name": "goto", "url": "https://crm.example.com"},
+      "expected_rendered": {
+        "type": "function_call",
+        "name": "goto",
+        "arguments": "{\"url\": \"https://crm.example.com\"}"
+      }
+    }
+  ],
+  "render_error_cases": [
+    {
+      "env_size": [1920, 1080],
+      "action": {"name": "click", "x": 1, "y": 1, "modifiers": ["shift"]},
+      "error_fragment": "modifier"
+    }
+  ]
+}
