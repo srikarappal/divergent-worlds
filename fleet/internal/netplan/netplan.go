@@ -2,7 +2,7 @@
 //
 // Every clone keeps the guest address it had when the snapshot was taken, so
 // each runs in its own namespace with a tap of the same name. A veth pair
-// reaches the host, and NAT gives every clone a unique address outside its
+// reaches the host; NAT gives every clone a unique address outside its
 // namespace, following Firecracker's network for clones layout.
 package netplan
 

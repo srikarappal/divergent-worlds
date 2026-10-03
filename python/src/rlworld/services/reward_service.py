@@ -1,9 +1,9 @@
 """Reward service: the finish pipeline (DESIGN.md section 6.9).
 
 Order matters: freeze input and extract state through fleetd, optionally keep a
-final snapshot for audits, verify and judge, record the episode, and only then
+final snapshot for audits, verify and judge, record the episode and only then
 close the lease so the env is torn down. A failure anywhere becomes a recorded
-env error, which is excluded from training, and the lease is still closed.
+env error, which is excluded from training; the lease is still closed.
 """
 
 import random

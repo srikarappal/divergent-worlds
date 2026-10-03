@@ -146,7 +146,7 @@ func (controller *Controller) tenantQuota(tenant string) int {
 	return controller.config.DefaultTenantQuota
 }
 
-// TryAdmit counts the env in if every limit allows it, and returns the first limit that does not.
+// TryAdmit counts the env in if every limit allows it; otherwise it returns the first limit that does not.
 func (controller *Controller) TryAdmit(request Request) error {
 	controller.mu.Lock()
 	defer controller.mu.Unlock()

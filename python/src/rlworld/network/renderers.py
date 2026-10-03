@@ -1,6 +1,6 @@
 """Render a network plan into files and commands the node agent applies inside the env namespace.
 
-DNS is dnsmasq, egress is an nftables forward chain that drops by default, and
+DNS is dnsmasq, egress is an nftables forward chain that drops by default and
 faults are a netem qdisc on the guest interface. Commands are argv lists so
 nothing ever passes through a shell.
 """

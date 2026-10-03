@@ -269,7 +269,7 @@ func (agent *Agent) Extract(ctx context.Context, envID string, apps []string) (j
 	return agent.guest.Extract(ctx, envID, apps)
 }
 
-// Destroy removes the VM, its network and its overlay, and frees the clone slot.
+// Destroy removes the VM, its network and its overlay, then frees the clone slot.
 func (agent *Agent) Destroy(ctx context.Context, envID string) error {
 	target, err := agent.lookup(envID)
 	if err != nil {

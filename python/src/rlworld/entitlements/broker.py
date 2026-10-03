@@ -1,8 +1,8 @@
 """Identity and entitlements broker (DESIGN.md section 6.5).
 
 One broker leases everything an episode must hold: license seats, synthetic
-identities with freshly minted sessions, and short lived scoped secrets.
-Acquisition is all or nothing, leases carry a TTL renewed by heartbeats, and a
+identities with freshly minted sessions and short lived scoped secrets.
+Acquisition is all or nothing, leases carry a TTL renewed by heartbeats and a
 reaper releases leases whose env died. Host scoped licenses such as Windows
 Server Datacenter are held once per host while any env on it is leased.
 """

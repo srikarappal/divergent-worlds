@@ -74,7 +74,7 @@ def parse_rubric(rubric_text: str) -> Rubric:
 
 
 class RubricLibrary:
-    """Loads rubrics by the relative path a task names, and never outside its root directory."""
+    """Loads rubrics by the relative path a task names, never outside its root directory."""
 
     def __init__(self, root_directory: Path) -> None:
         self.root_directory = root_directory.resolve()

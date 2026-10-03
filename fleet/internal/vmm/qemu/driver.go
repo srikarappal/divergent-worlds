@@ -38,7 +38,7 @@ type instance struct {
 }
 
 // Driver restores clones by VM templating: guest RAM is a file mapped private, so clones share
-// untouched pages, and only device state is loaded through the x-ignore-shared migration capability.
+// untouched pages; only device state is loaded through the x-ignore-shared migration capability.
 type Driver struct {
 	mu      sync.Mutex
 	config  Config

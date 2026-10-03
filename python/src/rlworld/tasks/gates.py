@@ -2,7 +2,7 @@
 
 A task ships only when its verifiers fail the untouched start state, pass the
 scripted oracle, give identical results across oracle reruns, accept every
-alternative valid solution, reject every near miss, and a strong agent solves
+alternative valid solution, reject every near miss and a strong agent solves
 it at least once in k tries. A failing gate sends the task to human review.
 """
 

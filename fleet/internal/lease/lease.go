@@ -1,7 +1,7 @@
 // Package lease tracks env leases (DESIGN.md section 6.7).
 //
 // A lease carries a TTL that heartbeats extend. The reaper releases leases
-// whose holder stopped heartbeating, and release hooks destroy the VM and hand
+// whose holder stopped heartbeating; release hooks destroy the VM and hand
 // seats and identities back, so nothing leaks when a rollout worker dies.
 // Every lease is tagged with run, tenant and cost center for billing.
 package lease

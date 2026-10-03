@@ -3,7 +3,7 @@
 Every failed episode gets one label. Cheap rules settle env errors, parse
 errors and give ups; an LLM labels the rest from the failed checks and the
 last steps, with the agent's own text fenced off as untrusted. Labels roll up
-per template, policy version and category, and categories that point at
+per template, policy version and category; categories that point at
 platform bugs open tickets in the verifier, adapter, env or task queue.
 """
 

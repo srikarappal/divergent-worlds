@@ -2,7 +2,7 @@
 
 Distractors add irrelevant records without touching anything a task depends
 on. Corrupted inputs damage rows of the invoice export the way real exports
-get damaged, and the log says exactly what changed so task generators can
+get damaged and the log says exactly what changed so task generators can
 build ground truth around it.
 """
 
