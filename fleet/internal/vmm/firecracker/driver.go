@@ -70,6 +70,11 @@ func (driver *Driver) SocketPath(vmID string) string {
 	return filepath.Join(driver.JailRoot(vmID), "run", "firecracker.socket")
 }
 
+// VsockPath is the host side socket of the VM's vsock device, which the snapshot names v.sock inside the jail.
+func (driver *Driver) VsockPath(vmID string) string {
+	return filepath.Join(driver.JailRoot(vmID), "v.sock")
+}
+
 // JailerArgs builds the jailer command line; snapshot paths are inside the jail root.
 func (driver *Driver) JailerArgs(spec vmm.RestoreSpec) []string {
 	argv := []string{

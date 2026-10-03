@@ -8,6 +8,7 @@ package nodeagent
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,14 +30,18 @@ var (
 	ErrNoCloneSlots = errors.New("no free clone network slots on this host")
 )
 
-// GuestChannel reaches the guest agent (vsock on Linux, the in session helper on Windows).
+// GuestChannel reaches the guest agent (vsock on Linux, the in session helper on Windows); the VM must be running.
 type GuestChannel interface {
+	Prepare(ctx context.Context, vmID string, now time.Time, entropy []byte) error
 	Act(ctx context.Context, vmID string, action json.RawMessage) error
 	ScreenHash(ctx context.Context, vmID string) (string, error)
-	Observe(ctx context.Context, vmID string) (json.RawMessage, error)
+	Observe(ctx context.Context, vmID string, kinds []string) (json.RawMessage, error)
 	Inject(ctx context.Context, vmID string, payload json.RawMessage) error
 	Extract(ctx context.Context, vmID string, apps []string) (json.RawMessage, error)
 }
+
+// entropyBytes is how much fresh randomness each restored clone's kernel RNG gets.
+const entropyBytes = 64
 
 // CommandRunner runs one argv on the host; tests record instead.
 type CommandRunner interface {
@@ -61,6 +66,12 @@ type StartRequest struct {
 	MemoryMiB    int
 	VCPUs        int
 	Resume       bool
+	// WorldTime is the world's fixed clock; zero means the host clock.
+	WorldTime time.Time
+	// GuestElapsed is how long the guest has already run, for forks of a running env.
+	GuestElapsed time.Duration
+	// ObservationKinds are what the task observes: screenshot, accessibility_tree, dom, terminal, file_diff.
+	ObservationKinds []string
 }
 
 // EnvInfo describes a running env.
@@ -80,10 +91,13 @@ type StepResult struct {
 }
 
 type env struct {
-	request     StartRequest
-	network     netplan.CloneNetwork
-	overlayPath string
-	state       vmm.State
+	request      StartRequest
+	network      netplan.CloneNetwork
+	overlayPath  string
+	state        vmm.State
+	elapsed      time.Duration
+	resumedAt    time.Time
+	needsEntropy bool
 }
 
 // Agent manages every env on one host.
@@ -186,7 +200,8 @@ func (agent *Agent) Start(ctx context.Context, request StartRequest) (EnvInfo, e
 		return EnvInfo{}, fmt.Errorf("restore env %s: %w", request.EnvID, err)
 	}
 	agent.mu.Lock()
-	agent.envs[request.EnvID] = &env{request: request, network: network, overlayPath: overlayPath, state: restored.State}
+	agent.envs[request.EnvID] = &env{request: request, network: network, overlayPath: overlayPath, state: restored.State,
+		elapsed: request.GuestElapsed, needsEntropy: true}
 	agent.mu.Unlock()
 	return EnvInfo{EnvID: request.EnvID, State: restored.State, Namespace: network.Namespace,
 		CloneAddress: network.CloneAddress.String()}, nil
@@ -209,12 +224,64 @@ func (agent *Agent) lookup(envID string) (*env, error) {
 	return found, nil
 }
 
+// setState also keeps the guest's running time, which is all the time its world clock advances by.
 func (agent *Agent) setState(envID string, state vmm.State) {
 	agent.mu.Lock()
 	defer agent.mu.Unlock()
-	if found, ok := agent.envs[envID]; ok {
-		found.state = state
+	found, ok := agent.envs[envID]
+	if !ok {
+		return
 	}
+	now := agent.clock.Now()
+	if found.state == vmm.Running && state != vmm.Running && !found.resumedAt.IsZero() {
+		found.elapsed += now.Sub(found.resumedAt)
+		found.resumedAt = time.Time{}
+	}
+	if found.state != vmm.Running && state == vmm.Running {
+		found.resumedAt = now
+	}
+	found.state = state
+}
+
+// guestClock is what the guest's clock should read: the world's time plus its running time, or the host clock.
+func (agent *Agent) guestClock(found *env) time.Time {
+	if found.request.WorldTime.IsZero() {
+		return agent.clock.Now()
+	}
+	running := found.elapsed
+	if !found.resumedAt.IsZero() {
+		running += agent.clock.Now().Sub(found.resumedAt)
+	}
+	return found.request.WorldTime.Add(running)
+}
+
+// wake resumes the VM and prepares the guest: the clock every time, fresh entropy once after a restore.
+func (agent *Agent) wake(ctx context.Context, envID string) error {
+	if err := agent.Resume(ctx, envID); err != nil {
+		return err
+	}
+	found, err := agent.lookup(envID)
+	if err != nil {
+		return err
+	}
+	agent.mu.Lock()
+	now := agent.guestClock(found)
+	needsEntropy := found.needsEntropy
+	agent.mu.Unlock()
+	var entropy []byte
+	if needsEntropy {
+		entropy = make([]byte, entropyBytes)
+		if _, err := rand.Read(entropy); err != nil {
+			return err
+		}
+	}
+	if err := agent.guest.Prepare(ctx, envID, now, entropy); err != nil {
+		return fmt.Errorf("prepare guest of %s: %w", envID, err)
+	}
+	agent.mu.Lock()
+	found.needsEntropy = false
+	agent.mu.Unlock()
+	return nil
 }
 
 // Pause stops an env's vCPUs.
@@ -241,12 +308,13 @@ func (agent *Agent) Resume(ctx context.Context, envID string) error {
 	return nil
 }
 
-// Inject hands minted sessions, license tokens and secrets to the guest after restore.
+// Inject hands world state, task setup, sessions, license tokens and secrets to the guest, waking it briefly.
 func (agent *Agent) Inject(ctx context.Context, envID string, payload json.RawMessage) error {
-	if _, err := agent.lookup(envID); err != nil {
-		return err
+	if err := agent.wake(ctx, envID); err != nil {
+		return errors.Join(err, agent.Pause(ctx, envID))
 	}
-	return agent.guest.Inject(ctx, envID, payload)
+	injectErr := agent.guest.Inject(ctx, envID, payload)
+	return errors.Join(injectErr, agent.Pause(ctx, envID))
 }
 
 // Checkpoint pauses an env and writes a full snapshot of it.
@@ -261,12 +329,13 @@ func (agent *Agent) Checkpoint(ctx context.Context, envID, statePath, memoryPath
 	return snapshot, err
 }
 
-// Extract reads normalized app state for verifiers; the env must already be frozen by the caller.
+// Extract reads normalized app state for verifiers; input is already frozen, so the VM wakes only to answer.
 func (agent *Agent) Extract(ctx context.Context, envID string, apps []string) (json.RawMessage, error) {
-	if _, err := agent.lookup(envID); err != nil {
-		return nil, err
+	if err := agent.wake(ctx, envID); err != nil {
+		return nil, errors.Join(err, agent.Pause(ctx, envID))
 	}
-	return agent.guest.Extract(ctx, envID, apps)
+	state, extractErr := agent.guest.Extract(ctx, envID, apps)
+	return state, errors.Join(extractErr, agent.Pause(ctx, envID))
 }
 
 // Destroy removes the VM, its network and its overlay, then frees the clone slot.
@@ -308,6 +377,7 @@ func (agent *Agent) Fork(ctx context.Context, envID string, count int, checkpoin
 		forkRequest.StatePath, forkRequest.MemoryPath = checkpoint.StatePath, checkpoint.MemoryPath
 		forkRequest.BaseDiskPath = checkpointDisk
 		forkRequest.Resume = false
+		forkRequest.GuestElapsed = agent.elapsedOf(source)
 		info, err := agent.Start(ctx, forkRequest)
 		if err != nil {
 			for _, started := range forks {
@@ -325,6 +395,12 @@ func (agent *Agent) Fork(ctx context.Context, envID string, count int, checkpoin
 	return forks, nil
 }
 
+func (agent *Agent) elapsedOf(found *env) time.Duration {
+	agent.mu.Lock()
+	defer agent.mu.Unlock()
+	return found.elapsed
+}
+
 // Step runs one turn: resume, act, wait for the screen to settle, observe, pause.
 func (agent *Agent) Step(ctx context.Context, envID string, action json.RawMessage) (StepResult, error) {
 	return agent.turn(ctx, envID, action)
@@ -340,8 +416,8 @@ func (agent *Agent) turn(ctx context.Context, envID string, action json.RawMessa
 		return StepResult{}, err
 	}
 	started := agent.clock.Now()
-	if err := agent.Resume(ctx, envID); err != nil {
-		return StepResult{}, err
+	if err := agent.wake(ctx, envID); err != nil {
+		return StepResult{}, errors.Join(err, agent.Pause(ctx, envID))
 	}
 	result, stepErr := agent.actAndObserve(ctx, envID, action)
 	pauseErr := agent.Pause(ctx, envID)
@@ -359,7 +435,11 @@ func (agent *Agent) actAndObserve(ctx context.Context, envID string, action json
 	if err != nil {
 		return StepResult{}, err
 	}
-	observation, err := agent.guest.Observe(ctx, envID)
+	found, err := agent.lookup(envID)
+	if err != nil {
+		return StepResult{}, err
+	}
+	observation, err := agent.guest.Observe(ctx, envID, found.request.ObservationKinds)
 	if err != nil {
 		return StepResult{}, fmt.Errorf("observe %s: %w", envID, err)
 	}

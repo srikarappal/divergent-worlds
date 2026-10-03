@@ -32,13 +32,21 @@ func (runner *recordingCommands) Run(_ context.Context, argv []string) error {
 	return nil
 }
 
+// preparation is one clone hygiene call the guest received.
+type preparation struct {
+	now     time.Time
+	entropy int
+}
+
 // scriptedGuest returns screen hashes from a script, one per poll, then repeats the last one.
 type scriptedGuest struct {
-	hashes   []string
-	polls    int
-	actions  []string
-	injected []string
-	failAct  bool
+	hashes        []string
+	polls         int
+	actions       []string
+	injected      []string
+	failAct       bool
+	prepared      []preparation
+	observedKinds []string
 }
 
 func (guest *scriptedGuest) Act(_ context.Context, _ string, action json.RawMessage) error {
@@ -55,7 +63,13 @@ func (guest *scriptedGuest) ScreenHash(context.Context, string) (string, error) 
 	return hash, nil
 }
 
-func (guest *scriptedGuest) Observe(context.Context, string) (json.RawMessage, error) {
+func (guest *scriptedGuest) Prepare(_ context.Context, _ string, now time.Time, entropy []byte) error {
+	guest.prepared = append(guest.prepared, preparation{now: now, entropy: len(entropy)})
+	return nil
+}
+
+func (guest *scriptedGuest) Observe(_ context.Context, _ string, kinds []string) (json.RawMessage, error) {
+	guest.observedKinds = kinds
 	return json.RawMessage(`{"step_index": 1}`), nil
 }
 
@@ -253,5 +267,68 @@ func TestQEMUEnvsGetQcow2Overlays(t *testing.T) {
 	argv := strings.Join(OverlayCommand("qemu_templated", "/images/win.qcow2", "/overlays/win_1.disk"), " ")
 	if argv != "qemu-img create -f qcow2 -F qcow2 -b /images/win.qcow2 /overlays/win_1.disk" {
 		t.Fatalf("overlay command %q", argv)
+	}
+}
+
+func TestEveryWakeSetsTheWorldClockAndRestoresGetFreshEntropyOnce(t *testing.T) {
+	guest := &scriptedGuest{hashes: []string{"a"}}
+	agent, driver, _, fakeClock := newTestAgent(guest)
+	worldTime := time.Date(2026, 3, 14, 9, 0, 0, 0, time.UTC)
+	request := startRequest("env_1")
+	request.WorldTime = worldTime
+	request.ObservationKinds = []string{"screenshot", "accessibility_tree"}
+	if _, err := agent.Start(context.Background(), request); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	fakeClock.Advance(time.Hour)
+	if err := agent.Inject(context.Background(), "env_1", json.RawMessage(`{"files": {}}`)); err != nil {
+		t.Fatalf("inject: %v", err)
+	}
+	if last := driver.Operations[len(driver.Operations)-1]; last != "pause env_1" {
+		t.Fatalf("inject must leave the env paused, last operation %q", last)
+	}
+	first, err := agent.Step(context.Background(), "env_1", json.RawMessage(`{"name": "wait"}`))
+	if err != nil {
+		t.Fatalf("step: %v", err)
+	}
+	fakeClock.Advance(time.Hour)
+	if _, err := agent.Step(context.Background(), "env_1", json.RawMessage(`{"name": "wait"}`)); err != nil {
+		t.Fatalf("second step: %v", err)
+	}
+	if len(guest.prepared) != 3 || guest.prepared[0].entropy != entropyBytes || guest.prepared[1].entropy != 0 {
+		t.Fatalf("preparations: %+v", guest.prepared)
+	}
+	if !guest.prepared[0].now.Equal(worldTime) || !guest.prepared[1].now.Equal(worldTime) {
+		t.Fatalf("the world clock moved while the env was paused: %+v", guest.prepared)
+	}
+	if want := worldTime.Add(first.EnvDuration); !guest.prepared[2].now.Equal(want) {
+		t.Fatalf("third wake at %v, want %v after one turn of running time", guest.prepared[2].now, want)
+	}
+	if !slices.Equal(guest.observedKinds, request.ObservationKinds) {
+		t.Fatalf("observed kinds %v", guest.observedKinds)
+	}
+}
+
+func TestForksKeepTheirSourcesRunningTimeAndHostClocksFollowTheHost(t *testing.T) {
+	guest := &scriptedGuest{hashes: []string{"a"}}
+	agent, _, _, fakeClock := newTestAgent(guest)
+	request := startRequest("env_1")
+	request.WorldTime = time.Date(2026, 3, 14, 9, 0, 0, 0, time.UTC)
+	agent.Start(context.Background(), request)
+	turn, _ := agent.Step(context.Background(), "env_1", json.RawMessage(`{"name": "wait"}`))
+	forks, err := agent.Fork(context.Background(), "env_1", 1, "/checkpoints")
+	if err != nil {
+		t.Fatalf("fork: %v", err)
+	}
+	agent.Step(context.Background(), forks[0].EnvID, json.RawMessage(`{"name": "wait"}`))
+	forkWake := guest.prepared[len(guest.prepared)-1]
+	if !forkWake.now.Equal(request.WorldTime.Add(turn.EnvDuration)) || forkWake.entropy != entropyBytes {
+		t.Fatalf("fork wake %+v after a %v turn", forkWake, turn.EnvDuration)
+	}
+	agent.Start(context.Background(), startRequest("env_host"))
+	agent.Step(context.Background(), "env_host", json.RawMessage(`{"name": "wait"}`))
+	hostWake := guest.prepared[len(guest.prepared)-1]
+	if hostWake.now.Before(fakeClock.Now().Add(-time.Minute)) {
+		t.Fatalf("an env without a world clock follows the host clock: %v", hostWake.now)
 	}
 }
