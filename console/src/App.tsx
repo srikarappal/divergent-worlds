@@ -16,6 +16,7 @@ import type { ConsoleApi, TokenSource } from "./api/client";
 import type { AuthConfig, Principal } from "./api/types";
 import { failureProblems, ProblemList } from "./components/common";
 import { AdminPage } from "./pages/AdminPage";
+import { AlertsPage } from "./pages/AlertsPage";
 import { QueuesPage } from "./pages/QueuesPage";
 import type { NavigateTo } from "./pages/ReviewPages";
 import { EpisodeLiveView } from "./components/EpisodeLiveView";
@@ -128,6 +129,7 @@ export function ConsoleRoutes(props: ConsoleRoutesProps): ReactElement {
           <NavLink to="/configure">Configure</NavLink>
           <NavLink to="/catalogs">Catalogs</NavLink>
           <NavLink to="/runs" end>Runs</NavLink>
+          <NavLink to="/alerts">Alerts</NavLink>
           {hasAnyRole(principal, QUEUE_ROLES) ? <NavLink to="/queues">Queues</NavLink> : null}
           {hasAnyRole(principal, ADMIN_ROLES) ? <NavLink to="/admin">Admin</NavLink> : null}
         </nav>
@@ -144,6 +146,7 @@ export function ConsoleRoutes(props: ConsoleRoutesProps): ReactElement {
           <Route path="/launch/:digest" element={<LaunchRoute api={props.api} />} />
           <Route path="/experiments/:experimentId" element={<ExperimentRoute api={props.api} />} />
           <Route path="/runs" element={<RunsPage api={props.api} />} />
+          <Route path="/alerts" element={<AlertsPage api={props.api} />} />
           <Route path="/runs/:runId" element={<RunRoute api={props.api} />} />
           <Route path="/runs/:runId/live" element={<LiveWallRoute api={props.api} />} />
           <Route path="/runs/:runId/episodes/:episodeId" element={<EpisodeRoute api={props.api} />} />
