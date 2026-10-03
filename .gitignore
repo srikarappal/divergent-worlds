@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# Go
+fleet/bin/
+
+# Node
+node_modules/
+console/dist/
+
+# OS and editors
+.DS_Store
+.idea/
+.vscode/
