@@ -1,5 +1,7 @@
 """Endpoint registry: every model endpoint a run may call, with its pinned models and limits (DESIGN.md 6.8)."""
 
+import threading
+from operator import attrgetter
 from pathlib import Path
 from typing import Literal
 
@@ -37,13 +39,28 @@ class EndpointConfig(BaseModel):
         return self
 
 
+class DuplicateEndpointError(ValueError):
+    """An endpoint name is already registered."""
+
+
 class EndpointRegistry:
     def __init__(self, endpoints: list[EndpointConfig]) -> None:
         self.endpoints_by_name: dict[str, EndpointConfig] = {}
+        self.lock = threading.Lock()
         for endpoint in endpoints:
+            self.register(endpoint)
+
+    def register(self, endpoint: EndpointConfig) -> EndpointConfig:
+        """Adds a BYO endpoint; a registered name never changes meaning under running runs."""
+        with self.lock:
             if endpoint.name in self.endpoints_by_name:
-                raise ValueError(f"endpoint {endpoint.name} is registered twice")
+                raise DuplicateEndpointError(f"endpoint {endpoint.name} is registered twice")
             self.endpoints_by_name[endpoint.name] = endpoint
+        return endpoint
+
+    def endpoints(self) -> list[EndpointConfig]:
+        with self.lock:
+            return sorted(self.endpoints_by_name.values(), key=attrgetter("name"))
 
     def resolve(self, endpoint_reference: str) -> EndpointConfig:
         """A run spec may name an endpoint or give its base URL."""

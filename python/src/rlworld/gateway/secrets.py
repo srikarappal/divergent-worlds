@@ -14,7 +14,15 @@ class SecretStore(Protocol):
     def get(self, secret_name: str) -> str: ...
 
 
+class SecretVault(SecretStore, Protocol):
+    """Where the endpoint registry writes keys; nothing ever reads them back out to a user."""
+
+    def put(self, secret_name: str, secret_value: str) -> None: ...
+
+
 class StaticSecretStore:
+    """In memory store, also a vault for development and tests."""
+
     def __init__(self, secrets: Mapping[str, str]) -> None:
         self.secrets = dict(secrets)
 
@@ -22,6 +30,9 @@ class StaticSecretStore:
         if secret_name not in self.secrets:
             raise MissingSecretError(f"secret {secret_name} is not set")
         return self.secrets[secret_name]
+
+    def put(self, secret_name: str, secret_value: str) -> None:
+        self.secrets[secret_name] = secret_value
 
 
 class EnvironmentSecretStore:

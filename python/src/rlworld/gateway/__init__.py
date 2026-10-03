@@ -2,7 +2,7 @@
 
 from rlworld.gateway.adapters import GatewayEndpointProbe, GatewayJudgeClient
 from rlworld.gateway.cache import FileResponseCache, InMemoryResponseCache, ResponseCache
-from rlworld.gateway.config import EndpointConfig, EndpointRegistry, load_endpoint_registry
+from rlworld.gateway.config import DuplicateEndpointError, EndpointConfig, EndpointRegistry, load_endpoint_registry
 from rlworld.gateway.errors import (
     CacheMissError,
     CircuitOpenError,
@@ -19,7 +19,7 @@ from rlworld.gateway.gateway import EndpointHeadroom, ModelGateway
 from rlworld.gateway.messages import ChatRequest, ChatResponse, TokenTrace, Usage
 from rlworld.gateway.metering import CallRecord, UsageMeter, UsageSummary
 from rlworld.gateway.openai_compatible import OpenAICompatibleTransport, PassthroughImageResolver
-from rlworld.gateway.secrets import EnvironmentSecretStore, SecretStore, StaticSecretStore
+from rlworld.gateway.secrets import EnvironmentSecretStore, SecretStore, SecretVault, StaticSecretStore
 
 __all__ = [
     "CacheMissError",
@@ -28,6 +28,7 @@ __all__ = [
     "ChatResponse",
     "CircuitOpenError",
     "DataPolicyViolationError",
+    "DuplicateEndpointError",
     "EndpointConfig",
     "EndpointHeadroom",
     "EndpointNotFoundError",
@@ -46,6 +47,7 @@ __all__ = [
     "RateLimitTimeoutError",
     "ResponseCache",
     "SecretStore",
+    "SecretVault",
     "StaticSecretStore",
     "TokenIdsUnavailableError",
     "TokenTrace",
