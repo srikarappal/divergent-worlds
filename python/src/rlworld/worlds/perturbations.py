@@ -41,7 +41,7 @@ class PerturbationLog:
 def corrupt_amount(amount_text: str, random_generator: random.Random) -> str:
     """Formatting damage a real export suffers: thousands separators, comma decimals, stray currency."""
     amount = float(amount_text)
-    damaged_forms = (f"{amount:,.2f}", f"{amount:.2f}".replace(".", ","), f"$ {amount:.2f} ", f"{amount:.1f}0 ")
+    damaged_forms = (f"{amount:,.2f}", f"{amount:.2f}".replace(".", ","), f"$ {amount:.2f} ", f"{amount:.2f}0 ")
     return random_generator.choice(damaged_forms)
 
 

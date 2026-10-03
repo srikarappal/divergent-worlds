@@ -1,8 +1,10 @@
 import csv
 import io
+import random
 
 from rlworld.rewards.checks import parse_number
 from rlworld.worlds import apply_perturbations, events_due, generate_mid_market_company
+from rlworld.worlds.perturbations import corrupt_amount
 
 SIZE = {"employees": 8, "customers": 6, "emails_per_person": 2, "invoices_per_customer": 3}
 
@@ -39,6 +41,12 @@ def test_corruptions_damage_formatting_but_keep_the_value_recoverable():
     untouched_ids = {row["invoice_id"] for row in invoice_rows(world)} - {item.record_id for item in log.corruptions}
     original_rows = {row["invoice_id"]: row for row in invoice_rows(world)}
     assert all(rows_by_id[invoice_id] == original_rows[invoice_id] for invoice_id in untouched_ids)
+
+
+def test_every_damaged_form_keeps_the_cents():
+    forms = {corrupt_amount("1234.56", random.Random(seed)) for seed in range(64)}
+    assert len(forms) == 4
+    assert all(recover_amount(form) == 1234.56 for form in forms)
 
 
 def test_perturbations_are_deterministic_per_seed():
