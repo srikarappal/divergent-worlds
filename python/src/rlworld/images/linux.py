@@ -4,7 +4,8 @@ The Dockerfile starts from the spec's base image by digest and installs from
 dated snapshot mirrors only; downloads are checked against the artifact lock
 and the guest agent's dependencies against their hashes. The image boots
 systemd with the clone address behind NAT, Xvfb, openbox and a session bus
-whose accessibility bus the root guest agent may read. The agent listens on
+whose accessibility bus the root guest agent may read; x11vnc serves the screen
+for operator takeover on a root only Unix socket. The agent listens on
 vsock and nothing else touches the clock, which the agent sets to world time.
 BuildKit exports the filesystem as a tarball that mke2fs (e2fsprogs 1.47.1 or
 newer) packs into ext4 without root or loop mounts; the kernel is fetched and
@@ -29,6 +30,7 @@ from rlworld.images.config import (
     LinuxBuildConfig,
     locale_parts,
 )
+from rlworld.guest.server import DEFAULT_VNC_SOCKET
 from rlworld.images.recipes import DOWNLOAD_PLACEHOLDER, LinuxApp, linux_app
 from rlworld.network.plan import ENV_SUBNET, GATEWAY_ADDRESS, GUEST_ADDRESS
 from rlworld.specs.digest import spec_digest
@@ -36,8 +38,8 @@ from rlworld.specs.models import DisplaySpec, ImageSpec
 
 BOOT_ARGS = "console=ttyS0 reboot=k panic=1 pci=off"
 BASE_PACKAGES = ("systemd", "systemd-sysv", "dbus", "iproute2", "xvfb", "x11-xserver-utils", "openbox",
-                 "at-spi2-core", "python3", "python3-venv", "python3-gi", "python3-pyatspi", "xdotool", "locales",
-                 "ca-certificates", "curl", "unzip", "xz-utils")
+                 "at-spi2-core", "python3", "python3-venv", "python3-gi", "python3-pyatspi", "xdotool", "x11vnc",
+                 "locales", "ca-certificates", "curl", "unzip", "xz-utils")
 CA_PACKAGES = ("libnss3-tools",)
 DOWNLOAD_DIRECTORY = "/tmp/rlworld/downloads"
 INPUT_DIRECTORY = "/tmp/rlworld/inputs"
@@ -49,9 +51,11 @@ GUEST_REQUIREMENTS = "guest-requirements.txt"
 CHROMIUM_POLICY_DIRECTORIES = {"chrome": "etc/opt/chrome_for_testing/policies/managed",
                                "edge": "etc/opt/edge/policies/managed"}
 ENABLED_UNITS = ("rlworld-network.service", "rlworld-xvfb.service", "rlworld-desktop.service",
-                 "rlworld-guest-agent.service")
+                 "rlworld-guest-agent.service", "rlworld-vnc.service")
 SESSION_BUS_COMMAND = (f"/usr/bin/dbus-daemon --session --address=unix:path={RUNTIME_DIRECTORY}/bus"
                        " --nofork --nopidfile")
+VNC_COMMAND = f"/usr/bin/x11vnc -display :0 -unixsockonly {DEFAULT_VNC_SOCKET} -forever -shared -nopw -noxdamage -quiet"
+WAIT_FOR_DISPLAY = "while [ ! -S /tmp/.X11-unix/X0 ]; do sleep 0.1; done"
 DEV_TOKEN_FILE = "/run/rlworld/agent.token"
 DEV_AGENT_FLAGS = ("--transport", "tcp", "--token-file", DEV_TOKEN_FILE, "--container")
 DEV_DOCKERFILE_SUFFIX = ("COPY dev/ /\n"
@@ -232,6 +236,8 @@ def dev_init_script(image: ImageSpec, config: LinuxBuildConfig, launchers: Mappi
             "unset RLWORLD_AGENT_TOKEN\n"
             "set -a\n. /etc/rlworld/desktop.env\nset +a\n"
             f"{xvfb_command(image.display)} &\n"
+            f"{WAIT_FOR_DISPLAY}\n"
+            f"{VNC_COMMAND} &\n"
             f"install -d -m 0700 -o {config.user} -g {config.user} {RUNTIME_DIRECTORY}\n"
             f"runuser -u {config.user} -- {SESSION_BUS_COMMAND} &\n"
             f"runuser -u {config.user} -- sh -c 'cd \"$HOME\" && exec /usr/local/bin/rlworld-desktop' &\n"
@@ -258,6 +264,12 @@ def unit_files(config: LinuxBuildConfig, display: DisplaySpec, agent_exec_start:
             "After=rlworld-xvfb.service rlworld-session-bus.service\n\n"
             f"[Service]\nUser={config.user}\nWorkingDirectory=~\nEnvironmentFile=/etc/rlworld/desktop.env\n"
             "ExecStart=/usr/local/bin/rlworld-desktop\nRestart=always\n\n[Install]\nWantedBy=multi-user.target\n"),
+        "etc/systemd/system/rlworld-vnc.service": (
+            "[Unit]\nDescription=rlworld screen for operator takeover\nRequires=rlworld-xvfb.service\n"
+            "After=rlworld-xvfb.service\n\n"
+            "[Service]\nRuntimeDirectory=rlworld\nRuntimeDirectoryMode=0700\nRuntimeDirectoryPreserve=yes\n"
+            f"ExecStartPre=/bin/sh -c '{WAIT_FOR_DISPLAY}'\nExecStart={VNC_COMMAND}\nRestart=always\n\n"
+            "[Install]\nWantedBy=multi-user.target\n"),
         "etc/systemd/system/rlworld-guest-agent.service": (
             "[Unit]\nDescription=rlworld guest agent on vsock\nAfter=rlworld-xvfb.service\n\n"
             f"[Service]\nEnvironment=DISPLAY=:0\nExecStart={agent_exec_start}\nRestart=always\n\n"

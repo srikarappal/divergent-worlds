@@ -6,6 +6,7 @@ clock and RNG alone.
 """
 
 import pwd
+import threading
 from pathlib import Path
 
 from rlworld.actions.accessibility import Bounds
@@ -13,7 +14,7 @@ from rlworld.guest.agent import GuestAgent
 from rlworld.guest.atspi import AtspiAccessibility
 from rlworld.guest.cdp import CdpBrowser
 from rlworld.guest.options import parse_arguments
-from rlworld.guest.server import TokenServer, VsockServer
+from rlworld.guest.server import TokenServer, VncRelayServer, VsockServer
 from rlworld.guest.system import DisplayCommandRunner, SharedKernelHygiene, SystemHygiene, UserShell, X11Screen
 
 
@@ -37,8 +38,11 @@ def main() -> None:
         owner=(account.pw_uid, account.pw_gid),
     )
     if arguments.transport == "tcp":
-        TokenServer(agent, arguments.token_file.read_text().strip(), arguments.port).serve_forever()
+        TokenServer(agent, arguments.token_file.read_text().strip(), arguments.port,
+                    vnc_socket=arguments.vnc_socket).serve_forever()
     else:
+        vnc_relay = VncRelayServer(arguments.vnc_socket, arguments.vnc_port)
+        threading.Thread(target=vnc_relay.serve_forever, daemon=True).start()
         VsockServer(agent, arguments.port).serve_forever()
 
 

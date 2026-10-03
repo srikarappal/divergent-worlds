@@ -4,7 +4,7 @@ import argparse
 from collections.abc import Sequence
 from pathlib import Path
 
-from rlworld.guest.server import DEFAULT_PORT
+from rlworld.guest.server import DEFAULT_PORT, DEFAULT_VNC_PORT, DEFAULT_VNC_SOCKET
 
 
 def launcher(text: str) -> tuple[str, str]:
@@ -35,6 +35,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--transport", choices=("vsock", "tcp"), default="vsock")
     parser.add_argument("--token-file", type=Path, help="root only file holding the token tcp clients must present")
     parser.add_argument("--container", action="store_true", help="share the host kernel: leave the clock and RNG alone")
+    parser.add_argument("--vnc-socket", type=Path, default=DEFAULT_VNC_SOCKET, help="the VNC server's Unix socket")
+    parser.add_argument("--vnc-port", type=int, default=DEFAULT_VNC_PORT, help="vsock port for operator takeover")
     return parser
 
 
