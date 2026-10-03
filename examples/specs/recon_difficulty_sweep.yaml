@@ -1,0 +1,56 @@
+spec_version: 1
+
+experiment:                                # what the web console saves; each sweep point becomes a run
+  name: recon_difficulty_sweep
+  hypothesis: distractors hurt reconciliation more than corrupted inputs
+  sweep:
+    task.difficulty.distractors: [0, 5, 10]
+    task.difficulty.corrupted_inputs: [0, 2]
+  budget_usd: 2500
+  tracker: wandb
+
+image:                                     # built rarely, snapshotted at "app ready"
+  id: win2025_office_v4
+  os: windows
+  base: windows_server_2025_desktop@sha256:4f9c2a7d1e0b8c6a5f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c2b1a
+  pool: {vmm: qemu_templated, machine: pc-q35-9.0, cpu_model: fleet_baseline}
+  apps: {excel: office_ltsc_2024, edge: stable_pinned}
+  display: {width: 1280, height: 800, dpi: 96, theme: light, locale: en_US}
+  hardening: [no_auto_update, no_defender_scan, no_first_run, no_protected_view, no_animations]
+  ready_probe: {window: Excel, screen_stable_ms: 500}
+
+world:                                     # one seed, many tasks
+  generator: worlds.mid_market_company
+  seed: 1842
+  size: {employees: 40, customers: 300, emails_per_person: 120}
+  materialize: [mail, calendar, crm, files, chat, browser_profile]
+  identity: {idp: keycloak, users: world.employees, sessions: mint_after_restore}
+  network:
+    dns_overrides: {crm.example.com: crm_clone, mail.example.com: mail_sidecar}
+    trusted_ca: world_ca
+    internet: replay_only
+  clock: {fixed: "2026-03-14T09:00:00"}
+
+task:                                      # injected after restore, versioned with its verifiers
+  generator: tasks.finance.reconcile_invoices
+  difficulty: {apps: 3, oracle_steps: 30, distractors: 5, corrupted_inputs: 1, ambiguity: low, dependency_depth: 2}
+  allowed_actions: [computer, control]
+  observation: [screenshot, accessibility_tree]
+  user_simulator: {persona: finance_manager, hidden_intent: from_generator}
+  verifiers:
+    exact: [verifiers.excel.reconciliation_values_match]
+    semantic: [verifiers.mail.summary_lists_discrepant_invoices]
+  side_effects: {allowed_changes: [files/reconciliation.xlsx, mail.sent]}
+  judge_rubric: rubrics/summary_email_quality.md
+  oracle: oracles.finance.reconcile_invoices
+  network_faults: {latency_ms: [0, 200], packet_loss: [0.0, 0.01]}
+  split: train
+
+run:                                       # who plays, who grades, how much
+  type: rl                                 # rl, eval or data
+  trainer: {template: verl_grpo_7b_vlm, launcher: kubernetes}
+  policy: {endpoint: "http://vllm.internal/v1", model: my_policy, token_ids: true, logprobs: true}
+  judge: {endpoint: frontier, model: frontier_judge_2026_06}
+  group_size: 8
+  max_concurrent_envs: 4000
+  priority: training
