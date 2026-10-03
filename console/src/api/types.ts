@@ -366,6 +366,37 @@ export interface Alert {
   deliveries: Record<string, string>;
 }
 
+export interface TakeoverSession {
+  run_id: string;
+  episode_id: string;
+  session_id: string;
+  relay_path: string;
+  expires_at: string;
+}
+
+export interface InputEvent {
+  at_ms: number;
+  kind: "pointer" | "key";
+  x: number;
+  y: number;
+  buttons: number;
+  keysym: number;
+  down: boolean;
+}
+
+export interface Demonstration {
+  run_id: string;
+  episode_id: string;
+  recorded_by: string;
+  started_at: string;
+  ended_at: string;
+  complete: boolean;
+  lost_reason: string;
+  pause_error: string;
+  events: InputEvent[];
+  actions: Record<string, unknown>[];
+}
+
 export type AlertFilter = {
   run_id?: string;
   experiment_id?: string;

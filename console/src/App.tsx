@@ -20,6 +20,7 @@ import { AlertsPage } from "./pages/AlertsPage";
 import { QueuesPage } from "./pages/QueuesPage";
 import type { NavigateTo } from "./pages/ReviewPages";
 import { EpisodeLiveView } from "./components/EpisodeLiveView";
+import { type ScreenAccess, TakeoverControls } from "./components/TakeoverView";
 import { CatalogsPage } from "./pages/CatalogsPage";
 import { LaunchPage } from "./pages/LaunchPage";
 import { RunDashboardPage } from "./pages/RunDashboardPage";
@@ -73,11 +74,20 @@ function LiveWallRoute(props: RouteProps): ReactElement {
   return <LiveWallPage key={runId} api={props.api} runId={runId} />;
 }
 
-function EpisodeRoute(props: RouteProps): ReactElement {
+interface EpisodeRouteProps extends RouteProps {
+  principal: Principal | null;
+  screens?: ScreenAccess;
+}
+
+// Operators get the takeover panel when the browser can reach fleetd's relay.
+function EpisodeRoute(props: EpisodeRouteProps): ReactElement {
   const params = useParams();
   const runId = params.runId ?? "";
   const episodeId = params.episodeId ?? "";
-  return <EpisodeLiveView key={`${runId}/${episodeId}`} api={props.api} runId={runId} episodeId={episodeId} />;
+  const controls = props.screens !== undefined && hasAnyRole(props.principal, ADMIN_ROLES)
+    ? new TakeoverControls(props.api, runId, props.screens) : undefined;
+  return <EpisodeLiveView key={`${runId}/${episodeId}`} api={props.api} runId={runId} episodeId={episodeId}
+                          controls={controls} />;
 }
 
 function EpisodeReviewRoute(props: RouteProps): ReactElement {
@@ -116,6 +126,7 @@ function CompareRoute(props: RouteProps): ReactElement {
 
 interface ConsoleRoutesProps extends RouteProps {
   principal?: Principal | null;
+  screens?: ScreenAccess;
   onSignOut?(): void;
 }
 
@@ -149,7 +160,8 @@ export function ConsoleRoutes(props: ConsoleRoutesProps): ReactElement {
           <Route path="/alerts" element={<AlertsPage api={props.api} />} />
           <Route path="/runs/:runId" element={<RunRoute api={props.api} />} />
           <Route path="/runs/:runId/live" element={<LiveWallRoute api={props.api} />} />
-          <Route path="/runs/:runId/episodes/:episodeId" element={<EpisodeRoute api={props.api} />} />
+          <Route path="/runs/:runId/episodes/:episodeId"
+                 element={<EpisodeRoute api={props.api} principal={principal} screens={props.screens} />} />
           <Route path="/runs/:runId/episodes/:episodeId/review" element={<EpisodeReviewRoute api={props.api} />} />
           <Route path="/runs/:runId/cohort" element={<CohortRoute api={props.api} />} />
           <Route path="/runs/:runId/review" element={<RunReviewRoute api={props.api} />} />
@@ -194,6 +206,7 @@ interface ShellProps extends RouteProps {
   signIn: SignInDriver;
   navigate: NavigateTo;
   grantRefreshMilliseconds?: number;
+  screens?: ScreenAccess;
 }
 
 interface ShellState {
@@ -272,19 +285,25 @@ export class ConsoleShell extends Component<ShellProps, ShellState> {
         </div>
       );
     }
-    return <ConsoleRoutes api={this.props.api} principal={this.state.principal}
+    return <ConsoleRoutes api={this.props.api} principal={this.state.principal} screens={this.props.screens}
                           onSignOut={this.state.config.enabled ? this.handleSignOut : undefined} />;
   }
 }
 
-function ShellRoute(props: { api: ConsoleApi; signIn: SignInDriver }): ReactElement {
-  return <ConsoleShell api={props.api} signIn={props.signIn} navigate={useNavigate()} />;
+interface AppProps {
+  api: ConsoleApi;
+  signIn: SignInDriver;
+  screens?: ScreenAccess;
 }
 
-export function App(props: { api: ConsoleApi; signIn: SignInDriver }): ReactElement {
+function ShellRoute(props: AppProps): ReactElement {
+  return <ConsoleShell api={props.api} signIn={props.signIn} navigate={useNavigate()} screens={props.screens} />;
+}
+
+export function App(props: AppProps): ReactElement {
   return (
     <BrowserRouter>
-      <ShellRoute api={props.api} signIn={props.signIn} />
+      <ShellRoute api={props.api} signIn={props.signIn} screens={props.screens} />
     </BrowserRouter>
   );
 }

@@ -12,6 +12,7 @@ import type {
   CohortEpisode,
   Comparison,
   DataPolicy,
+  Demonstration,
   DryRun,
   EndpointRegistration,
   EndpointView,
@@ -35,6 +36,7 @@ import type {
   ReviewUpdate,
   RunEvent,
   RunRecord,
+  TakeoverSession,
 } from "./types";
 
 export interface FetchTransport {
@@ -81,6 +83,8 @@ export interface ConsoleApi {
   getStepPrompt(runId: string, episodeId: string, stepIndex: number): Promise<Record<string, unknown>[]>;
   reviewEpisode(runId: string, episodeId: string, action: ReviewAction, note?: string,
                 label?: Record<string, unknown>): Promise<ReviewItem>;
+  startTakeover(runId: string, episodeId: string): Promise<TakeoverSession>;
+  endTakeover(runId: string, episodeId: string): Promise<Demonstration>;
   analyzeFailures(runId: string): Promise<FailureAnalysis>;
   getFailures(runId: string): Promise<FailureAnalysis>;
   runReport(runId: string): Promise<EvalReport>;
@@ -355,6 +359,14 @@ export class ApiClient implements ConsoleApi {
 
   sweepRetention(): Promise<RetentionReport> {
     return this.call("sweep_retention");
+  }
+
+  startTakeover(runId: string, episodeId: string): Promise<TakeoverSession> {
+    return this.call("start_takeover", { path: { run_id: runId, episode_id: episodeId } });
+  }
+
+  endTakeover(runId: string, episodeId: string): Promise<Demonstration> {
+    return this.call("end_takeover", { path: { run_id: runId, episode_id: episodeId } });
   }
 
   async listAlerts(filter: AlertFilter = {}): Promise<Alert[]> {

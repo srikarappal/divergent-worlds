@@ -71,6 +71,9 @@ function sampleArguments(operationName: string): unknown[] {
       return [PATH_VALUES.run_id, PATH_VALUES.episode_id];
     case "review_episode":
       return [PATH_VALUES.run_id, PATH_VALUES.episode_id, "flag"];
+    case "start_takeover":
+    case "end_takeover":
+      return [PATH_VALUES.run_id, PATH_VALUES.episode_id];
     case "compare_runs":
       return [[PATH_VALUES.run_id, "experiment_000001_run_001"]];
     case "list_review_items":

@@ -5,12 +5,14 @@ import { Component, type ReactElement } from "react";
 import type { ConsoleApi } from "../api/client";
 import type { CheckResult, EpisodeRecord, Provenance, RewardRecord, StateChange, StepRecord } from "../api/types";
 import { failureProblems, ProblemList } from "./common";
+import type { EpisodeControls } from "./TakeoverView";
 
 interface EpisodeLiveViewProps {
   api: ConsoleApi;
   runId: string;
   episodeId: string;
   pollMilliseconds?: number;
+  controls?: EpisodeControls;
 }
 
 interface EpisodeLiveViewState {
@@ -167,6 +169,7 @@ export class EpisodeLiveView extends Component<EpisodeLiveViewProps, EpisodeLive
         <p>{episode.instruction}</p>
         <p role="status">{episode.finished_at === null ? `playing, step ${steps.length}` : "finished"}</p>
         <ProblemList title="Episode" problems={this.state.problems} />
+        {this.props.controls?.render(episode) ?? null}
         {screenshot !== null
           ? <img className="frame" alt="latest frame" src={this.props.api.frameUrl(screenshot.sha256, "full")}
                  width={screenshot.width} height={screenshot.height} />

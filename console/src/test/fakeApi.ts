@@ -12,6 +12,7 @@ import type {
   CohortEpisode,
   Comparison,
   DataPolicy,
+  Demonstration,
   DryRun,
   EndpointRegistration,
   EndpointView,
@@ -35,6 +36,7 @@ import type {
   ReviewUpdate,
   RunEvent,
   RunRecord,
+  TakeoverSession,
 } from "../api/types";
 
 export function catalogEntry(kind: CatalogEntry["kind"], name: string,
@@ -431,6 +433,19 @@ export class FakeApi implements ConsoleApi {
   async sweepRetention(): Promise<RetentionReport> {
     this.record("sweepRetention");
     return { deleted_episodes: ["run_1/episode_old"], thumbnail_only_frames: 3, deleted_blobs: 2 };
+  }
+
+  async startTakeover(runId: string, episodeId: string): Promise<TakeoverSession> {
+    this.record("startTakeover", runId, episodeId);
+    return { run_id: runId, episode_id: episodeId, session_id: "session_1", relay_path: "/v1/takeover/session_1",
+             expires_at: "2026-10-03T12:02:00Z" };
+  }
+
+  async endTakeover(runId: string, episodeId: string): Promise<Demonstration> {
+    this.record("endTakeover", runId, episodeId);
+    return { run_id: runId, episode_id: episodeId, recorded_by: "developer", started_at: "2026-10-03T12:00:00Z",
+             ended_at: "2026-10-03T12:03:00Z", complete: true, lost_reason: "", pause_error: "", events: [],
+             actions: [{ name: "click", x: 40, y: 50 }, { name: "type", text: "1250" }] };
   }
 
   async listAlerts(filter?: AlertFilter): Promise<Alert[]> {
