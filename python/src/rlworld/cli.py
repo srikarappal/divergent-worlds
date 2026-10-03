@@ -44,11 +44,15 @@ def preflight(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
 
 
 def dry_run(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
-    return {"episode_id": client.dry_run(arguments.digest)}
+    return client.dry_run(arguments.digest)
 
 
 def launch(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
     return client.launch(arguments.digest, budget_usd=arguments.budget_usd)
+
+
+def get_experiment(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.get_experiment(arguments.experiment_id)
 
 
 def approve_experiment(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
@@ -77,6 +81,25 @@ def run_events(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
     return None
 
 
+def list_episodes(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return [episode.model_dump(mode="json", exclude={"steps"})
+            for episode in client.list_episodes(arguments.run_id, status=arguments.status)]
+
+
+def get_episode(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.get_episode(arguments.run_id, arguments.episode_id, first_step=arguments.first_step)
+
+
+def live_wall(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.live_wall(arguments.run_id, limit=arguments.limit)
+
+
+def get_frame(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    frame = client.get_frame(arguments.frame_digest, size=arguments.size)
+    Path(arguments.output).write_bytes(frame)
+    return {"frame": arguments.frame_digest, "bytes": len(frame), "output": arguments.output}
+
+
 def list_catalog(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
     return client.list_catalog(arguments.kind)
 
@@ -101,9 +124,9 @@ def set_endpoint_key(client: ExperimentClient, arguments: argparse.Namespace) ->
 OperationHandler = Callable[[ExperimentClient, argparse.Namespace], Any]
 HANDLERS: dict[str, OperationHandler] = {
     handler.__name__: handler
-    for handler in (save_spec, get_spec, preflight, dry_run, launch, approve_experiment, list_runs, get_run,
-                    get_run_spec, control_run, run_events, list_catalog, list_endpoints, register_endpoint,
-                    test_endpoint, set_endpoint_key)
+    for handler in (save_spec, get_spec, preflight, dry_run, launch, get_experiment, approve_experiment, list_runs,
+                    get_run, get_run_spec, control_run, run_events, list_episodes, get_episode, live_wall, get_frame,
+                    list_catalog, list_endpoints, register_endpoint, test_endpoint, set_endpoint_key)
 }
 
 
@@ -129,8 +152,9 @@ def build_parser() -> argparse.ArgumentParser:
     launch_parser.add_argument("digest")
     launch_parser.add_argument("--budget-usd", type=float, default=None)
 
-    experiments = groups.add_parser("experiments", help="approve experiments")
+    experiments = groups.add_parser("experiments", help="read and approve experiments")
     experiment_commands = experiments.add_subparsers(dest="command", required=True)
+    add_operation(experiment_commands, "get", get_experiment, "read an experiment").add_argument("experiment_id")
     add_operation(experiment_commands, "approve", approve_experiment, "approve a launch").add_argument("experiment_id")
 
     runs = groups.add_parser("runs", help="list, read, control and follow runs")
@@ -146,6 +170,26 @@ def build_parser() -> argparse.ArgumentParser:
     events_parser.add_argument("run_id")
     events_parser.add_argument("--follow", action="store_true")
     events_parser.add_argument("--after", type=int, default=0)
+    live_parser = add_operation(run_commands, "live", live_wall, "show the latest frame of running episodes")
+    live_parser.add_argument("run_id")
+    live_parser.add_argument("--limit", type=int, default=24)
+
+    episodes = groups.add_parser("episodes", help="list and read episodes")
+    episode_commands = episodes.add_subparsers(dest="command", required=True)
+    episodes_list = add_operation(episode_commands, "list", list_episodes, "list a run's episodes")
+    episodes_list.add_argument("run_id")
+    episodes_list.add_argument("--status", choices=("running", "finished"), default=None)
+    episode_get = add_operation(episode_commands, "get", get_episode, "read an episode with its steps")
+    episode_get.add_argument("run_id")
+    episode_get.add_argument("episode_id")
+    episode_get.add_argument("--first-step", type=int, default=0)
+
+    frames = groups.add_parser("frames", help="download frames")
+    frame_commands = frames.add_subparsers(dest="command", required=True)
+    frame_get = add_operation(frame_commands, "get", get_frame, "save a frame to a file")
+    frame_get.add_argument("frame_digest")
+    frame_get.add_argument("--size", choices=("full", "thumbnail"), default="full")
+    frame_get.add_argument("--output", required=True)
 
     catalogs = groups.add_parser("catalogs", help="browse catalogs")
     catalog_commands = catalogs.add_subparsers(dest="command", required=True)

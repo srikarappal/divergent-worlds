@@ -6,7 +6,7 @@ import httpx
 
 from rlworld.preflight import PreflightContext, SeatPool
 from rlworld.services.experimentd_http import create_app
-from rlworld.services.experiments import ExperimentService
+from rlworld.services.experiments import DryRun, ExperimentService
 from rlworld.services.trainer_launch import TrainerLauncher
 from rlworld.specs import expand_sweep, parse_spec_document, spec_digest
 from rlworld.tasks import GateReport
@@ -37,7 +37,7 @@ class IdleExecutor:
         return None
 
     def dry_run(self, document):
-        return "dry_run_000001_s000_a0"
+        return DryRun(run_id="dry_run_000001", episode_id="dry_run_000001_s000_a0")
 
 
 def eval_payload(example_payload):

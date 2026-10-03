@@ -19,6 +19,7 @@ from rlworld.specs import dump_spec_document, load_spec_document, parse_spec_doc
 OPERATIONS_PATH = Path(__file__).resolve().parents[3] / "schemas" / "api_operations.json"
 OPERATIONS = json.loads(OPERATIONS_PATH.read_text())["operations"]
 PLACEHOLDER_PATTERN = re.compile(r"\{(\w+)\}")
+SAMPLE_VALUES = {"status": "running", "size": "thumbnail"}
 ENDPOINT_YAML = """name: byo_judge
 base_url: https://judge.customer.example/v1
 allowed_models: [judge_v1]
@@ -49,7 +50,7 @@ def test_the_sdk_covers_the_console_flow(experiment_service, spec_yaml):
     assert client.get_spec(digest) == spec_yaml
     report = client.preflight(digest)
     assert report.is_valid and len(report.points) == 6
-    assert client.dry_run(digest) == "dry_run_000001_s000_a0"
+    assert client.dry_run(digest).model_dump() == {"run_id": "dry_run_000001", "episode_id": "dry_run_000001_s000_a0"}
     experiment = client.launch(digest, budget_usd=100.0)
     assert experiment.budget_usd == 100.0 and len(experiment.run_ids) == 6
     runs = client.list_runs(experiment_id=experiment.experiment_id)
@@ -99,6 +100,10 @@ def test_the_cli_drives_the_same_operations(experiment_service, spec_yaml, tmp_p
     assert "invalid_spec" in capsys.readouterr().err
 
 
+def sample_value(placeholder: re.Match) -> str:
+    return SAMPLE_VALUES.get(placeholder.group(1), "1")
+
+
 @pytest.mark.parametrize("operation", OPERATIONS, ids=itemgetter("name"))
 def test_every_console_operation_has_a_route_an_sdk_method_and_a_cli_command(operation, experiment_service):
     app = create_app(experiment_service)
@@ -106,7 +111,7 @@ def test_every_console_operation_has_a_route_an_sdk_method_and_a_cli_command(ope
     assert (operation["method"], PLACEHOLDER_PATTERN.sub(r"<\1>", operation["path"])) in routes
     assert callable(getattr(ExperimentClient, operation["name"], None))
     assert operation["sdk"].startswith(f"client.{operation['name']}(")
-    words = shlex.split(PLACEHOLDER_PATTERN.sub("1", operation["cli"]))
+    words = shlex.split(PLACEHOLDER_PATTERN.sub(sample_value, operation["cli"]))
     command_words = words[1:words.index("<")] if "<" in words else words[1:]
     assert words[0] == "rlworld"
     assert build_parser().parse_args(command_words).operation == operation["name"]

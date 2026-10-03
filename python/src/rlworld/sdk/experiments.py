@@ -11,7 +11,9 @@ import httpx
 
 from rlworld.preflight.preflight import ExperimentPreflight
 from rlworld.services.catalogs import CatalogEntry
-from rlworld.services.experiments import ExperimentRecord, RunEvent, RunRecord
+from rlworld.services.experiments import DryRun, ExperimentRecord, RunEvent, RunRecord
+from rlworld.services.trajectory_views import LiveTile
+from rlworld.trajectories.records import EpisodeRecord
 
 EVENT_DATA_PREFIX = "data: "
 
@@ -58,12 +60,15 @@ class ExperimentClient:
     def preflight(self, digest: str) -> ExperimentPreflight:
         return ExperimentPreflight.model_validate(self.request("POST", f"/v1/specs/{digest}/preflight"))
 
-    def dry_run(self, digest: str) -> str:
-        return self.request("POST", f"/v1/specs/{digest}/dry_run")["episode_id"]
+    def dry_run(self, digest: str) -> DryRun:
+        return DryRun.model_validate(self.request("POST", f"/v1/specs/{digest}/dry_run"))
 
     def launch(self, digest: str, budget_usd: float | None = None) -> ExperimentRecord:
         body = {} if budget_usd is None else {"budget_usd": budget_usd}
         return ExperimentRecord.model_validate(self.request("POST", f"/v1/specs/{digest}/launch", body))
+
+    def get_experiment(self, experiment_id: str) -> ExperimentRecord:
+        return ExperimentRecord.model_validate(self.request("GET", f"/v1/experiments/{experiment_id}"))
 
     def approve_experiment(self, experiment_id: str) -> ExperimentRecord:
         return ExperimentRecord.model_validate(self.request("POST", f"/v1/experiments/{experiment_id}/approve"))
@@ -91,6 +96,24 @@ class ExperimentClient:
             for line in response.iter_lines():
                 if line.startswith(EVENT_DATA_PREFIX):
                     yield RunEvent.model_validate_json(line.removeprefix(EVENT_DATA_PREFIX))
+
+    def list_episodes(self, run_id: str, status: str | None = None) -> list[EpisodeRecord]:
+        params = {"status": status} if status else None
+        payload = self.request("GET", f"/v1/runs/{run_id}/episodes", params=params)
+        return [EpisodeRecord.model_validate(episode) for episode in payload["episodes"]]
+
+    def get_episode(self, run_id: str, episode_id: str, first_step: int = 0) -> EpisodeRecord:
+        payload = self.request("GET", f"/v1/runs/{run_id}/episodes/{episode_id}", params={"first_step": first_step})
+        return EpisodeRecord.model_validate(payload)
+
+    def live_wall(self, run_id: str, limit: int = 24) -> list[LiveTile]:
+        payload = self.request("GET", f"/v1/runs/{run_id}/live", params={"limit": limit})
+        return [LiveTile.model_validate(tile) for tile in payload["tiles"]]
+
+    def get_frame(self, frame_digest: str, size: str = "full") -> bytes:
+        response = self.http_client.get(f"{self.base_url}/v1/frames/{frame_digest}", params={"size": size})
+        raise_for_error(response)
+        return response.content
 
     def list_catalog(self, kind: str) -> list[CatalogEntry]:
         return [CatalogEntry.model_validate(entry) for entry in self.request("GET", f"/v1/catalogs/{kind}")["entries"]]
