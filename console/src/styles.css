@@ -435,3 +435,35 @@ td {
 .provenance-drill details {
   margin: 6px 0;
 }
+
+.signed-in {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+  color: #c9d1d9;
+}
+
+.sign-in {
+  max-width: 360px;
+  margin: 80px auto;
+  text-align: center;
+}
+
+.label-editor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.item-meta {
+  font-size: 12px;
+  color: #6b7580;
+}
+
+.admin section {
+  margin-bottom: 20px;
+}
