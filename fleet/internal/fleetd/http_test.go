@@ -24,15 +24,26 @@ import (
 )
 
 type stubGuest struct {
-	mu       sync.Mutex
-	injected []string
+	mu            sync.Mutex
+	injected      []string
+	preparedAt    []time.Time
+	observedKinds []string
 }
 
 func (guest *stubGuest) Act(context.Context, string, json.RawMessage) error { return nil }
 func (guest *stubGuest) ScreenHash(context.Context, string) (string, error) {
 	return "steady", nil
 }
-func (guest *stubGuest) Observe(_ context.Context, vmID string) (json.RawMessage, error) {
+func (guest *stubGuest) Prepare(_ context.Context, _ string, now time.Time, _ []byte) error {
+	guest.mu.Lock()
+	defer guest.mu.Unlock()
+	guest.preparedAt = append(guest.preparedAt, now)
+	return nil
+}
+func (guest *stubGuest) Observe(_ context.Context, vmID string, kinds []string) (json.RawMessage, error) {
+	guest.mu.Lock()
+	defer guest.mu.Unlock()
+	guest.observedKinds = kinds
 	return json.RawMessage(`{"env": "` + vmID + `"}`), nil
 }
 func (guest *stubGuest) Inject(_ context.Context, _ string, payload json.RawMessage) error {
@@ -304,5 +315,29 @@ func TestConsoleOperationsServedByFleetdAreRouted(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Fatal("the manifest names no fleetd operation")
+	}
+}
+
+func TestLeasesCarryTheWorldClockAndObservationKinds(t *testing.T) {
+	fleet := newTestFleet(t, 4, 64_000)
+	body := leaseBody(1)
+	body["world_time"] = "2026-03-14T09:00:00Z"
+	body["observation_kinds"] = []string{"screenshot", "terminal"}
+	status, payload := fleet.call(t, http.MethodPost, "/v1/leases", body)
+	if status != http.StatusCreated {
+		t.Fatalf("lease: %d %v", status, payload)
+	}
+	leaseID := leaseIDs(t, payload)[0]
+	if status, _ := fleet.call(t, http.MethodPost, "/v1/leases/"+leaseID+"/step",
+		map[string]any{"action": map[string]any{"name": "wait"}}); status != http.StatusOK {
+		t.Fatalf("step: %d", status)
+	}
+	fleet.guest.mu.Lock()
+	defer fleet.guest.mu.Unlock()
+	if !fleet.guest.preparedAt[0].Equal(time.Date(2026, 3, 14, 9, 0, 0, 0, time.UTC)) {
+		t.Fatalf("prepared at %v", fleet.guest.preparedAt)
+	}
+	if len(fleet.guest.observedKinds) != 2 || fleet.guest.observedKinds[1] != "terminal" {
+		t.Fatalf("observed kinds %v", fleet.guest.observedKinds)
 	}
 }

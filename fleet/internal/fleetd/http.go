@@ -27,6 +27,8 @@ type leaseGroupBody struct {
 	GroupSize          int                `json:"group_size"`
 	TTLSeconds         int                `json:"ttl_seconds"`
 	HostScopedLicenses []string           `json:"host_scoped_licenses"`
+	WorldTime          *time.Time         `json:"world_time"`
+	ObservationKinds   []string           `json:"observation_kinds"`
 }
 
 type stepBody struct {
@@ -151,13 +153,17 @@ func (api *httpAPI) leaseGroup(writer http.ResponseWriter, request *http.Request
 	if !decode(writer, request, &body) {
 		return
 	}
-	infos, err := api.service.LeaseGroup(request.Context(), GroupRequest{
+	group := GroupRequest{
 		RunID: body.RunID, Tenant: body.Tenant, CostCenter: body.CostCenter, Pool: body.Pool,
 		Priority: body.Priority, Endpoint: body.Endpoint, Snapshot: body.Snapshot,
 		PerVM: scheduler.Resources{CPUMillicores: body.CPUMillicores, MemoryMiB: body.MemoryMiB, GPUs: body.GPUs},
 		VCPUs: body.VCPUs, GroupSize: max(1, body.GroupSize), TTL: time.Duration(body.TTLSeconds) * time.Second,
-		HostScopedLicenses: body.HostScopedLicenses,
-	})
+		HostScopedLicenses: body.HostScopedLicenses, ObservationKinds: body.ObservationKinds,
+	}
+	if body.WorldTime != nil {
+		group.WorldTime = *body.WorldTime
+	}
+	infos, err := api.service.LeaseGroup(request.Context(), group)
 	if err != nil {
 		writeError(writer, err)
 		return

@@ -62,6 +62,10 @@ type GroupRequest struct {
 	GroupSize          int
 	TTL                time.Duration
 	HostScopedLicenses []string
+	// WorldTime is the world's fixed clock that every env of the group starts at; zero means the host clock.
+	WorldTime time.Time
+	// ObservationKinds are what the task observes.
+	ObservationKinds []string
 }
 
 // LeaseInfo is what a rollout worker gets back for each env.
@@ -209,7 +213,8 @@ func (service *Service) abandon(admitted []lease.Lease, unadmittedHostIDs []stri
 
 func startRequest(envID string, request GroupRequest, snapshot Snapshot) nodeagent.StartRequest {
 	return nodeagent.StartRequest{EnvID: envID, StatePath: snapshot.StatePath, MemoryPath: snapshot.MemoryPath,
-		BaseDiskPath: snapshot.BaseDiskPath, MemoryMiB: request.PerVM.MemoryMiB, VCPUs: request.VCPUs}
+		BaseDiskPath: snapshot.BaseDiskPath, MemoryMiB: request.PerVM.MemoryMiB, VCPUs: request.VCPUs,
+		WorldTime: request.WorldTime, ObservationKinds: request.ObservationKinds}
 }
 
 // Heartbeat keeps a lease alive.
