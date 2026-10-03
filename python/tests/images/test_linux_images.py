@@ -3,9 +3,10 @@ import json
 import pytest
 from support.image_fakes import DIGEST, LOCK, linux_config, linux_image, world_ca_pem
 
-from rlworld.images import BuildError, linux_build_plan
-from rlworld.images.linux import BASE_PACKAGES, BOOT_ARGS, ENABLED_UNITS, systemd_argument
+from rlworld.images import BuildError, dev_image_tag, linux_build_plan, linux_dev_build_plan
+from rlworld.images.linux import BASE_PACKAGES, BOOT_ARGS, DEV_TOKEN_FILE, ENABLED_UNITS, systemd_argument
 from rlworld.network.plan import GATEWAY_ADDRESS, GUEST_ADDRESS
+from rlworld.specs.digest import spec_digest
 
 
 def plan_for(image=None, config=None, trusted_cas=None):
@@ -188,3 +189,41 @@ def test_build_exports_a_tarball_into_ext4_and_fetches_the_kernel():
                                           "guest_kernel": "4" * 64}
     with pytest.raises(BuildError, match="artifact guest_kernel_7 is not in the lock"):
         plan_for(config=linux_config(kernel_artifact="guest_kernel_7"))
+
+
+def test_desktop_waits_for_the_display_and_the_session_bus():
+    desktop = text(plan_for(), "context/rootfs/usr/local/bin/rlworld-desktop")
+    assert "while [ ! -S /tmp/.X11-unix/X0 ] || [ ! -S /run/rlworld-desktop/bus ]; do sleep 0.1; done" in desktop
+
+
+def test_dev_target_tags_the_same_build_as_a_container_image():
+    vm_plan = plan_for()
+    dev_plan = linux_dev_build_plan(linux_image(), linux_config(), LOCK, {})
+    dockerfile = text(dev_plan, "context/Dockerfile")
+    assert dockerfile.startswith(text(vm_plan, "context/Dockerfile"))
+    assert dockerfile.endswith('COPY dev/ /\nRUN chmod 0755 /usr/local/bin/rlworld-dev-init\n'
+                               'ENTRYPOINT ["/usr/local/bin/rlworld-dev-init"]\n')
+    tag = dev_image_tag(linux_image())
+    assert tag == f"rlworld-dev/noble_browsers_v1:{spec_digest(linux_image())[7:19]}"
+    assert [command.argv for command in dev_plan.commands] == [
+        ("docker", "build", "--platform", "linux/amd64", "--tag", tag, "--iidfile", "image.id", "--file",
+         "context/Dockerfile", "context")]
+    assert dev_plan.downloads == {} and dev_plan.outputs == {"image_id": "image.id"}
+    assert dev_plan.manifest["image_tag"] == tag and dev_plan.manifest["agent_transport"] == "tcp"
+    assert "guest_kernel" not in dev_plan.manifest["artifacts"] and "boot_args" not in dev_plan.manifest
+    assert dev_plan.copies == vm_plan.copies
+
+
+def test_dev_init_hides_the_token_before_starting_anything():
+    init = text(linux_dev_build_plan(linux_image(), linux_config(), LOCK, {}),
+                "context/dev/usr/local/bin/rlworld-dev-init")
+    lines = init.splitlines()
+    token_line = lines.index(f'(umask 077 && printf %s "${{RLWORLD_AGENT_TOKEN:?}}" > {DEV_TOKEN_FILE})')
+    assert lines[token_line + 1] == "unset RLWORLD_AGENT_TOKEN"
+    xvfb_line = next(index for index, line in enumerate(lines) if line.startswith("/usr/bin/Xvfb :0"))
+    assert token_line < xvfb_line
+    assert "runuser -u agent -- /usr/bin/dbus-daemon --session --address=unix:path=/run/rlworld-desktop/bus" in init
+    agent = lines[-1]
+    assert agent.startswith("exec /opt/rlworld/bin/rlworld-guest-agent --user agent --screen 1280x800 ")
+    assert agent.endswith(f" --transport tcp --token-file {DEV_TOKEN_FILE} --container")
+    assert "'--launcher=Calc=libreoffice --calc --nologo --norestore'" in agent

@@ -1,11 +1,12 @@
 """Runs an image build and records what it produced (DESIGN.md sections 6.2 and 7).
 
-The builder picks the plan for the image's OS, writes its files, copies local
-inputs, fetches host side downloads checked against the artifact lock, runs
-the commands in order and stops at the first failure. manifest.json then
-records the image spec and its digest, every pinned artifact and input, the
-trusted CAs and the sha256 of every output, which is what the snapshot builder
-and later reproductions start from.
+The builder picks the plan for the image's OS and target, writes its files,
+copies local inputs, fetches host side downloads checked against the artifact
+lock, runs the commands in order and stops at the first failure. manifest.json
+then records the image spec and its digest, every pinned artifact and input,
+the trusted CAs and the sha256 of every output, which is what the snapshot
+builder and later reproductions start from. The vm target builds VM disks; the
+dev target builds Linux container images for the Docker dev backend.
 """
 
 import argparse
@@ -18,7 +19,7 @@ import sys
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 import httpx
 import yaml
@@ -34,7 +35,7 @@ from rlworld.images.config import (
     load_build_config,
     read_trusted_cas,
 )
-from rlworld.images.linux import linux_build_plan
+from rlworld.images.linux import linux_build_plan, linux_dev_build_plan
 from rlworld.images.windows import windows_build_plan
 from rlworld.specs.digest import spec_digest
 from rlworld.specs.document import format_validation_errors
@@ -42,6 +43,7 @@ from rlworld.specs.models import ImageSpec
 
 CHUNK_BYTES = 1 << 20
 MANIFEST_NAME = "manifest.json"
+BuildTarget = Literal["vm", "dev"]
 
 
 class CommandRunner(Protocol):
@@ -86,12 +88,15 @@ class HttpFetcher:
         partial.replace(destination)
 
 
-def build_plan(image: ImageSpec, config: BuildConfig, lock: ArtifactLock,
-               trusted_cas: Mapping[str, bytes]) -> BuildPlan:
+def build_plan(image: ImageSpec, config: BuildConfig, lock: ArtifactLock, trusted_cas: Mapping[str, bytes],
+               target: BuildTarget = "vm") -> BuildPlan:
+    if target == "dev" and image.os != "linux":
+        raise BuildError([f"dev containers run linux images only, not {image.os}"])
     if image.os == "linux":
         if config.linux is None:
             raise BuildError(["the build config has no linux section"])
-        return linux_build_plan(image, config.linux, lock, trusted_cas)
+        plan_for_target = linux_dev_build_plan if target == "dev" else linux_build_plan
+        return plan_for_target(image, config.linux, lock, trusted_cas)
     if image.os == "windows":
         if config.windows is None:
             raise BuildError(["the build config has no windows section"])
@@ -115,21 +120,22 @@ class ImageBuilder:
             return
         self.fetcher.fetch(artifact, destination)
 
-    def build(self, image: ImageSpec, config: BuildConfig, lock: ArtifactLock, work_directory: Path) -> dict[str, Any]:
+    def build(self, image: ImageSpec, config: BuildConfig, lock: ArtifactLock, work_directory: Path,
+              target: BuildTarget = "vm") -> dict[str, Any]:
         trusted_cas = read_trusted_cas(config.trusted_cas)
-        plan = build_plan(image, config, lock, trusted_cas)
+        plan = build_plan(image, config, lock, trusted_cas, target)
         for relative_path, content in plan.files.items():
-            target = work_directory / relative_path
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(content)
+            destination = work_directory / relative_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(content)
         for relative_path, source in plan.copies.items():
-            target = work_directory / relative_path
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(source, target)
+            destination = work_directory / relative_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
         for relative_path, artifact in plan.downloads.items():
-            target = work_directory / relative_path
-            target.parent.mkdir(parents=True, exist_ok=True)
-            self.fetch_once(artifact, target)
+            destination = work_directory / relative_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            self.fetch_once(artifact, destination)
         for command in plan.commands:
             self.runner.run(command.argv, work_directory, command.environment)
         missing = [path for path in plan.outputs.values() if not (work_directory / path).is_file()]
@@ -138,6 +144,7 @@ class ImageBuilder:
         manifest = {
             "image": image.model_dump(mode="json"),
             "image_digest": spec_digest(image),
+            "target": target,
             "built_at": self.clock().isoformat(),
             "inputs": {path: file_sha256(work_directory / path) for path in plan.copies},
             "trusted_cas": {name: hashlib.sha256(pem).hexdigest() for name, pem in trusted_cas.items()},
@@ -168,6 +175,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", type=Path, required=True, help="build config YAML")
     parser.add_argument("--lock", type=Path, required=True, help="artifact lock YAML")
     parser.add_argument("--work-dir", type=Path, required=True, help="where the build writes its files and outputs")
+    parser.add_argument("--target", choices=("vm", "dev"), default="vm",
+                        help="vm disks for the pools, or a container image for the Docker dev backend")
     return parser
 
 
@@ -178,7 +187,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = load_build_config(arguments.config)
         lock = load_artifact_lock(arguments.lock)
         arguments.work_dir.mkdir(parents=True, exist_ok=True)
-        manifest = ImageBuilder(SubprocessRunner(), HttpFetcher()).build(image, config, lock, arguments.work_dir)
+        manifest = ImageBuilder(SubprocessRunner(), HttpFetcher()).build(image, config, lock, arguments.work_dir,
+                                                                         arguments.target)
     except (BuildError, ValidationError, OSError, httpx.HTTPError) as error:
         print(f"image build failed: {error}", file=sys.stderr)
         return 1

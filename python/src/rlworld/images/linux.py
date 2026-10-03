@@ -8,13 +8,16 @@ whose accessibility bus the root guest agent may read. The agent listens on
 vsock and nothing else touches the clock, which the agent sets to world time.
 BuildKit exports the filesystem as a tarball that mke2fs (e2fsprogs 1.47.1 or
 newer) packs into ext4 without root or loop mounts; the kernel is fetched and
-checked on the build host.
+checked on the build host. The dev target tags the same build as a container
+image for the Docker dev backend (docs/TASKS.md build decision 4), whose init
+runs the same services and serves the agent over TCP behind a token.
 """
 
 import json
 import shlex
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from rlworld.images.config import (
@@ -28,6 +31,7 @@ from rlworld.images.config import (
 )
 from rlworld.images.recipes import DOWNLOAD_PLACEHOLDER, LinuxApp, linux_app
 from rlworld.network.plan import ENV_SUBNET, GATEWAY_ADDRESS, GUEST_ADDRESS
+from rlworld.specs.digest import spec_digest
 from rlworld.specs.models import DisplaySpec, ImageSpec
 
 BOOT_ARGS = "console=ttyS0 reboot=k panic=1 pci=off"
@@ -46,6 +50,13 @@ CHROMIUM_POLICY_DIRECTORIES = {"chrome": "etc/opt/chrome_for_testing/policies/ma
                                "edge": "etc/opt/edge/policies/managed"}
 ENABLED_UNITS = ("rlworld-network.service", "rlworld-xvfb.service", "rlworld-desktop.service",
                  "rlworld-guest-agent.service")
+SESSION_BUS_COMMAND = (f"/usr/bin/dbus-daemon --session --address=unix:path={RUNTIME_DIRECTORY}/bus"
+                       " --nofork --nopidfile")
+DEV_TOKEN_FILE = "/run/rlworld/agent.token"
+DEV_AGENT_FLAGS = ("--transport", "tcp", "--token-file", DEV_TOKEN_FILE, "--container")
+DEV_DOCKERFILE_SUFFIX = ("COPY dev/ /\n"
+                         "RUN chmod 0755 /usr/local/bin/rlworld-dev-init\n"
+                         'ENTRYPOINT ["/usr/local/bin/rlworld-dev-init"]\n')
 
 
 @dataclass(frozen=True)
@@ -186,9 +197,9 @@ def network_script() -> str:
 
 
 def desktop_script() -> str:
-    """Waits for the display, starts the accessibility bus so it publishes itself on X, then runs openbox."""
+    """Waits for the display and session bus, starts the accessibility bus so it publishes itself on X, then openbox."""
     return ("#!/bin/sh\nset -eu\n"
-            "while [ ! -S /tmp/.X11-unix/X0 ]; do sleep 0.1; done\n"
+            f"while [ ! -S /tmp/.X11-unix/X0 ] || [ ! -S {RUNTIME_DIRECTORY}/bus ]; do sleep 0.1; done\n"
             "xrdb -nocpp -merge /etc/rlworld/Xresources\n"
             "dbus-send --session --print-reply --dest=org.a11y.Bus /org/a11y/bus org.a11y.Bus.GetAddress > /dev/null\n"
             "exec openbox --startup /usr/local/bin/rlworld-autostart\n")
@@ -199,8 +210,35 @@ def autostart_script(probe_launch: str | None) -> str:
     return "#!/bin/sh\n" + (f"{probe_launch} &\n" if probe_launch else "exit 0\n")
 
 
+def xvfb_command(display: DisplaySpec) -> str:
+    return (f"/usr/bin/Xvfb :0 -screen 0 {display.width}x{display.height}x24 -dpi {display.dpi}"
+            " -nolisten tcp -ac -s 0")
+
+
+def guest_agent_argv(image: ImageSpec, config: LinuxBuildConfig, launchers: Mapping[str, str]) -> list[str]:
+    return [GUEST_AGENT, "--user", config.user, "--screen", f"{image.display.width}x{image.display.height}",
+            *(f"--launcher={window}={command}" for window, command in launchers.items())]
+
+
+def dev_init_script(image: ImageSpec, config: LinuxBuildConfig, launchers: Mapping[str, str]) -> str:
+    """The dev container's init. The token goes into a root only file and leaves the environment before anything
+    starts, so no process the policy can inspect holds it. Then it starts what the units start in a VM except the
+    network, which is Docker's; the agent serves TCP."""
+    agent = " ".join(shlex.quote(argument)
+                     for argument in [*guest_agent_argv(image, config, launchers), *DEV_AGENT_FLAGS])
+    return ("#!/bin/sh\nset -eu\n"
+            "install -d -m 0700 /run/rlworld\n"
+            f'(umask 077 && printf %s "${{RLWORLD_AGENT_TOKEN:?}}" > {DEV_TOKEN_FILE})\n'
+            "unset RLWORLD_AGENT_TOKEN\n"
+            "set -a\n. /etc/rlworld/desktop.env\nset +a\n"
+            f"{xvfb_command(image.display)} &\n"
+            f"install -d -m 0700 -o {config.user} -g {config.user} {RUNTIME_DIRECTORY}\n"
+            f"runuser -u {config.user} -- {SESSION_BUS_COMMAND} &\n"
+            f"runuser -u {config.user} -- sh -c 'cd \"$HOME\" && exec /usr/local/bin/rlworld-desktop' &\n"
+            f"exec {agent}\n")
+
+
 def unit_files(config: LinuxBuildConfig, display: DisplaySpec, agent_exec_start: str) -> dict[str, str]:
-    geometry = f"{display.width}x{display.height}"
     return {
         "etc/systemd/system/rlworld-network.service": (
             "[Unit]\nDescription=rlworld guest network\nDefaultDependencies=no\nBefore=network.target\n\n"
@@ -208,14 +246,12 @@ def unit_files(config: LinuxBuildConfig, display: DisplaySpec, agent_exec_start:
             "[Install]\nWantedBy=multi-user.target\n"),
         "etc/systemd/system/rlworld-xvfb.service": (
             "[Unit]\nDescription=rlworld display\n\n"
-            f"[Service]\nExecStart=/usr/bin/Xvfb :0 -screen 0 {geometry}x24 -dpi {display.dpi}"
-            " -nolisten tcp -ac -s 0\nRestart=always\n\n[Install]\nWantedBy=multi-user.target\n"),
+            f"[Service]\nExecStart={xvfb_command(display)}\nRestart=always\n\n[Install]\nWantedBy=multi-user.target\n"),
         "etc/systemd/system/rlworld-session-bus.service": (
             "[Unit]\nDescription=rlworld desktop session bus\n\n"
             f"[Service]\nUser={config.user}\nEnvironmentFile=/etc/rlworld/desktop.env\n"
             "RuntimeDirectory=rlworld-desktop\nRuntimeDirectoryMode=0700\n"
-            f"ExecStart=/usr/bin/dbus-daemon --session --address=unix:path={RUNTIME_DIRECTORY}/bus"
-            " --nofork --nopidfile\nRestart=always\n"),
+            f"ExecStart={SESSION_BUS_COMMAND}\nRestart=always\n"),
         "etc/systemd/system/rlworld-desktop.service": (
             "[Unit]\nDescription=rlworld desktop session\n"
             "Requires=rlworld-xvfb.service rlworld-session-bus.service\n"
@@ -233,8 +269,7 @@ def overlay_files(image: ImageSpec, config: LinuxBuildConfig, apps: Mapping[str,
                   hardening: Sequence[LinuxHardening], trusted_cas: Mapping[str, bytes]) -> dict[str, bytes]:
     """Files copied over the base image's root before anything is installed."""
     launchers = {recipe.window: recipe.launch for recipe in apps.values()}
-    agent_argv = [GUEST_AGENT, "--user", config.user, "--screen", f"{image.display.width}x{image.display.height}",
-                  *(f"--launcher={window}={command}" for window, command in launchers.items())]
+    agent_argv = guest_agent_argv(image, config, launchers)
     probe_window = image.ready_probe.window
     files = {
         "etc/apt/sources.list": "".join(f"{line}\n" for line in config.apt_sources),
@@ -331,8 +366,23 @@ def render_dockerfile(image: ImageSpec, config: LinuxBuildConfig, apps: Mapping[
     return "\n".join(steps) + "\n"
 
 
-def linux_build_plan(image: ImageSpec, config: LinuxBuildConfig, lock: ArtifactLock,
-                     trusted_cas: Mapping[str, bytes]) -> BuildPlan:
+@dataclass(frozen=True)
+class LinuxContext:
+    """The docker build context both targets share: Dockerfile, root overlay and the guest agent's inputs."""
+
+    files: dict[str, bytes]
+    copies: dict[str, Path]
+    downloads: dict[str, Artifact]
+    launchers: dict[str, str]
+
+    def manifest(self, image: ImageSpec, config: LinuxBuildConfig, artifacts: Mapping[str, Artifact]) -> dict[str, Any]:
+        return {"base_image": base_reference(image, config), "apt_sources": list(config.apt_sources),
+                "user": config.user, "launchers": self.launchers,
+                "artifacts": {name: artifact.sha256 for name, artifact in artifacts.items()}}
+
+
+def linux_context(image: ImageSpec, config: LinuxBuildConfig, lock: ArtifactLock,
+                  trusted_cas: Mapping[str, bytes]) -> LinuxContext:
     locale_parts(image.display.locale)
     hardening = linux_hardening(image.hardening)
     chromium_flags = tuple(flag for step in hardening for flag in step.chromium_flags)
@@ -342,16 +392,22 @@ def linux_build_plan(image: ImageSpec, config: LinuxBuildConfig, lock: ArtifactL
     if probe_window is not None and probe_window not in launchers:
         raise BuildError([f"ready probe window {probe_window} is not opened by any app in the image"])
     downloads = {recipe.artifact: lock.require(recipe.artifact) for recipe in apps.values() if recipe.artifact}
-    kernel = lock.require(config.kernel_artifact)
-    artifacts = {**downloads, config.kernel_artifact: kernel}
-    ca_names = sorted(trusted_cas)
-    files = {"context/Dockerfile": render_dockerfile(image, config, apps, downloads, hardening, ca_names).encode()}
+    files = {"context/Dockerfile": render_dockerfile(image, config, apps, downloads, hardening,
+                                                     sorted(trusted_cas)).encode()}
     files.update({f"context/rootfs/{path}": content
                   for path, content in overlay_files(image, config, apps, hardening, trusted_cas).items()})
+    copies = {f"context/inputs/{config.guest_agent_wheel.name}": config.guest_agent_wheel,
+              f"context/inputs/{GUEST_REQUIREMENTS}": config.guest_agent_requirements}
+    return LinuxContext(files=files, copies=copies, downloads=downloads, launchers=launchers)
+
+
+def linux_build_plan(image: ImageSpec, config: LinuxBuildConfig, lock: ArtifactLock,
+                     trusted_cas: Mapping[str, bytes]) -> BuildPlan:
+    context = linux_context(image, config, lock, trusted_cas)
+    kernel = lock.require(config.kernel_artifact)
     return BuildPlan(
-        files=files,
-        copies={f"context/inputs/{config.guest_agent_wheel.name}": config.guest_agent_wheel,
-                f"context/inputs/{GUEST_REQUIREMENTS}": config.guest_agent_requirements},
+        files=context.files,
+        copies=context.copies,
         downloads={"vmlinux": kernel},
         commands=(
             BuildCommand(("docker", "build", "--platform", config.platform, "--output", "type=tar,dest=rootfs.tar",
@@ -361,7 +417,29 @@ def linux_build_plan(image: ImageSpec, config: LinuxBuildConfig, lock: ArtifactL
             BuildCommand(("rm", "-f", "rootfs.tar")),
         ),
         outputs={"rootfs": "rootfs.ext4", "kernel": "vmlinux"},
-        manifest={"base_image": base_reference(image, config), "apt_sources": list(config.apt_sources),
-                  "boot_args": BOOT_ARGS, "user": config.user, "launchers": launchers,
-                  "artifacts": {name: artifact.sha256 for name, artifact in artifacts.items()}},
+        manifest={**context.manifest(image, config, {**context.downloads, config.kernel_artifact: kernel}),
+                  "boot_args": BOOT_ARGS},
+    )
+
+
+def dev_image_tag(image: ImageSpec) -> str:
+    return f"rlworld-dev/{image.id}:{spec_digest(image).removeprefix('sha256:')[:12]}"
+
+
+def linux_dev_build_plan(image: ImageSpec, config: LinuxBuildConfig, lock: ArtifactLock,
+                         trusted_cas: Mapping[str, bytes]) -> BuildPlan:
+    """The same build tagged as a container image; its digest and tag are what dev leases name as the snapshot."""
+    context = linux_context(image, config, lock, trusted_cas)
+    tag = dev_image_tag(image)
+    files = {**context.files,
+             "context/Dockerfile": context.files["context/Dockerfile"] + DEV_DOCKERFILE_SUFFIX.encode(),
+             "context/dev/usr/local/bin/rlworld-dev-init": dev_init_script(image, config, context.launchers).encode()}
+    return BuildPlan(
+        files=files,
+        copies=context.copies,
+        downloads={},
+        commands=(BuildCommand(("docker", "build", "--platform", config.platform, "--tag", tag, "--iidfile",
+                                "image.id", "--file", "context/Dockerfile", "context")),),
+        outputs={"image_id": "image.id"},
+        manifest={**context.manifest(image, config, context.downloads), "image_tag": tag, "agent_transport": "tcp"},
     )

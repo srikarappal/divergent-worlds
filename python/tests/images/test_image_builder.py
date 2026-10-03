@@ -110,6 +110,19 @@ def test_builds_that_produce_nothing_fail(tmp_path):
                                                                         LOCK_WITH_REAL_KERNEL, tmp_path / "work")
 
 
+def test_dev_builds_record_the_container_image(tmp_path):
+    runner = RecordingRunner(creates={"docker": {"image.id": b"sha256:1234"}})
+    fetcher = RecordingFetcher(KERNEL)
+    manifest = ImageBuilder(runner, fetcher, clock=fixed_clock).build(linux_image(), linux_inputs(tmp_path), LOCK,
+                                                                     tmp_path / "work", target="dev")
+    assert manifest["target"] == "dev" and fetcher.fetched == []
+    assert manifest["outputs"]["image_id"]["sha256"] == hashlib.sha256(b"sha256:1234").hexdigest()
+    assert manifest["image_tag"].startswith("rlworld-dev/noble_browsers_v1:")
+    assert [command[0][:2] for command in runner.commands] == [("docker", "build")]
+    with pytest.raises(BuildError, match="dev containers run linux images only"):
+        build_plan(windows_image(), BuildConfig(), LOCK, {}, target="dev")
+
+
 def test_plans_need_their_os_section():
     with pytest.raises(BuildError, match="no linux section"):
         build_plan(linux_image(), BuildConfig(), LOCK, {})

@@ -20,10 +20,10 @@ from rlworld.images.config import (
     load_build_config,
     read_trusted_cas,
 )
-from rlworld.images.linux import LINUX_HARDENING, linux_build_plan
+from rlworld.images.linux import LINUX_HARDENING, dev_image_tag, linux_build_plan, linux_dev_build_plan
 from rlworld.images.windows import WINDOWS_HARDENING, windows_build_plan
 
 __all__ = ["LINUX_HARDENING", "WINDOWS_HARDENING", "Artifact", "ArtifactLock", "BuildCommand", "BuildConfig",
            "BuildError", "BuildPlan", "HttpFetcher", "ImageBuilder", "LinuxBuildConfig", "SubprocessRunner",
-           "WindowsBuildConfig", "build_plan", "linux_build_plan", "load_artifact_lock", "load_build_config",
-           "load_image_spec", "read_trusted_cas", "windows_build_plan"]
+           "WindowsBuildConfig", "build_plan", "dev_image_tag", "linux_build_plan", "linux_dev_build_plan",
+           "load_artifact_lock", "load_build_config", "load_image_spec", "read_trusted_cas", "windows_build_plan"]
