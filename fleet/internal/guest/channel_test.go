@@ -92,7 +92,8 @@ func startFakeVsock(t *testing.T, replies map[string]string) *fakeVsock {
 func newTestChannel(t *testing.T, fake *fakeVsock) (*Channel, string) {
 	t.Helper()
 	frameRoot := t.TempDir()
-	return NewChannel(fake.socketPath, 5005, NewFilesystemFrames(frameRoot), 2*time.Second), frameRoot
+	dialer := VsockDialer{SocketPath: fake.socketPath, Port: 5005}
+	return NewChannel(dialer, NewFilesystemFrames(frameRoot), 2*time.Second), frameRoot
 }
 
 func TestPrepareSendsTheWorldClockAndEntropy(t *testing.T) {
@@ -184,5 +185,77 @@ func TestFramesAreStoredOnce(t *testing.T) {
 	entries, _ := os.ReadDir(filepath.Join(root, "blobs", first[:2]))
 	if first != second || len(entries) != 1 {
 		t.Fatalf("digests %s %s, files %d", first, second, len(entries))
+	}
+}
+
+// fakeContainerAgent plays a development container's agent: TCP, then a token before any request.
+type fakeContainerAgent struct {
+	mu       sync.Mutex
+	listener net.Listener
+	token    string
+}
+
+func (fake *fakeContainerAgent) close() {
+	fake.listener.Close()
+}
+
+func (fake *fakeContainerAgent) setToken(token string) {
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	fake.token = token
+}
+
+func (fake *fakeContainerAgent) GuestEndpoint(vmID string) (string, string, error) {
+	if vmID != "env_1" {
+		return "", "", errors.New("no such container")
+	}
+	return fake.listener.Addr().String(), "s3cret", nil
+}
+
+func (fake *fakeContainerAgent) serve() {
+	for {
+		connection, err := fake.listener.Accept()
+		if err != nil {
+			return
+		}
+		fake.answer(connection)
+	}
+}
+
+func (fake *fakeContainerAgent) answer(connection net.Conn) {
+	defer connection.Close()
+	reader := bufio.NewReader(connection)
+	greeting, err := reader.ReadString('\n')
+	fake.mu.Lock()
+	expected := "AUTH " + fake.token + "\n"
+	fake.mu.Unlock()
+	if err != nil || greeting != expected {
+		return
+	}
+	connection.Write([]byte("OK\n"))
+	if _, err := reader.ReadBytes('\n'); err == nil {
+		connection.Write([]byte(`{"id": 1, "result": "hash"}` + "\n"))
+	}
+}
+
+func TestTokenDialerProvesItselfToContainerAgents(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeContainerAgent{listener: listener, token: "s3cret"}
+	t.Cleanup(fake.close)
+	go fake.serve()
+	channel := NewChannel(TokenDialer{Endpoints: fake}, NewFilesystemFrames(t.TempDir()), 2*time.Second)
+	if hash, err := channel.ScreenHash(context.Background(), "env_1"); err != nil || hash != "hash" {
+		t.Fatalf("screen hash over tcp: %q %v", hash, err)
+	}
+	fake.setToken("rotated")
+	if _, err := channel.ScreenHash(context.Background(), "env_1"); err == nil {
+		t.Fatal("a wrong token must not reach the agent")
+	}
+	if _, err := channel.ScreenHash(context.Background(), "env_2"); err == nil ||
+		!strings.Contains(err.Error(), "no such container") {
+		t.Fatalf("unknown container: %v", err)
 	}
 }

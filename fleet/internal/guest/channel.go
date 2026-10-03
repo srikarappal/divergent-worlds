@@ -1,9 +1,12 @@
-// Package guest reaches the Linux guest agent over Firecracker's hybrid vsock (DESIGN.md sections 6.1 and 6.3).
+// Package guest reaches the Linux guest agent (DESIGN.md sections 6.1 and 6.3).
 //
-// Each call dials the VM's vsock socket on the host, asks Firecracker to connect
-// to the agent's port, sends one JSON request line and reads one response line.
-// Screenshots come back as bytes; the channel stores them as content addressed
-// blobs and hands the node agent an observation that references them by digest.
+// Each call dials the guest, finishes a one line handshake, sends one JSON
+// request line and reads one response line. VMs are reached over Firecracker's
+// hybrid vsock: the host socket is asked to connect to the agent's port.
+// Development containers have no vsock, so their agent listens on TCP and only
+// answers a client presenting the container's token, which the policy's shell
+// cannot read. Screenshots come back as bytes; the channel stores them as content
+// addressed blobs and hands the node agent an observation that references them.
 package guest
 
 import (
@@ -24,6 +27,27 @@ type SocketPath func(vmID string) string
 // FrameStore keeps screenshot bytes and returns their hex sha256.
 type FrameStore interface {
 	Put(data []byte) (string, error)
+}
+
+// Dialer opens a connection to a VM's guest agent with its handshake done and the deadline set.
+type Dialer interface {
+	Dial(ctx context.Context, vmID string, deadline time.Time) (net.Conn, *bufio.Reader, error)
+}
+
+// Endpoints says where a development container's agent listens and which token it expects.
+type Endpoints interface {
+	GuestEndpoint(vmID string) (address, token string, err error)
+}
+
+// VsockDialer reaches the agent through Firecracker's hybrid vsock socket.
+type VsockDialer struct {
+	SocketPath SocketPath
+	Port       uint32
+}
+
+// TokenDialer reaches the agent of a development container over TCP.
+type TokenDialer struct {
+	Endpoints Endpoints
 }
 
 // Error is a failure the guest agent reported, with its code.
@@ -56,45 +80,78 @@ type screenshotRef struct {
 	SHA256      string `json:"sha256"`
 }
 
+// handshake sends the greeting line and accepts an answer starting with OK; on any failure it closes the connection.
+func handshake(connection net.Conn, deadline time.Time, greeting, vmID string) (*bufio.Reader, error) {
+	if err := connection.SetDeadline(deadline); err != nil {
+		connection.Close()
+		return nil, err
+	}
+	if _, err := fmt.Fprint(connection, greeting); err != nil {
+		connection.Close()
+		return nil, err
+	}
+	reader := bufio.NewReader(connection)
+	acknowledgement, err := reader.ReadString('\n')
+	if err != nil {
+		connection.Close()
+		return nil, fmt.Errorf("guest handshake with %s: %w", vmID, err)
+	}
+	if !strings.HasPrefix(acknowledgement, "OK") {
+		connection.Close()
+		return nil, fmt.Errorf("guest handshake with %s refused: %q", vmID, strings.TrimSpace(acknowledgement))
+	}
+	return reader, nil
+}
+
+// Dial connects to the VM's vsock socket and asks Firecracker for the agent's port.
+func (dialer VsockDialer) Dial(ctx context.Context, vmID string, deadline time.Time) (net.Conn, *bufio.Reader, error) {
+	var netDialer net.Dialer
+	connection, err := netDialer.DialContext(ctx, "unix", dialer.SocketPath(vmID))
+	if err != nil {
+		return nil, nil, fmt.Errorf("dial guest of %s: %w", vmID, err)
+	}
+	reader, err := handshake(connection, deadline, fmt.Sprintf("CONNECT %d\n", dialer.Port), vmID)
+	return connection, reader, err
+}
+
+// Dial connects to the container's published agent port and presents its token.
+func (dialer TokenDialer) Dial(ctx context.Context, vmID string, deadline time.Time) (net.Conn, *bufio.Reader, error) {
+	address, token, err := dialer.Endpoints.GuestEndpoint(vmID)
+	if err != nil {
+		return nil, nil, err
+	}
+	var netDialer net.Dialer
+	connection, err := netDialer.DialContext(ctx, "tcp", address)
+	if err != nil {
+		return nil, nil, fmt.Errorf("dial guest of %s: %w", vmID, err)
+	}
+	reader, err := handshake(connection, deadline, fmt.Sprintf("AUTH %s\n", token), vmID)
+	return connection, reader, err
+}
+
 // Channel implements the node agent's guest channel.
 type Channel struct {
-	socketPath SocketPath
-	port       uint32
+	dialer     Dialer
 	frames     FrameStore
 	timeout    time.Duration
 	requestIDs atomic.Int64
 }
 
 // NewChannel returns a channel; calls without a context deadline give up after timeout.
-func NewChannel(socketPath SocketPath, port uint32, frames FrameStore, timeout time.Duration) *Channel {
-	return &Channel{socketPath: socketPath, port: port, frames: frames, timeout: timeout}
+func NewChannel(dialer Dialer, frames FrameStore, timeout time.Duration) *Channel {
+	return &Channel{dialer: dialer, frames: frames, timeout: timeout}
 }
 
 func (channel *Channel) call(ctx context.Context, vmID, method string, params any) (json.RawMessage, error) {
-	var dialer net.Dialer
-	connection, err := dialer.DialContext(ctx, "unix", channel.socketPath(vmID))
-	if err != nil {
-		return nil, fmt.Errorf("dial guest of %s: %w", vmID, err)
-	}
-	defer connection.Close()
 	deadline, hasDeadline := ctx.Deadline()
 	if !hasDeadline {
 		deadline = time.Now().Add(channel.timeout)
 	}
-	if err := connection.SetDeadline(deadline); err != nil {
-		return nil, err
-	}
-	if _, err := fmt.Fprintf(connection, "CONNECT %d\n", channel.port); err != nil {
-		return nil, err
-	}
-	reader := bufio.NewReader(connection)
-	acknowledgement, err := reader.ReadString('\n')
+	connection, reader, err := channel.dialer.Dial(ctx, vmID, deadline)
 	if err != nil {
-		return nil, fmt.Errorf("vsock handshake with %s: %w", vmID, err)
+		return nil, err
 	}
-	if !strings.HasPrefix(acknowledgement, "OK ") {
-		return nil, fmt.Errorf("vsock handshake with %s refused: %q", vmID, strings.TrimSpace(acknowledgement))
-	}
+	defer connection.Close()
 	encoded, err := json.Marshal(request{ID: channel.requestIDs.Add(1), Method: method, Params: params})
 	if err != nil {
 		return nil, err
