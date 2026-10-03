@@ -1,0 +1,180 @@
+{
+  "adapter": "computer_tool",
+  "options": {},
+  "parse_cases": [
+    {
+      "description": "left click scales from the 1280x720 model screen to the 1920x1080 env",
+      "env_size": [1920, 1080],
+      "raw_output": [{"name": "computer", "input": {"action": "left_click", "coordinate": [640, 360]}}],
+      "expected_actions": [{"name": "click", "x": 960, "y": 540}]
+    },
+    {
+      "description": "double click",
+      "env_size": [1920, 1080],
+      "raw_output": [{"name": "computer", "input": {"action": "double_click", "coordinate": [100, 200]}}],
+      "expected_actions": [{"name": "click", "x": 150, "y": 300, "count": 2}]
+    },
+    {
+      "description": "shift click carries the modifier",
+      "env_size": [1920, 1080],
+      "raw_output": [{"name": "computer", "input": {"action": "left_click", "coordinate": [10, 10], "text": "shift"}}],
+      "expected_actions": [{"name": "click", "x": 15, "y": 15, "modifiers": ["shift"]}]
+    },
+    {
+      "description": "xdotool key combos normalize",
+      "env_size": [1920, 1080],
+      "raw_output": [
+        {"name": "computer", "input": {"action": "key", "text": "ctrl+Shift+s"}},
+        {"name": "computer", "input": {"action": "key", "text": "Return"}},
+        {"name": "computer", "input": {"action": "key", "text": "ctrl+plus"}}
+      ],
+      "expected_actions": [
+        {"name": "key", "keys": ["ctrl", "shift", "s"]},
+        {"name": "key", "keys": ["enter"]},
+        {"name": "key", "keys": ["ctrl", "+"]}
+      ]
+    },
+    {
+      "description": "scroll direction and amount become wheel notches",
+      "env_size": [1920, 1080],
+      "raw_output": [
+        {
+          "name": "computer",
+          "input": {"action": "scroll", "coordinate": [640, 360], "scroll_direction": "down", "scroll_amount": 3}
+        }
+      ],
+      "expected_actions": [{"name": "scroll", "x": 960, "y": 540, "delta_y": 3}]
+    },
+    {
+      "description": "drag",
+      "env_size": [1920, 1080],
+      "raw_output": [
+        {"name": "computer", "input": {"action": "left_click_drag", "start_coordinate": [10, 10], "coordinate": [110, 60]}}
+      ],
+      "expected_actions": [{"name": "drag", "path": [{"x": 15, "y": 15}, {"x": 165, "y": 90}]}]
+    },
+    {
+      "description": "type, wait and screenshot",
+      "env_size": [1920, 1080],
+      "raw_output": [
+        {"name": "computer", "input": {"action": "type", "text": "Q3 totals\n"}},
+        {"name": "computer", "input": {"action": "wait", "duration": 1.5}},
+        {"name": "computer", "input": {"action": "screenshot"}}
+      ],
+      "expected_actions": [
+        {"name": "type", "text": "Q3 totals\n"},
+        {"name": "wait", "duration_ms": 1500},
+        {"name": "wait", "duration_ms": 0}
+      ]
+    },
+    {
+      "description": "coordinates past the screen edge clamp to the last pixel",
+      "env_size": [1920, 1080],
+      "raw_output": [{"name": "computer", "input": {"action": "mouse_move", "coordinate": [1300, 900]}}],
+      "expected_actions": [{"name": "move", "x": 1919, "y": 1079}]
+    },
+    {
+      "description": "non computer actions arrive as function tools",
+      "env_size": [1920, 1080],
+      "raw_output": [
+        {"name": "exec", "input": {"command": "ls /data", "timeout_s": 30}},
+        {"name": "ask_user", "input": {"question": "Which quarter?"}},
+        {"name": "done", "input": {}}
+      ],
+      "expected_actions": [
+        {"name": "exec", "command": "ls /data", "timeout_s": 30},
+        {"name": "ask_user", "question": "Which quarter?"},
+        {"name": "done"}
+      ]
+    }
+  ],
+  "parse_error_cases": [
+    {
+      "description": "unknown computer action",
+      "env_size": [1920, 1080],
+      "raw_output": [{"name": "computer", "input": {"action": "teleport"}}],
+      "error_fragment": "unsupported computer action"
+    },
+    {
+      "description": "missing coordinate",
+      "env_size": [1920, 1080],
+      "raw_output": [{"name": "computer", "input": {"action": "left_click"}}],
+      "error_fragment": "missing 'coordinate'"
+    },
+    {
+      "description": "unknown key",
+      "env_size": [1920, 1080],
+      "raw_output": [{"name": "computer", "input": {"action": "key", "text": "ctrl+hyperspace"}}],
+      "error_fragment": "unknown key"
+    },
+    {
+      "description": "computer actions cannot hide in function tools",
+      "env_size": [1920, 1080],
+      "raw_output": [{"name": "click", "input": {"x": 1, "y": 2}}],
+      "error_fragment": "unknown function"
+    },
+    {
+      "description": "output must be a list",
+      "env_size": [1920, 1080],
+      "raw_output": {"name": "done"},
+      "error_fragment": "list of tool calls"
+    }
+  ],
+  "render_cases": [
+    {
+      "env_size": [1920, 1080],
+      "action": {"name": "click", "x": 960, "y": 540},
+      "expected_rendered": {"name": "computer", "input": {"action": "left_click", "coordinate": [640, 360]}}
+    },
+    {
+      "env_size": [1920, 1080],
+      "action": {"name": "click", "x": 960, "y": 540, "button": "right"},
+      "expected_rendered": {"name": "computer", "input": {"action": "right_click", "coordinate": [640, 360]}}
+    },
+    {
+      "env_size": [1920, 1080],
+      "action": {"name": "key", "keys": ["ctrl", "shift", "s"]},
+      "expected_rendered": {"name": "computer", "input": {"action": "key", "text": "ctrl+shift+s"}}
+    },
+    {
+      "env_size": [1920, 1080],
+      "action": {"name": "key", "keys": ["meta", "page_down"]},
+      "expected_rendered": {"name": "computer", "input": {"action": "key", "text": "super+Page_Down"}}
+    },
+    {
+      "env_size": [1920, 1080],
+      "action": {"name": "scroll", "x": 960, "y": 540, "delta_y": -2},
+      "expected_rendered": {
+        "name": "computer",
+        "input": {"action": "scroll", "coordinate": [640, 360], "scroll_direction": "up", "scroll_amount": 2}
+      }
+    },
+    {
+      "env_size": [1920, 1080],
+      "action": {"name": "wait", "duration_ms": 1500},
+      "expected_rendered": {"name": "computer", "input": {"action": "wait", "duration": 1.5}}
+    },
+    {
+      "env_size": [1920, 1080],
+      "action": {"name": "wait", "duration_ms": 0},
+      "expected_rendered": {"name": "computer", "input": {"action": "screenshot"}}
+    },
+    {
+      "env_size": [1920, 1080],
+      "action": {"name": "exec", "command": "ls", "timeout_s": 30},
+      "expected_rendered": {"name": "exec", "input": {"command": "ls", "timeout_s": 30}}
+    }
+  ],
+  "render_error_cases": [
+    {
+      "env_size": [1920, 1080],
+      "action": {"name": "scroll", "x": 1, "y": 1, "delta_x": 1, "delta_y": 1},
+      "error_fragment": "one scroll axis"
+    },
+    {
+      "env_size": [1920, 1080],
+      "action": {"name": "click", "x": 1, "y": 1, "button": "right", "count": 2},
+      "error_fragment": "cannot express"
+    }
+  ]
+}
