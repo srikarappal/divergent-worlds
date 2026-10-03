@@ -1,15 +1,9 @@
-import copy
-
 import httpx
 import pytest
+from support.experiment_fakes import bridged_http_client, build_experiment_service, eval_payload
 
-from rlworld.preflight import PreflightContext, SeatPool
 from rlworld.rollout import ExperimentdClient, RunControlError, connection_from_environment
-from rlworld.services.experimentd_http import create_app
-from rlworld.services.experiments import ExperimentService
-from rlworld.services.trainer_launch import TrainerLauncher
-from rlworld.specs import dump_spec_document, expand_sweep, parse_spec_document, spec_digest
-from rlworld.tasks import GateReport
+from rlworld.specs import dump_spec_document, parse_spec_document
 
 ENVIRONMENT = {
     "RLWORLD_RUN_ID": "experiment_000001_run_000",
@@ -19,57 +13,20 @@ ENVIRONMENT = {
 }
 
 
-class FlaskBridge:
-    """httpx transport handler that serves each request from the experimentd Flask app."""
-
-    def __init__(self, app):
-        self.client = app.test_client()
-
-    def __call__(self, request):
-        headers = {name: value for name, value in request.headers.items()
-                   if name.lower() in ("authorization", "content-type")}
-        response = self.client.open(request.url.raw_path.decode(), method=request.method, data=request.content,
-                                    headers=headers)
-        return httpx.Response(response.status_code, content=response.get_data(),
-                              headers={"Content-Type": response.content_type or "application/json"})
-
-
-class IdleExecutor:
-    def start(self, run, document):
-        return None
-
-    def apply(self, run):
-        return None
-
-    def dry_run(self, document):
-        return "episode_dry_000001"
-
-
 class Unreachable:
     def __call__(self, request):
         raise httpx.ConnectError("connection refused", request=request)
 
 
 def launched_service(example_payload, tmp_path):
-    payload = copy.deepcopy(example_payload)
-    payload["run"].update({"type": "eval", "policy": {**payload["run"]["policy"], "token_ids": False,
-                                                       "logprobs": False}})
-    del payload["run"]["trainer"]
-    payload["task"]["split"] = "eval"
-    document = parse_spec_document(payload)
-    gate_reports = {spec_digest(point.document.task): GateReport(spec_digest(point.document.task), ())
-                    for point in expand_sweep(document)}
-    context = PreflightContext(gate_reports=gate_reports, seat_pools={"windows_server_dc": SeatPool(1000, "per_host"),
-                                                                      "office_ltsc": SeatPool(10_000)})
-    service = ExperimentService(context, IdleExecutor(), TrainerLauncher({}, None, tmp_path), b"run token secret",
-                                "http://fleetd.internal", "http://experimentd.internal")
-    experiment = service.launch(service.save_spec(dump_spec_document(document)))
+    payload = eval_payload(example_payload)
+    service = build_experiment_service(payload, tmp_path)
+    experiment = service.launch(service.save_spec(dump_spec_document(parse_spec_document(payload))))
     return service, experiment.run_ids
 
 
 def client_for(service, token):
-    http_client = httpx.Client(transport=httpx.MockTransport(FlaskBridge(create_app(service, poll_seconds=0.0))))
-    return ExperimentdClient("http://experimentd.internal", token, http_client)
+    return ExperimentdClient("http://experimentd.internal", token, bridged_http_client(service))
 
 
 def test_workers_read_their_spec_and_report_with_a_scoped_token(example_payload, tmp_path):

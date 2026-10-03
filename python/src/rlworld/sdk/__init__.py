@@ -1,4 +1,4 @@
-"""Env SDK: fleet client, Gymnasium style env and the MCP tools facade."""
+"""SDK: fleet client, Gymnasium style env, the MCP tools facade and the experiment API client."""
 
 from rlworld.sdk.client import (
     AdmissionRejectedError,
@@ -14,6 +14,7 @@ from rlworld.sdk.client import (
     UnknownLeaseError,
 )
 from rlworld.sdk.env import ComputerUseEnv
+from rlworld.sdk.experiments import ExperimentApiError, ExperimentClient
 from rlworld.sdk.mcp_server import EnvToolServer
 
 __all__ = [
@@ -21,6 +22,8 @@ __all__ = [
     "ComputerUseEnv",
     "EnvError",
     "EnvToolServer",
+    "ExperimentApiError",
+    "ExperimentClient",
     "FleetClient",
     "FleetError",
     "InputFrozenError",
