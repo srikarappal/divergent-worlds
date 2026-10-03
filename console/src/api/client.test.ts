@@ -13,6 +13,9 @@ const PATH_VALUES: Record<string, string> = {
   frame_digest: "ab12",
   kind: "images",
   name: "byo_judge",
+  item_id: "review_000001",
+  subject: "user_ada",
+  tenant: "finance_lab",
 };
 const EVENT_STREAM = [
   'id: 1\nevent: launched\ndata: {"sequence": 1, "at": 1.0, "kind": "launched", "detail": {}}\n\n',
@@ -32,6 +35,8 @@ class RecordingTransport implements FetchTransport {
     return this.responses.shift() ?? new Response(JSON.stringify({ digest: "sha256:abc", yaml: "", runs: [],
                                                                    entries: [], endpoints: [], episodes: [],
                                                                    tiles: [], items: [], messages: [],
+                                                                   experiments: [], rows: [], bindings: {},
+                                                                   policies: [], records: [], pools: {},
                                                                    episode_id: "e" }));
   }
 }
@@ -68,7 +73,31 @@ function sampleArguments(operationName: string): unknown[] {
     case "compare_runs":
       return [[PATH_VALUES.run_id, "experiment_000001_run_001"]];
     case "list_review_items":
+    case "auth_config":
+    case "me":
+    case "frame_grant":
+    case "list_experiments":
+    case "calibration":
+    case "list_roles":
+    case "list_data_policies":
+    case "audit_log":
+    case "pool_status":
+    case "sweep_retention":
+    case "fleet_admission":
       return [];
+    case "file_review_item":
+      return [{ source: "gates", title: "task_017 fails a gate" }];
+    case "update_review_item":
+      return [PATH_VALUES.item_id, { status: "resolved" }];
+    case "export_run":
+      return [PATH_VALUES.run_id, PATH_VALUES.kind];
+    case "set_roles":
+      return [PATH_VALUES.subject, ["labeler"]];
+    case "set_data_policy":
+      return [PATH_VALUES.tenant, { screenshot_endpoints: null, trajectory_days: 30, full_frame_days: 7,
+                                    exports: [] }];
+    case "set_tenant_quota":
+      return [PATH_VALUES.tenant, 40];
     case "list_runs":
     case "list_endpoints":
       return [];
@@ -161,6 +190,23 @@ async function episodeReadsAskOnlyForNewSteps(): Promise<void> {
 }
 
 test("episode reads ask only for new steps and frames have stable URLs", episodeReadsAskOnlyForNewSteps);
+
+async function bearerTokensAndFrameGrantsTravel(): Promise<void> {
+  const transport = new RecordingTransport();
+  const client = new ApiClient("/api", transport, new FixedToken());
+  await client.me();
+  expect(transport.requests[0].init?.headers).toEqual({ Authorization: "Bearer token_abc" });
+  client.setFrameGrant("grant.1.sig");
+  expect(client.frameUrl("ab12", "full")).toBe("/api/v1/frames/ab12?size=full&grant=grant.1.sig");
+}
+
+class FixedToken {
+  accessToken(): string | null {
+    return "token_abc";
+  }
+}
+
+test("bearer tokens and frame grants travel with every request", bearerTokensAndFrameGrantsTravel);
 
 function templatesShowWhatIsStillMissing(): void {
   expect(fillTemplate("rlworld specs launch {digest} --budget-usd {budget_usd}", { digest: "sha256:abc" }))

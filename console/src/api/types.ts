@@ -5,6 +5,7 @@ export type RunState = "awaiting_approval" | "running" | "paused" | "stopped" | 
 export interface RunRecord {
   run_id: string;
   experiment_id: string;
+  tenant: string;
   run_name: string;
   spec_digest: string;
   run_digest: string;
@@ -19,6 +20,7 @@ export interface RunRecord {
 
 export interface ExperimentRecord {
   experiment_id: string;
+  tenant: string;
   spec_digest: string;
   name: string;
   budget_usd: number;
@@ -318,7 +320,7 @@ export type ReviewAction = "flag" | "label" | "verifier_bug" | "task_draft" | "a
 
 export interface ReviewItem {
   item_id: string;
-  action: ReviewAction | "bug_ticket";
+  action: ReviewAction | "bug_ticket" | "gate_failure" | "alert";
   queue: string;
   run_id: string;
   episode_ids: string[];
@@ -329,7 +331,9 @@ export interface ReviewItem {
   status: "open" | "resolved" | "dismissed";
   created_by: string;
   created_at: number;
-  source: "console" | "failure_analysis";
+  resolved_by: string;
+  resolved_at: number | null;
+  source: "console" | "failure_analysis" | "gates" | "alert";
 }
 
 export type ReviewItemFilter = {
@@ -338,3 +342,87 @@ export type ReviewItemFilter = {
   run_id?: string;
   episode_id?: string;
 };
+
+export interface AuthConfig {
+  enabled: boolean;
+  issuer?: string;
+  client_id?: string;
+  audience?: string;
+  scopes?: string[];
+}
+
+export interface Principal {
+  subject: string;
+  email: string;
+  tenant: string;
+  roles: string[];
+}
+
+export interface FrameGrant {
+  grant: string;
+  expires_at: number | null;
+}
+
+export interface ReviewUpdate {
+  status?: "open" | "resolved" | "dismissed";
+  note?: string;
+  label?: Record<string, unknown>;
+}
+
+export interface FiledReviewItem {
+  source: "gates" | "alert";
+  title: string;
+  queue?: string;
+  run_id?: string;
+  episode_ids?: string[];
+  note?: string;
+}
+
+export interface CalibrationReport {
+  verifier: { labels: number; precision: number | null; recall: number | null; false_passes: number;
+              false_fails: number };
+  judge: Record<string, { label_count: number; accuracy: number; kappa: number; false_passes: number;
+                          false_fails: number }>;
+  judge_problems: string[];
+}
+
+export interface DataPolicy {
+  tenant: string;
+  screenshot_endpoints: string[] | null;
+  trajectory_days: number;
+  full_frame_days: number;
+  exports: Array<"sft" | "preferences">;
+}
+
+export interface AuditRecord {
+  sequence: number;
+  at: number;
+  actor: string;
+  tenant: string;
+  action: string;
+  target: Record<string, unknown>;
+  detail: Record<string, unknown>;
+}
+
+export type AuditFilter = {
+  actor?: string;
+  action?: string;
+  since?: number;
+  limit?: number;
+};
+
+export interface AdmissionStatus {
+  capacity: number;
+  reserved: Record<string, number>;
+  default_tenant_quota: number;
+  tenant_quotas: Record<string, number>;
+  endpoint_max_envs: Record<string, number>;
+  usage: { total: number; by_class: Record<string, number>; by_tenant: Record<string, number>;
+           by_endpoint: Record<string, number> };
+}
+
+export interface RetentionReport {
+  deleted_episodes: string[];
+  thumbnail_only_frames: number;
+  deleted_blobs: number;
+}

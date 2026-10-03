@@ -1,9 +1,15 @@
 // Typed client for the public experiment API; every method is one operation from the shared manifest.
 import { fillPath, operation } from "./operations";
 import type {
+  AdmissionStatus,
+  AuditFilter,
+  AuditRecord,
+  AuthConfig,
+  CalibrationReport,
   CatalogEntry,
   CohortEpisode,
   Comparison,
+  DataPolicy,
   DryRun,
   EndpointRegistration,
   EndpointView,
@@ -14,12 +20,17 @@ import type {
   ExperimentPreflight,
   ExperimentRecord,
   FailureAnalysis,
+  FiledReviewItem,
+  FrameGrant,
   FrameSize,
   LiveTile,
+  Principal,
   ProbeResult,
+  RetentionReport,
   ReviewAction,
   ReviewItem,
   ReviewItemFilter,
+  ReviewUpdate,
   RunEvent,
   RunRecord,
 } from "./types";
@@ -30,6 +41,11 @@ export interface FetchTransport {
 
 export interface RunEventListener {
   onRunEvent(event: RunEvent): void;
+}
+
+// Where the signed in user's OIDC access token comes from; null before sign in or when sign in is off.
+export interface TokenSource {
+  accessToken(): string | null;
 }
 
 export interface CallOptions {
@@ -69,6 +85,24 @@ export interface ConsoleApi {
   compareRuns(runIds: readonly string[]): Promise<Comparison>;
   comparePolicyVersions(runId: string): Promise<Comparison>;
   listReviewItems(filter?: ReviewItemFilter): Promise<ReviewItem[]>;
+  setFrameGrant(grant: string): void;
+  authConfig(): Promise<AuthConfig>;
+  me(): Promise<Principal>;
+  frameGrant(): Promise<FrameGrant>;
+  listExperiments(tenant?: string): Promise<ExperimentRecord[]>;
+  fileReviewItem(item: FiledReviewItem): Promise<ReviewItem>;
+  updateReviewItem(itemId: string, update: ReviewUpdate): Promise<ReviewItem>;
+  calibration(runId?: string): Promise<CalibrationReport>;
+  exportRun(runId: string, kind: "sft" | "preferences"): Promise<Record<string, unknown>[]>;
+  listRoles(): Promise<Record<string, string[]>>;
+  setRoles(subject: string, roles: readonly string[]): Promise<{ subject: string; roles: string[] }>;
+  listDataPolicies(): Promise<DataPolicy[]>;
+  setDataPolicy(tenant: string, policy: Omit<DataPolicy, "tenant">): Promise<DataPolicy>;
+  auditLog(filter?: AuditFilter): Promise<AuditRecord[]>;
+  poolStatus(): Promise<Record<string, number>>;
+  sweepRetention(): Promise<RetentionReport>;
+  fleetAdmission(): Promise<AdmissionStatus>;
+  setTenantQuota(tenant: string, quota: number): Promise<AdmissionStatus>;
   listCatalog(kind: string): Promise<CatalogEntry[]>;
   listEndpoints(): Promise<EndpointView[]>;
   registerEndpoint(endpoint: EndpointRegistration): Promise<EndpointView>;
@@ -112,25 +146,34 @@ export function parseEventFrame(frame: string): RunEvent | null {
   return null;
 }
 
-function requestInit(bodyKind: string | undefined, method: string, options: CallOptions): RequestInit {
+function requestInit(bodyKind: string | undefined, method: string, options: CallOptions,
+                     token: string | null): RequestInit {
+  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
   if (bodyKind === "yaml") {
-    return { method, body: String(options.body ?? ""), headers: { "Content-Type": "application/yaml" },
-             signal: options.signal };
+    headers["Content-Type"] = "application/yaml";
+    return { method, body: String(options.body ?? ""), headers, signal: options.signal };
   }
   if (bodyKind === "json") {
-    return { method, body: JSON.stringify(options.body ?? {}), headers: { "Content-Type": "application/json" },
-             signal: options.signal };
+    headers["Content-Type"] = "application/json";
+    return { method, body: JSON.stringify(options.body ?? {}), headers, signal: options.signal };
   }
-  return { method, signal: options.signal };
+  return { method, headers, signal: options.signal };
 }
 
 export class ApiClient implements ConsoleApi {
   private readonly baseUrl: string;
   private readonly transport: FetchTransport;
+  private readonly tokens: TokenSource | null;
+  private grant = "";
 
-  constructor(baseUrl: string, transport: FetchTransport = window) {
+  constructor(baseUrl: string, transport: FetchTransport = window, tokens: TokenSource | null = null) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.transport = transport;
+    this.tokens = tokens;
+  }
+
+  setFrameGrant(grant: string): void {
+    this.grant = grant;
   }
 
   async send(name: string, options: CallOptions = {}): Promise<Response> {
@@ -144,7 +187,8 @@ export class ApiClient implements ConsoleApi {
     }
     const queryText = query.toString();
     const url = `${this.baseUrl}${fillPath(listed.path, options.path ?? {})}${queryText ? `?${queryText}` : ""}`;
-    const response = await this.transport.fetch(url, requestInit(listed.body, listed.method, options));
+    const token = this.tokens?.accessToken() ?? null;
+    const response = await this.transport.fetch(url, requestInit(listed.body, listed.method, options, token));
     if (!response.ok) {
       throw await apiError(response);
     }
@@ -244,7 +288,77 @@ export class ApiClient implements ConsoleApi {
 
   // Frames go straight into img elements; content addressed, so browsers cache them for good.
   frameUrl(frameDigest: string, size: FrameSize): string {
-    return `${this.baseUrl}${fillPath(operation("get_frame").path, { frame_digest: frameDigest })}?size=${size}`;
+    const grant = this.grant ? `&grant=${encodeURIComponent(this.grant)}` : "";
+    const path = fillPath(operation("get_frame").path, { frame_digest: frameDigest });
+    return `${this.baseUrl}${path}?size=${size}${grant}`;
+  }
+
+  authConfig(): Promise<AuthConfig> {
+    return this.call("auth_config");
+  }
+
+  me(): Promise<Principal> {
+    return this.call("me");
+  }
+
+  frameGrant(): Promise<FrameGrant> {
+    return this.call("frame_grant");
+  }
+
+  async listExperiments(tenant?: string): Promise<ExperimentRecord[]> {
+    return (await this.call("list_experiments", { query: { tenant } })).experiments;
+  }
+
+  fileReviewItem(item: FiledReviewItem): Promise<ReviewItem> {
+    return this.call("file_review_item", { body: item });
+  }
+
+  updateReviewItem(itemId: string, update: ReviewUpdate): Promise<ReviewItem> {
+    return this.call("update_review_item", { path: { item_id: itemId }, body: update });
+  }
+
+  calibration(runId?: string): Promise<CalibrationReport> {
+    return this.call("calibration", { query: { run_id: runId } });
+  }
+
+  async exportRun(runId: string, kind: "sft" | "preferences"): Promise<Record<string, unknown>[]> {
+    return (await this.call("export_run", { path: { run_id: runId, kind } })).rows;
+  }
+
+  async listRoles(): Promise<Record<string, string[]>> {
+    return (await this.call("list_roles")).bindings;
+  }
+
+  setRoles(subject: string, roles: readonly string[]): Promise<{ subject: string; roles: string[] }> {
+    return this.call("set_roles", { path: { subject }, body: { roles } });
+  }
+
+  async listDataPolicies(): Promise<DataPolicy[]> {
+    return (await this.call("list_data_policies")).policies;
+  }
+
+  setDataPolicy(tenant: string, policy: Omit<DataPolicy, "tenant">): Promise<DataPolicy> {
+    return this.call("set_data_policy", { path: { tenant }, body: policy });
+  }
+
+  async auditLog(filter: AuditFilter = {}): Promise<AuditRecord[]> {
+    return (await this.call("audit_log", { query: filter })).records;
+  }
+
+  async poolStatus(): Promise<Record<string, number>> {
+    return (await this.call("pool_status")).pools;
+  }
+
+  sweepRetention(): Promise<RetentionReport> {
+    return this.call("sweep_retention");
+  }
+
+  fleetAdmission(): Promise<AdmissionStatus> {
+    return this.call("fleet_admission");
+  }
+
+  setTenantQuota(tenant: string, quota: number): Promise<AdmissionStatus> {
+    return this.call("set_tenant_quota", { path: { tenant }, body: { quota } });
   }
 
   async cohort(runId: string, filter: EpisodeFilter = {}): Promise<CohortEpisode[]> {

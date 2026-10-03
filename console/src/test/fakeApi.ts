@@ -1,9 +1,15 @@
 // An in memory ConsoleApi for page tests: canned answers and a log of every call.
 import { ApiError, type ConsoleApi, type RunEventListener } from "../api/client";
 import type {
+  AdmissionStatus,
+  AuditFilter,
+  AuditRecord,
+  AuthConfig,
+  CalibrationReport,
   CatalogEntry,
   CohortEpisode,
   Comparison,
+  DataPolicy,
   DryRun,
   EndpointRegistration,
   EndpointView,
@@ -14,12 +20,17 @@ import type {
   ExperimentPreflight,
   ExperimentRecord,
   FailureAnalysis,
+  FiledReviewItem,
+  FrameGrant,
   FrameSize,
   LiveTile,
+  Principal,
   ProbeResult,
+  RetentionReport,
   ReviewAction,
   ReviewItem,
   ReviewItemFilter,
+  ReviewUpdate,
   RunEvent,
   RunRecord,
 } from "../api/types";
@@ -34,7 +45,8 @@ export function catalogEntry(kind: CatalogEntry["kind"], name: string,
 
 export function runRecord(runId: string, extra: Partial<RunRecord> = {}): RunRecord {
   return {
-    run_id: runId, experiment_id: "experiment_000001", run_name: "point_000", spec_digest: "sha256:spec",
+    run_id: runId, experiment_id: "experiment_000001", tenant: "default", run_name: "point_000",
+    spec_digest: "sha256:spec",
     run_digest: "sha256:run", run_type: "rl", assignments: {}, state: "running", desired_concurrency: 4000,
     priority: "training", job_id: null, created_at: 0, ...extra,
   };
@@ -42,7 +54,8 @@ export function runRecord(runId: string, extra: Partial<RunRecord> = {}): RunRec
 
 export function experimentRecord(extra: Partial<ExperimentRecord> = {}): ExperimentRecord {
   return {
-    experiment_id: "experiment_000001", spec_digest: "sha256:spec", name: "recon_difficulty_sweep",
+    experiment_id: "experiment_000001", tenant: "default", spec_digest: "sha256:spec",
+    name: "recon_difficulty_sweep",
     budget_usd: 2500, spent_usd: 0, estimated_cost_usd: 1200, run_ids: ["experiment_000001_run_000"],
     approved: true, ...extra,
   };
@@ -79,6 +92,22 @@ export class FakeApi implements ConsoleApi {
   report: EvalReport | null = null;
   comparison: Comparison = { reports: {}, shared_tasks: [] };
   reviewItems: ReviewItem[] = [];
+  authSettings: AuthConfig = { enabled: false };
+  principal: Principal = { subject: "developer", email: "", tenant: "default",
+                           roles: ["viewer", "researcher", "operator", "labeler", "admin"] };
+  frameGrantValue = "grant.1.sig";
+  roleBindings: Record<string, string[]> = {};
+  dataPolicies: DataPolicy[] = [{ tenant: "default", screenshot_endpoints: null, trajectory_days: 365,
+                                  full_frame_days: 30, exports: ["sft", "preferences"] }];
+  auditRecords: AuditRecord[] = [];
+  pools: Record<string, number> = {};
+  admission: AdmissionStatus = {
+    capacity: 4000, reserved: { interactive: 100 }, default_tenant_quota: 0, tenant_quotas: {},
+    endpoint_max_envs: {}, usage: { total: 0, by_class: {}, by_tenant: {}, by_endpoint: {} },
+  };
+  calibrationReport: CalibrationReport = { verifier: { labels: 0, precision: null, recall: null, false_passes: 0,
+                                                       false_fails: 0 }, judge: {}, judge_problems: [] };
+  grant = "";
   saveFailure: ApiError | null = null;
   launchFailure: ApiError | null = null;
   digest = "sha256:abc123";
@@ -239,7 +268,7 @@ export class FakeApi implements ConsoleApi {
     const item: ReviewItem = {
       item_id: `review_${this.reviewItems.length + 1}`, action, queue: queues[action], run_id: runId,
       episode_ids: [episodeId], title: `${action} ${episodeId}`, note: note ?? "", label: label ?? null, payload: {},
-      status: "open", created_by: "", created_at: 0, source: "console",
+      status: "open", created_by: "", created_at: 0, resolved_by: "", resolved_at: null, source: "console",
     };
     this.reviewItems = [...this.reviewItems, item];
     return item;
@@ -284,7 +313,122 @@ export class FakeApi implements ConsoleApi {
 
   async listReviewItems(filter?: ReviewItemFilter): Promise<ReviewItem[]> {
     this.record("listReviewItems", filter);
-    return this.reviewItems;
+    const matching: ReviewItem[] = [];
+    for (const item of this.reviewItems) {
+      if ((filter?.queue === undefined || item.queue === filter.queue)
+          && (filter?.status === undefined || item.status === filter.status)) {
+        matching.push(item);
+      }
+    }
+    return matching;
+  }
+
+  setFrameGrant(grant: string): void {
+    this.grant = grant;
+  }
+
+  async authConfig(): Promise<AuthConfig> {
+    this.record("authConfig");
+    return this.authSettings;
+  }
+
+  async me(): Promise<Principal> {
+    this.record("me");
+    return this.principal;
+  }
+
+  async frameGrant(): Promise<FrameGrant> {
+    this.record("frameGrant");
+    return { grant: this.frameGrantValue, expires_at: 60 };
+  }
+
+  async listExperiments(tenant?: string): Promise<ExperimentRecord[]> {
+    this.record("listExperiments", tenant);
+    return Object.values(this.experiments);
+  }
+
+  async fileReviewItem(item: FiledReviewItem): Promise<ReviewItem> {
+    this.record("fileReviewItem", item);
+    return this.reviewEpisode(item.run_id ?? "", "", "flag", item.note);
+  }
+
+  async updateReviewItem(itemId: string, update: ReviewUpdate): Promise<ReviewItem> {
+    this.record("updateReviewItem", itemId, update);
+    const updated: ReviewItem[] = [];
+    let result: ReviewItem | undefined;
+    for (const item of this.reviewItems) {
+      if (item.item_id === itemId) {
+        result = { ...item, status: update.status ?? item.status, label: update.label ?? item.label,
+                   note: update.note ?? item.note, resolved_by: "developer" };
+        updated.push(result);
+      } else {
+        updated.push(item);
+      }
+    }
+    this.reviewItems = updated;
+    if (result === undefined) {
+      throw new ApiError(404, "not_found", itemId, []);
+    }
+    return result;
+  }
+
+  async calibration(runId?: string): Promise<CalibrationReport> {
+    this.record("calibration", runId);
+    return this.calibrationReport;
+  }
+
+  async exportRun(runId: string, kind: "sft" | "preferences"): Promise<Record<string, unknown>[]> {
+    this.record("exportRun", runId, kind);
+    return [];
+  }
+
+  async listRoles(): Promise<Record<string, string[]>> {
+    this.record("listRoles");
+    return this.roleBindings;
+  }
+
+  async setRoles(subject: string, roles: readonly string[]): Promise<{ subject: string; roles: string[] }> {
+    this.record("setRoles", subject, roles);
+    this.roleBindings = { ...this.roleBindings, [subject]: [...roles].sort() };
+    return { subject, roles: this.roleBindings[subject] };
+  }
+
+  async listDataPolicies(): Promise<DataPolicy[]> {
+    this.record("listDataPolicies");
+    return this.dataPolicies;
+  }
+
+  async setDataPolicy(tenant: string, policy: Omit<DataPolicy, "tenant">): Promise<DataPolicy> {
+    this.record("setDataPolicy", tenant, policy);
+    const saved = { ...policy, tenant };
+    this.dataPolicies = [...this.dataPolicies, saved];
+    return saved;
+  }
+
+  async auditLog(filter?: AuditFilter): Promise<AuditRecord[]> {
+    this.record("auditLog", filter);
+    return this.auditRecords;
+  }
+
+  async poolStatus(): Promise<Record<string, number>> {
+    this.record("poolStatus");
+    return this.pools;
+  }
+
+  async sweepRetention(): Promise<RetentionReport> {
+    this.record("sweepRetention");
+    return { deleted_episodes: ["run_1/episode_old"], thumbnail_only_frames: 3, deleted_blobs: 2 };
+  }
+
+  async fleetAdmission(): Promise<AdmissionStatus> {
+    this.record("fleetAdmission");
+    return this.admission;
+  }
+
+  async setTenantQuota(tenant: string, quota: number): Promise<AdmissionStatus> {
+    this.record("setTenantQuota", tenant, quota);
+    this.admission = { ...this.admission, tenant_quotas: { ...this.admission.tenant_quotas, [tenant]: quota } };
+    return this.admission;
   }
 
   async listCatalog(kind: string): Promise<CatalogEntry[]> {
