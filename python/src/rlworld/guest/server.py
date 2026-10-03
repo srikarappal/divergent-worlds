@@ -1,11 +1,15 @@
-"""The guest agent's vsock server (DESIGN.md section 6.3).
+"""The guest agent's servers (DESIGN.md section 6.3).
 
 Only the host may connect: a vsock peer other than the host CID is refused, so
-nothing inside the guest can drive its own agent. Each connection is served on
-its own thread, one request at a time; requests from all connections run
-one after another because the screen and input are shared.
+nothing inside the guest can drive its own agent. Development containers have
+no vsock (docs/TASKS.md build decision 4), so there the agent listens on TCP and
+serves only a client whose first line carries the container's token, kept in a
+root only file the policy's shell cannot read. Each connection is served on its
+own thread, one request at a time; requests from all connections run one after
+another because the screen and input are shared.
 """
 
+import hmac
 import socket
 import threading
 from typing import Any, BinaryIO, Protocol
@@ -14,6 +18,7 @@ from rlworld.guest.protocol import GuestFailure, error_message, read_message, re
 
 VMADDR_CID_HOST = 2
 DEFAULT_PORT = 5005
+MAX_GREETING_BYTES = 512
 
 
 class RequestHandler(Protocol):
@@ -66,4 +71,33 @@ class VsockServer:
             if not self.accepts(peer_cid):
                 connection.close()
                 continue
+            threading.Thread(target=self.serve, args=(connection,), daemon=True).start()
+
+
+class TokenServer:
+    def __init__(self, handler: RequestHandler, token: str, port: int = DEFAULT_PORT, host: str = "0.0.0.0") -> None:
+        if not token:
+            raise ValueError("a token server needs a token")
+        self.handler = handler
+        self.expected_greeting = f"AUTH {token}\n".encode("utf-8")
+        self.port = port
+        self.host = host
+        self.lock = threading.Lock()
+
+    def authenticated(self, stream: BinaryIO) -> bool:
+        return hmac.compare_digest(stream.readline(MAX_GREETING_BYTES), self.expected_greeting)
+
+    def serve(self, connection: socket.socket) -> None:
+        """Clients without the token get no answer at all, then the connection closes."""
+        with connection, connection.makefile("rwb") as stream:
+            if not self.authenticated(stream):
+                return
+            stream.write(b"OK\n")
+            stream.flush()
+            serve_stream(stream, self.handler, self.lock)
+
+    def serve_forever(self) -> None:
+        listener = socket.create_server((self.host, self.port))
+        while True:
+            connection, _ = listener.accept()
             threading.Thread(target=self.serve, args=(connection,), daemon=True).start()

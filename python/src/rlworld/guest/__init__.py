@@ -2,7 +2,7 @@
 
 from rlworld.guest.agent import GuestAgent, cookie_domain, file_changes, xdotool_argv
 from rlworld.guest.protocol import GuestFailure
-from rlworld.guest.server import VsockServer, serve_stream
+from rlworld.guest.server import TokenServer, VsockServer, serve_stream
 
-__all__ = ["GuestAgent", "GuestFailure", "VsockServer", "cookie_domain", "file_changes", "serve_stream",
+__all__ = ["GuestAgent", "GuestFailure", "TokenServer", "VsockServer", "cookie_domain", "file_changes", "serve_stream",
            "xdotool_argv"]

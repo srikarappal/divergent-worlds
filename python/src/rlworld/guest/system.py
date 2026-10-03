@@ -55,6 +55,17 @@ class SystemHygiene:
             fcntl.ioctl(random_device, RNDADDENTROPY, entropy_payload(entropy))
 
 
+class SharedKernelHygiene:
+    """Development containers share the host's kernel, so setting the clock or crediting the RNG would reach the host;
+    their guests keep real time and the kernel's own randomness, never a restored copy of it."""
+
+    def set_clock(self, when: datetime) -> None:
+        pass
+
+    def add_entropy(self, entropy: bytes) -> None:
+        pass
+
+
 def user_command_argv(user: str, command: str) -> list[str]:
     return ["runuser", "-u", user, "--", "bash", "-lc", command]
 
