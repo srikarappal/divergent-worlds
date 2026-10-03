@@ -81,6 +81,12 @@ func statusFor(err error) (int, string) {
 		return http.StatusNotFound, "unknown_lease"
 	case errors.Is(err, ErrInputFrozen):
 		return http.StatusConflict, "input_frozen"
+	case errors.Is(err, ErrTakenOver):
+		return http.StatusConflict, "taken_over"
+	case errors.Is(err, ErrNoTakeover):
+		return http.StatusConflict, "no_takeover"
+	case errors.Is(err, ErrUnknownTakeover):
+		return http.StatusNotFound, "unknown_takeover"
 	default:
 		return http.StatusInternalServerError, "env_error"
 	}
@@ -129,6 +135,9 @@ func (api *httpAPI) routes() []route {
 		{"POST /v1/leases/{leaseID}/finish", api.finish},
 		{"POST /v1/leases/{leaseID}/inject", api.inject},
 		{"DELETE /v1/leases/{leaseID}", api.close},
+		{"POST /v1/leases/{leaseID}/takeover", api.startTakeover},
+		{"DELETE /v1/leases/{leaseID}/takeover", api.endTakeover},
+		{"GET /v1/takeover/{sessionID}", api.takeoverRelay},
 		{"GET /v1/admission", api.admissionStatus},
 		{"PUT /v1/admission/tenants/{tenant}", api.setTenantQuota},
 	}

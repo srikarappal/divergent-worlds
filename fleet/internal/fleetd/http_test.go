@@ -1,10 +1,12 @@
 package fleetd
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -55,6 +57,29 @@ func (guest *stubGuest) Inject(_ context.Context, _ string, payload json.RawMess
 func (guest *stubGuest) Extract(_ context.Context, _ string, apps []string) (json.RawMessage, error) {
 	return json.RawMessage(`{"mail": {"sent": []}, "apps": "` + strings.Join(apps, ",") + `"}`), nil
 }
+func (guest *stubGuest) DialVNC(context.Context, string) (net.Conn, *bufio.Reader, error) {
+	server, client := net.Pipe()
+	go serveFakeVNC(server)
+	return client, bufio.NewReader(client), nil
+}
+
+// serveFakeVNC greets like a VNC server, then echoes whatever the client sends.
+func serveFakeVNC(connection net.Conn) {
+	defer connection.Close()
+	if _, err := connection.Write([]byte("RFB 003.008\n")); err != nil {
+		return
+	}
+	buffer := make([]byte, 512)
+	for {
+		count, err := connection.Read(buffer)
+		if err != nil {
+			return
+		}
+		if _, err := connection.Write(buffer[:count]); err != nil {
+			return
+		}
+	}
+}
 
 type nopCommands struct{}
 
@@ -62,6 +87,7 @@ func (nopCommands) Run(context.Context, []string) error { return nil }
 
 type testFleet struct {
 	server    *httptest.Server
+	service   *Service
 	driver    *fake.Driver
 	guest     *stubGuest
 	clock     *clock.Fake
@@ -87,7 +113,8 @@ func newTestFleet(t *testing.T, capacity int, hostMemoryMiB int) *testFleet {
 	service := NewService(leases, placement, map[string]Node{"host_a": agent}, "/checkpoints")
 	server := httptest.NewServer(NewHandler(service))
 	t.Cleanup(server.Close)
-	return &testFleet{server: server, driver: driver, guest: guest, clock: fakeClock, leases: leases, scheduler: placement}
+	return &testFleet{server: server, service: service, driver: driver, guest: guest, clock: fakeClock, leases: leases,
+		scheduler: placement}
 }
 
 func (fleet *testFleet) call(t *testing.T, method, path string, body any) (int, map[string]any) {

@@ -3,10 +3,12 @@
 package fleetd
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"path/filepath"
 	"sync"
 	"time"
@@ -38,6 +40,8 @@ type Node interface {
 	Extract(ctx context.Context, envID string, apps []string) (json.RawMessage, error)
 	Inject(ctx context.Context, envID string, payload json.RawMessage) error
 	Pause(ctx context.Context, envID string) error
+	Resume(ctx context.Context, envID string) error
+	DialVNC(ctx context.Context, envID string) (net.Conn, *bufio.Reader, error)
 }
 
 // Snapshot is the start state a lease group restores from.
@@ -68,12 +72,13 @@ type GroupRequest struct {
 	ObservationKinds []string
 }
 
-// LeaseInfo is what a rollout worker gets back for each env.
+// LeaseInfo is what a rollout worker gets back for each env; TakenOver means an operator drives it right now.
 type LeaseInfo struct {
 	LeaseID   string    `json:"lease_id"`
 	EnvID     string    `json:"env_id"`
 	HostID    string    `json:"host_id"`
 	ExpiresAt time.Time `json:"expires_at"`
+	TakenOver bool      `json:"taken_over"`
 }
 
 type binding struct {
@@ -82,6 +87,7 @@ type binding struct {
 	request  GroupRequest
 	frozen   bool
 	snapshot Snapshot
+	takeover *takeoverSession
 }
 
 // Service ties admission, leases, placement and node agents together.
@@ -91,14 +97,16 @@ type Service struct {
 	scheduler     *scheduler.Scheduler
 	nodes         map[string]Node
 	bindings      map[string]*binding
+	takeovers     map[string]*takeoverSession
 	checkpointDir string
 	nextEnvNumber int
+	now           func() time.Time
 }
 
 // NewService wires lease endings to env teardown and capacity release.
 func NewService(leases *lease.Manager, placement *scheduler.Scheduler, nodes map[string]Node, checkpointDir string) *Service {
 	service := &Service{leases: leases, scheduler: placement, nodes: nodes, bindings: map[string]*binding{},
-		checkpointDir: checkpointDir}
+		takeovers: map[string]*takeoverSession{}, checkpointDir: checkpointDir, now: time.Now}
 	leases.OnRelease(service.onLeaseEnded)
 	return service
 }
@@ -110,6 +118,12 @@ func (service *Service) onLeaseEnded(ended lease.Lease) {
 	service.mu.Unlock()
 	if !found {
 		return
+	}
+	service.mu.Lock()
+	session := bound.takeover
+	service.mu.Unlock()
+	if session != nil {
+		service.dropTakeover(bound, session)
 	}
 	if node, known := service.nodes[bound.hostID]; known {
 		node.Destroy(context.Background(), bound.envID)
@@ -227,7 +241,8 @@ func (service *Service) Heartbeat(leaseID string) (LeaseInfo, error) {
 	if err != nil {
 		return LeaseInfo{}, ErrUnknownLease
 	}
-	return LeaseInfo{LeaseID: leaseID, EnvID: bound.envID, HostID: bound.hostID, ExpiresAt: renewed.ExpiresAt}, nil
+	return LeaseInfo{LeaseID: leaseID, EnvID: bound.envID, HostID: bound.hostID, ExpiresAt: renewed.ExpiresAt,
+		TakenOver: service.takenOver(bound)}, nil
 }
 
 // Reset restores the lease's start snapshot into a fresh env on the same host and observes it.
@@ -235,6 +250,9 @@ func (service *Service) Reset(ctx context.Context, leaseID string) (nodeagent.St
 	bound, err := service.lookup(leaseID)
 	if err != nil {
 		return nodeagent.StepResult{}, err
+	}
+	if service.takenOver(bound) {
+		return nodeagent.StepResult{}, ErrTakenOver
 	}
 	node, err := service.nodeFor(bound)
 	if err != nil {
@@ -260,6 +278,9 @@ func (service *Service) Step(ctx context.Context, leaseID string, action json.Ra
 	if bound.frozen {
 		return nodeagent.StepResult{}, ErrInputFrozen
 	}
+	if service.takenOver(bound) {
+		return nodeagent.StepResult{}, ErrTakenOver
+	}
 	node, err := service.nodeFor(bound)
 	if err != nil {
 		return nodeagent.StepResult{}, err
@@ -272,6 +293,9 @@ func (service *Service) Fork(ctx context.Context, leaseID string, count int) ([]
 	bound, err := service.lookup(leaseID)
 	if err != nil {
 		return nil, err
+	}
+	if service.takenOver(bound) {
+		return nil, ErrTakenOver
 	}
 	node, err := service.nodeFor(bound)
 	if err != nil {
@@ -316,6 +340,9 @@ func (service *Service) Checkpoint(ctx context.Context, leaseID string) (vmm.Sna
 	if err != nil {
 		return vmm.SnapshotRef{}, err
 	}
+	if service.takenOver(bound) {
+		return vmm.SnapshotRef{}, ErrTakenOver
+	}
 	node, err := service.nodeFor(bound)
 	if err != nil {
 		return vmm.SnapshotRef{}, err
@@ -329,6 +356,9 @@ func (service *Service) Finish(ctx context.Context, leaseID string, apps []strin
 	bound, err := service.lookup(leaseID)
 	if err != nil {
 		return nil, err
+	}
+	if service.takenOver(bound) {
+		return nil, ErrTakenOver
 	}
 	node, err := service.nodeFor(bound)
 	if err != nil {
@@ -348,6 +378,9 @@ func (service *Service) Inject(ctx context.Context, leaseID string, payload json
 	bound, err := service.lookup(leaseID)
 	if err != nil {
 		return err
+	}
+	if service.takenOver(bound) {
+		return ErrTakenOver
 	}
 	node, err := service.nodeFor(bound)
 	if err != nil {
@@ -386,7 +419,7 @@ func (service *Service) Leases(runID string) []LeaseInfo {
 		service.mu.Unlock()
 		if found {
 			infos = append(infos, LeaseInfo{LeaseID: active.ID, EnvID: bound.envID, HostID: bound.hostID,
-				ExpiresAt: active.ExpiresAt})
+				ExpiresAt: active.ExpiresAt, TakenOver: service.takenOver(bound)})
 		}
 	}
 	return infos

@@ -37,6 +37,7 @@ import (
 
 const (
 	guestAgentPort   = 5005
+	guestVNCPort     = 5901
 	reaperInterval   = 5 * time.Second
 	shutdownDeadline = 30 * time.Second
 )
@@ -165,20 +166,21 @@ func (loaded config) schedulerHost() scheduler.Host {
 			GPUs: loaded.Host.GPUs}}
 }
 
-// newDriver returns the driver and how the guest channel reaches that driver's guests.
-func newDriver(loaded config, hostTools tools) (vmm.Driver, guest.Dialer) {
+// newDriver returns the driver and how the guest channel reaches its guests' agents and VNC relays.
+func newDriver(loaded config, hostTools tools) (vmm.Driver, guest.Dialer, guest.Dialer) {
 	if loaded.Driver == "docker" {
 		driver := docker.NewDriver(docker.Config{Binary: loaded.Docker.Binary, AgentPort: guestAgentPort,
 			SecurityOptions: loaded.Docker.SecurityOptions, ShmSizeMiB: loaded.Docker.ShmSizeMiB,
 			ReadyTimeout:       time.Duration(loaded.Docker.ReadyTimeoutSeconds) * time.Second,
 			SnapshotRepository: loaded.Docker.SnapshotRepository}, hostTools.docker)
-		return driver, guest.TokenDialer{Endpoints: driver}
+		return driver, guest.TokenDialer{Endpoints: driver}, guest.TokenDialer{Endpoints: driver, Greeting: "VNC"}
 	}
 	driver := firecracker.NewDriver(firecracker.Config{JailerPath: loaded.Firecracker.JailerPath,
 		FirecrackerPath: loaded.Firecracker.FirecrackerPath, ChrootBaseDir: loaded.Firecracker.ChrootBaseDir,
 		UID: loaded.Firecracker.UID, GID: loaded.Firecracker.GID, UseUffd: loaded.Firecracker.UseUffd},
 		hostTools.processes, nil)
-	return driver, guest.VsockDialer{SocketPath: driver.VsockPath, Port: guestAgentPort}
+	return driver, guest.VsockDialer{SocketPath: driver.VsockPath, Port: guestAgentPort},
+		guest.VsockDialer{SocketPath: driver.VsockPath, Port: guestVNCPort}
 }
 
 func newFleet(loaded config, hostTools tools) (*fleet, error) {
@@ -196,8 +198,8 @@ func newFleet(loaded config, hostTools tools) (*fleet, error) {
 	leases := lease.NewManager(controller, clock.Real{}, time.Duration(loaded.LeaseTTLSeconds)*time.Second)
 	placement := scheduler.New()
 	placement.UpsertHost(loaded.schedulerHost())
-	driver, dialer := newDriver(loaded, hostTools)
-	channel := guest.NewChannel(dialer, guest.NewFilesystemFrames(loaded.ObjectStoreDir),
+	driver, dialer, vncDialer := newDriver(loaded, hostTools)
+	channel := guest.NewChannel(dialer, vncDialer, guest.NewFilesystemFrames(loaded.ObjectStoreDir),
 		time.Duration(loaded.GuestTimeoutSeconds)*time.Second)
 	node := nodeagent.New(nodeagent.Config{HostID: loaded.Host.ID, OverlayDir: overlayDir}, driver, channel,
 		hostTools.commands, clock.Real{}, nil)

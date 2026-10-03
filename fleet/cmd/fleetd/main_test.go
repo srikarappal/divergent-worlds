@@ -201,10 +201,13 @@ func TestFirecrackerHostsReachGuestsOverVsock(t *testing.T) {
 	loaded.Driver = "firecracker"
 	loaded.Firecracker.ChrootBaseDir = "/srv/jailer"
 	loaded.Firecracker.FirecrackerPath = "/usr/bin/firecracker"
-	driver, dialer := newDriver(loaded, tools{})
+	driver, dialer, vncDialer := newDriver(loaded, tools{})
 	vsock, isVsock := dialer.(guest.VsockDialer)
 	if driver.Name() != "firecracker" || !isVsock || vsock.Port != guestAgentPort {
 		t.Fatalf("driver %s dialer %T", driver.Name(), dialer)
+	}
+	if vnc, isVNC := vncDialer.(guest.VsockDialer); !isVNC || vnc.Port != guestVNCPort {
+		t.Fatalf("vnc dialer %T", vncDialer)
 	}
 	if path := vsock.SocketPath("env_1"); path != "/srv/jailer/firecracker/env_1/root/v.sock" {
 		t.Fatalf("vsock path: %s", path)
