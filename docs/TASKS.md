@@ -54,7 +54,7 @@ Status is one of todo, doing or done.
 ### Guests and images
 
 27. [done] Linux guest agent: screenshots, input, accessibility tree, settle hashing, vsock server.
-28. [todo] Image pipeline: Dockerfile to ext4 rootfs builder, Windows Packer template and hardening scripts.
+28. [done] Image pipeline: Dockerfile to ext4 rootfs builder, Windows Packer template and hardening scripts.
 29. [todo] Docker dev backend: local Linux GUI envs behind the VMM driver interface for an end to end loop on a laptop.
 
 ### Design coverage
