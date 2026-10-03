@@ -36,8 +36,13 @@ class EnvError(FleetError):
     """The environment failed; the episode is excluded from training and retried."""
 
 
+class TakenOverError(FleetError):
+    """An operator drives the env; the worker waits until the takeover ends."""
+
+
 ERRORS_BY_STATUS = {429: AdmissionRejectedError, 503: NoCapacityError, 404: UnknownLeaseError,
                     409: InputFrozenError}
+ERRORS_BY_CODE = {"taken_over": TakenOverError}
 
 
 @dataclass(frozen=True)
@@ -46,6 +51,7 @@ class LeaseInfo:
     env_id: str
     host_id: str
     expires_at: str
+    taken_over: bool = False
 
 
 @dataclass(frozen=True)
@@ -108,9 +114,9 @@ class FleetClient:
                 error_payload = response.json()
             except ValueError:
                 error_payload = {"code": "unknown", "message": response.text}
-            error_class = ERRORS_BY_STATUS.get(response.status_code, EnvError)
-            raise error_class(response.status_code, error_payload.get("code", "unknown"),
-                              error_payload.get("message", ""))
+            code = error_payload.get("code", "unknown")
+            error_class = ERRORS_BY_CODE.get(code) or ERRORS_BY_STATUS.get(response.status_code, EnvError)
+            raise error_class(response.status_code, code, error_payload.get("message", ""))
         return response.json() if response.content else None
 
     def lease_group(self, request: LeaseGroupRequest) -> list[LeaseInfo]:
@@ -167,6 +173,14 @@ class FleetClient:
 
     def close(self, lease_id: str) -> None:
         self.request("DELETE", f"/v1/leases/{lease_id}")
+
+    def start_takeover(self, lease_id: str) -> dict[str, Any]:
+        """Hands the env to an operator: the session id and relay path noVNC connects to."""
+        return self.request("POST", f"/v1/leases/{lease_id}/takeover")
+
+    def end_takeover(self, lease_id: str) -> dict[str, Any]:
+        """Gives the env back to its worker and returns the operator's recorded input."""
+        return self.request("DELETE", f"/v1/leases/{lease_id}/takeover")
 
     def leases(self, run_id: str | None = None) -> list[LeaseInfo]:
         query = f"?run_id={run_id}" if run_id else ""

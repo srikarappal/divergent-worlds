@@ -22,7 +22,7 @@ DEFAULT_API_URL = "http://localhost:8080"
 
 
 def parse_value(text: str | None) -> Any:
-    """Control values are JSON when they parse, such as 4000, and plain strings otherwise, such as eval."""
+    """Control values are JSON when they parse (such as 4000) and plain strings otherwise (such as eval)."""
     if text is None:
         return None
     try:
@@ -117,6 +117,14 @@ def get_step_prompt(client: ExperimentClient, arguments: argparse.Namespace) -> 
 def review_episode(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
     label = json.loads(arguments.label_json) if arguments.label_json else None
     return client.review_episode(arguments.run_id, arguments.episode_id, arguments.action, arguments.note, label)
+
+
+def start_takeover(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.start_takeover(arguments.run_id, arguments.episode_id)
+
+
+def end_takeover(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.end_takeover(arguments.run_id, arguments.episode_id)
 
 
 def analyze_failures(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
@@ -249,7 +257,8 @@ HANDLERS: dict[str, OperationHandler] = {
     handler.__name__: handler
     for handler in (save_spec, get_spec, preflight, dry_run, launch, get_experiment, approve_experiment, list_runs,
                     get_run, get_run_spec, control_run, run_events, list_episodes, get_episode, live_wall, get_frame,
-                    cohort, get_provenance, get_step_prompt, review_episode, analyze_failures, get_failures,
+                    cohort, get_provenance, get_step_prompt, review_episode, start_takeover, end_takeover,
+                    analyze_failures, get_failures,
                     run_report, compare_policy_versions, compare_runs, list_review_items, list_catalog,
                     list_endpoints, register_endpoint, test_endpoint, set_endpoint_key, auth_config, me,
                     list_experiments, file_review_item, update_review_item, calibration, export_run, list_roles,
@@ -338,6 +347,11 @@ def build_parser() -> argparse.ArgumentParser:
     review_parser.add_argument("action", choices=("flag", "label", "verifier_bug", "task_draft", "audit_sample"))
     review_parser.add_argument("--note", default="")
     review_parser.add_argument("--label-json", default=None)
+    for command_name, handler, help_text in (("takeover", start_takeover, "drive a running episode's env yourself"),
+                                             ("end-takeover", end_takeover, "hand back and keep your demonstration")):
+        takeover_parser = add_operation(episode_commands, command_name, handler, help_text)
+        takeover_parser.add_argument("run_id")
+        takeover_parser.add_argument("episode_id")
 
     failures = groups.add_parser("failures", help="label and cluster failures")
     failure_commands = failures.add_subparsers(dest="command", required=True)

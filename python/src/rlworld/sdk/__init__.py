@@ -11,6 +11,7 @@ from rlworld.sdk.client import (
     NoCapacityError,
     SnapshotSource,
     StepResult,
+    TakenOverError,
     UnknownLeaseError,
 )
 from rlworld.sdk.env import ComputerUseEnv
@@ -32,5 +33,6 @@ __all__ = [
     "NoCapacityError",
     "SnapshotSource",
     "StepResult",
+    "TakenOverError",
     "UnknownLeaseError",
 ]

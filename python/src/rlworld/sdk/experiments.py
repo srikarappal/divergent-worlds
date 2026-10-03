@@ -12,6 +12,7 @@ import httpx
 from rlworld.preflight.preflight import ExperimentPreflight
 from rlworld.services.admin import AuditRecord, DataPolicy
 from rlworld.services.alerts import Alert
+from rlworld.services.takeover import Demonstration, TakeoverSession
 from rlworld.services.catalogs import CatalogEntry
 from rlworld.services.experiments import DryRun, ExperimentRecord, RunEvent, RunRecord
 from rlworld.services.review import (
@@ -153,6 +154,14 @@ class ExperimentClient:
                        label: dict[str, Any] | None = None) -> ReviewItem:
         body = {"action": action, "note": note, "label": label}
         return ReviewItem.model_validate(self.request("POST", f"/v1/runs/{run_id}/episodes/{episode_id}/actions", body))
+
+    def start_takeover(self, run_id: str, episode_id: str) -> TakeoverSession:
+        return TakeoverSession.model_validate(
+            self.request("POST", f"/v1/runs/{run_id}/episodes/{episode_id}/takeover"))
+
+    def end_takeover(self, run_id: str, episode_id: str) -> Demonstration:
+        return Demonstration.model_validate(
+            self.request("POST", f"/v1/runs/{run_id}/episodes/{episode_id}/takeover/end"))
 
     def analyze_failures(self, run_id: str) -> FailureAnalysisView:
         return FailureAnalysisView.model_validate(self.request("POST", f"/v1/runs/{run_id}/failures/analyze"))
