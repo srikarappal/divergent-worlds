@@ -7,6 +7,7 @@
 // answers a client presenting the container's token, which the policy's shell
 // cannot read. Screenshots come back as bytes; the channel stores them as content
 // addressed blobs and hands the node agent an observation that references them.
+// A second dialer reaches the guest's VNC relay for operator takeover.
 package guest
 
 import (
@@ -45,9 +46,11 @@ type VsockDialer struct {
 	Port       uint32
 }
 
-// TokenDialer reaches the agent of a development container over TCP.
+// TokenDialer reaches the agent of a development container over TCP; Greeting defaults to AUTH, VNC asks for
+// the VNC relay instead.
 type TokenDialer struct {
 	Endpoints Endpoints
+	Greeting  string
 }
 
 // Error is a failure the guest agent reported, with its code.
@@ -125,21 +128,39 @@ func (dialer TokenDialer) Dial(ctx context.Context, vmID string, deadline time.T
 	if err != nil {
 		return nil, nil, fmt.Errorf("dial guest of %s: %w", vmID, err)
 	}
-	reader, err := handshake(connection, deadline, fmt.Sprintf("AUTH %s\n", token), vmID)
+	greeting := dialer.Greeting
+	if greeting == "" {
+		greeting = "AUTH"
+	}
+	reader, err := handshake(connection, deadline, fmt.Sprintf("%s %s\n", greeting, token), vmID)
 	return connection, reader, err
 }
 
 // Channel implements the node agent's guest channel.
 type Channel struct {
 	dialer     Dialer
+	vncDialer  Dialer
 	frames     FrameStore
 	timeout    time.Duration
 	requestIDs atomic.Int64
 }
 
 // NewChannel returns a channel; calls without a context deadline give up after timeout.
-func NewChannel(dialer Dialer, frames FrameStore, timeout time.Duration) *Channel {
-	return &Channel{dialer: dialer, frames: frames, timeout: timeout}
+func NewChannel(dialer, vncDialer Dialer, frames FrameStore, timeout time.Duration) *Channel {
+	return &Channel{dialer: dialer, vncDialer: vncDialer, frames: frames, timeout: timeout}
+}
+
+// DialVNC opens the guest's VNC relay for a takeover; the connection has no deadline because teleop is open ended.
+func (channel *Channel) DialVNC(ctx context.Context, vmID string) (net.Conn, *bufio.Reader, error) {
+	connection, reader, err := channel.vncDialer.Dial(ctx, vmID, time.Now().Add(channel.timeout))
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := connection.SetDeadline(time.Time{}); err != nil {
+		connection.Close()
+		return nil, nil, err
+	}
+	return connection, reader, nil
 }
 
 func (channel *Channel) call(ctx context.Context, vmID, method string, params any) (json.RawMessage, error) {

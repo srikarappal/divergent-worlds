@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -43,6 +44,11 @@ func (fake *fakeVsock) answer(connection net.Conn) {
 	defer connection.Close()
 	reader := bufio.NewReader(connection)
 	handshake, err := reader.ReadString('\n')
+	if err == nil && handshake == "CONNECT 5901\n" {
+		connection.Write([]byte("OK 1073741825\nRFB 003.008\n"))
+		echo(reader, connection)
+		return
+	}
 	if err != nil || handshake != "CONNECT 5005\n" {
 		return
 	}
@@ -93,7 +99,8 @@ func newTestChannel(t *testing.T, fake *fakeVsock) (*Channel, string) {
 	t.Helper()
 	frameRoot := t.TempDir()
 	dialer := VsockDialer{SocketPath: fake.socketPath, Port: 5005}
-	return NewChannel(dialer, NewFilesystemFrames(frameRoot), 2*time.Second), frameRoot
+	vncDialer := VsockDialer{SocketPath: fake.socketPath, Port: 5901}
+	return NewChannel(dialer, vncDialer, NewFilesystemFrames(frameRoot), 2*time.Second), frameRoot
 }
 
 func TestPrepareSendsTheWorldClockAndEntropy(t *testing.T) {
@@ -227,9 +234,14 @@ func (fake *fakeContainerAgent) answer(connection net.Conn) {
 	reader := bufio.NewReader(connection)
 	greeting, err := reader.ReadString('\n')
 	fake.mu.Lock()
-	expected := "AUTH " + fake.token + "\n"
+	token := fake.token
 	fake.mu.Unlock()
-	if err != nil || greeting != expected {
+	if err == nil && greeting == "VNC "+token+"\n" {
+		connection.Write([]byte("OK\nRFB 003.008\n"))
+		echo(reader, connection)
+		return
+	}
+	if err != nil || greeting != "AUTH "+token+"\n" {
 		return
 	}
 	connection.Write([]byte("OK\n"))
@@ -246,7 +258,8 @@ func TestTokenDialerProvesItselfToContainerAgents(t *testing.T) {
 	fake := &fakeContainerAgent{listener: listener, token: "s3cret"}
 	t.Cleanup(fake.close)
 	go fake.serve()
-	channel := NewChannel(TokenDialer{Endpoints: fake}, NewFilesystemFrames(t.TempDir()), 2*time.Second)
+	channel := NewChannel(TokenDialer{Endpoints: fake}, TokenDialer{Endpoints: fake, Greeting: "VNC"},
+		NewFilesystemFrames(t.TempDir()), 2*time.Second)
 	if hash, err := channel.ScreenHash(context.Background(), "env_1"); err != nil || hash != "hash" {
 		t.Fatalf("screen hash over tcp: %q %v", hash, err)
 	}
@@ -258,4 +271,54 @@ func TestTokenDialerProvesItselfToContainerAgents(t *testing.T) {
 		!strings.Contains(err.Error(), "no such container") {
 		t.Fatalf("unknown container: %v", err)
 	}
+}
+
+// echo plays a VNC server that repeats whatever the client sends until it hangs up.
+func echo(reader *bufio.Reader, connection net.Conn) {
+	buffer := make([]byte, 256)
+	for {
+		count, err := reader.Read(buffer)
+		if err != nil {
+			return
+		}
+		connection.Write(buffer[:count])
+	}
+}
+
+func readVNC(t *testing.T, connection net.Conn, reader *bufio.Reader) {
+	t.Helper()
+	defer connection.Close()
+	banner := make([]byte, 12)
+	if _, err := io.ReadFull(reader, banner); err != nil || string(banner) != "RFB 003.008\n" {
+		t.Fatalf("banner: %q %v", banner, err)
+	}
+	connection.Write([]byte("pointer"))
+	echoed := make([]byte, 7)
+	if _, err := io.ReadFull(reader, echoed); err != nil || string(echoed) != "pointer" {
+		t.Fatalf("echo: %q %v", echoed, err)
+	}
+}
+
+func TestVNCRelaysOpenOverVsockAndTokens(t *testing.T) {
+	fake := startFakeVsock(t, map[string]string{})
+	channel, _ := newTestChannel(t, fake)
+	connection, reader, err := channel.DialVNC(context.Background(), "vm_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	readVNC(t, connection, reader)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	container := &fakeContainerAgent{listener: listener, token: "s3cret"}
+	t.Cleanup(container.close)
+	go container.serve()
+	tokens := NewChannel(TokenDialer{Endpoints: container}, TokenDialer{Endpoints: container, Greeting: "VNC"},
+		NewFilesystemFrames(t.TempDir()), 2*time.Second)
+	connection, reader, err = tokens.DialVNC(context.Background(), "env_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	readVNC(t, connection, reader)
 }

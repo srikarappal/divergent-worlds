@@ -7,11 +7,13 @@
 package nodeagent
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -38,6 +40,7 @@ type GuestChannel interface {
 	Observe(ctx context.Context, vmID string, kinds []string) (json.RawMessage, error)
 	Inject(ctx context.Context, vmID string, payload json.RawMessage) error
 	Extract(ctx context.Context, vmID string, apps []string) (json.RawMessage, error)
+	DialVNC(ctx context.Context, vmID string) (net.Conn, *bufio.Reader, error)
 }
 
 // entropyBytes is how much fresh randomness each restored clone's kernel RNG gets.
@@ -359,6 +362,14 @@ func (agent *Agent) Extract(ctx context.Context, envID string, apps []string) (j
 	}
 	state, extractErr := agent.guest.Extract(ctx, envID, apps)
 	return state, errors.Join(extractErr, agent.Pause(ctx, envID))
+}
+
+// DialVNC opens the env's screen for an operator; the caller keeps the env running while the session lasts.
+func (agent *Agent) DialVNC(ctx context.Context, envID string) (net.Conn, *bufio.Reader, error) {
+	if _, err := agent.lookup(envID); err != nil {
+		return nil, nil, err
+	}
+	return agent.guest.DialVNC(ctx, envID)
 }
 
 // Destroy removes the VM, its network and its overlay, then frees the clone slot.

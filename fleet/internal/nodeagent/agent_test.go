@@ -1,9 +1,12 @@
 package nodeagent
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net"
 	"slices"
 	"strings"
 	"sync"
@@ -80,6 +83,12 @@ func (guest *scriptedGuest) Inject(_ context.Context, _ string, payload json.Raw
 
 func (guest *scriptedGuest) Extract(_ context.Context, _ string, apps []string) (json.RawMessage, error) {
 	return json.RawMessage(`{"apps": "` + strings.Join(apps, ",") + `"}`), nil
+}
+
+func (guest *scriptedGuest) DialVNC(context.Context, string) (net.Conn, *bufio.Reader, error) {
+	server, client := net.Pipe()
+	go server.Write([]byte("RFB 003.008\n"))
+	return client, bufio.NewReader(client), nil
 }
 
 func newTestAgent(guest *scriptedGuest) (*Agent, *fake.Driver, *recordingCommands, *clock.Fake) {
@@ -259,6 +268,23 @@ func TestSelfIsolatingDriversGetNoNetworkOrOverlayAndForkFromTheCommittedImage(t
 	}
 	if len(commands.commands) != 0 {
 		t.Fatalf("nothing to wire or tear down on the host: %v", commands.commands)
+	}
+}
+
+func TestOperatorsReachTheScreenOfKnownEnvsOnly(t *testing.T) {
+	agent, _, _, _ := newTestAgent(&scriptedGuest{hashes: []string{"a"}})
+	if _, _, err := agent.DialVNC(context.Background(), "env_9"); !errors.Is(err, ErrUnknownEnv) {
+		t.Fatalf("unknown env: %v", err)
+	}
+	agent.Start(context.Background(), startRequest("env_1"))
+	connection, reader, err := agent.DialVNC(context.Background(), "env_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	banner := make([]byte, 12)
+	if _, err := io.ReadFull(reader, banner); err != nil || string(banner) != "RFB 003.008\n" {
+		t.Fatalf("banner: %q %v", banner, err)
 	}
 }
 
