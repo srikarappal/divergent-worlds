@@ -71,6 +71,7 @@ Added after checking DESIGN.md section by section against the tasks above.
 37. [todo] Network proxies: record and replay proxy configuration and the logging, rate limited egress proxy for live internet eval (6.6).
 38. [todo] Eval integrity: clone fidelity measured against real apps and split overlap checks against public benchmarks (6.4, 6.10).
 39. [todo] Observability: Prometheus metrics from fleetd and experimentd, Grafana dashboards for platform health, chaos tests (6.15).
+40. [todo] Windows guest channel: QMP screens and input at the hypervisor plus the autologon in session helper for UIA trees, Excel COM state, injection and extraction (6.1, 6.3).
 
 ## Follow ups
 
