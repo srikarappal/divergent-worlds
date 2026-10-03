@@ -133,6 +133,20 @@ func New(config Config, driver vmm.Driver, guest GuestChannel, commands CommandR
 		envs: map[string]*env{}, usedIndexes: map[int]bool{}}
 }
 
+// isolatesItself is true for drivers whose VMs bring their own network and copy on write disk, like the Docker
+// dev backend's containers: the node agent makes neither and forks start from the image a snapshot committed.
+func isolatesItself(driverName string) bool {
+	return driverName == "docker"
+}
+
+// cloneAddress is the clone's NAT address, or empty when the driver isolates its own VMs.
+func cloneAddress(network netplan.CloneNetwork) string {
+	if !network.CloneAddress.IsValid() {
+		return ""
+	}
+	return network.CloneAddress.String()
+}
+
 // OverlayCommand makes a copy on write disk for one clone: a reflink copy of the raw image for
 // Firecracker, a qcow2 overlay backed by the template disk for QEMU.
 func OverlayCommand(driverName, baseDiskPath, overlayPath string) []string {
@@ -183,7 +197,11 @@ func (agent *Agent) Start(ctx context.Context, request StartRequest) (EnvInfo, e
 		return EnvInfo{}, err
 	}
 	overlayPath := filepath.Join(agent.config.OverlayDir, request.EnvID+".disk")
+	diskPath := overlayPath
 	setup := append(network.SetupCommands(), OverlayCommand(agent.driver.Name(), request.BaseDiskPath, overlayPath))
+	if isolatesItself(agent.driver.Name()) {
+		network, overlayPath, diskPath, setup = netplan.CloneNetwork{Index: index}, "", request.BaseDiskPath, nil
+	}
 	if err := agent.runAll(ctx, setup); err != nil {
 		agent.cleanup(ctx, network, overlayPath)
 		agent.freeIndex(index)
@@ -191,7 +209,7 @@ func (agent *Agent) Start(ctx context.Context, request StartRequest) (EnvInfo, e
 	}
 	restored, err := agent.driver.Restore(ctx, vmm.RestoreSpec{
 		VMID: request.EnvID, StatePath: request.StatePath, MemoryPath: request.MemoryPath,
-		DiskOverlayPath: overlayPath, MemoryMiB: request.MemoryMiB, VCPUs: request.VCPUs,
+		DiskOverlayPath: diskPath, MemoryMiB: request.MemoryMiB, VCPUs: request.VCPUs,
 		Namespace: network.Namespace, Resume: request.Resume,
 	})
 	if err != nil {
@@ -204,14 +222,19 @@ func (agent *Agent) Start(ctx context.Context, request StartRequest) (EnvInfo, e
 		elapsed: request.GuestElapsed, needsEntropy: true}
 	agent.mu.Unlock()
 	return EnvInfo{EnvID: request.EnvID, State: restored.State, Namespace: network.Namespace,
-		CloneAddress: network.CloneAddress.String()}, nil
+		CloneAddress: cloneAddress(network)}, nil
 }
 
+// cleanup undoes what Start made; drivers that isolate their own VMs left nothing to undo.
 func (agent *Agent) cleanup(ctx context.Context, network netplan.CloneNetwork, overlayPath string) {
-	for _, argv := range network.TeardownCommands() {
-		agent.commands.Run(ctx, argv)
+	if network.Namespace != "" {
+		for _, argv := range network.TeardownCommands() {
+			agent.commands.Run(ctx, argv)
+		}
 	}
-	agent.commands.Run(ctx, []string{"rm", "-f", overlayPath})
+	if overlayPath != "" {
+		agent.commands.Run(ctx, []string{"rm", "-f", overlayPath})
+	}
 }
 
 func (agent *Agent) lookup(envID string) (*env, error) {
@@ -367,7 +390,10 @@ func (agent *Agent) Fork(ctx context.Context, envID string, count int, checkpoin
 	}
 	agent.setState(envID, vmm.Paused)
 	checkpointDisk := checkpointPrefix + ".disk"
-	if err := agent.commands.Run(ctx, []string{"cp", "--reflink=always", source.overlayPath, checkpointDisk}); err != nil {
+	if isolatesItself(agent.driver.Name()) {
+		checkpointDisk = checkpoint.StatePath
+	} else if err := agent.commands.Run(ctx, []string{"cp", "--reflink=always", source.overlayPath,
+		checkpointDisk}); err != nil {
 		return nil, fmt.Errorf("copy disk of %s: %w", envID, err)
 	}
 	var forks []EnvInfo

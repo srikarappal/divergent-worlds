@@ -231,6 +231,37 @@ func TestForkCheckpointsAndStartsClonesFromIt(t *testing.T) {
 	}
 }
 
+func TestSelfIsolatingDriversGetNoNetworkOrOverlayAndForkFromTheCommittedImage(t *testing.T) {
+	agent, driver, commands, _ := newTestAgent(&scriptedGuest{hashes: []string{"a"}})
+	driver.DriverName = "docker"
+	request := startRequest("env_1")
+	request.BaseDiskPath = "rlworld-dev/noble:1"
+	info, err := agent.Start(context.Background(), request)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if info.Namespace != "" || info.CloneAddress != "" {
+		t.Fatalf("containers bring their own network: %+v", info)
+	}
+	if driver.Restores[0].DiskOverlayPath != "rlworld-dev/noble:1" || driver.Restores[0].Namespace != "" {
+		t.Fatalf("the image is the disk: %+v", driver.Restores[0])
+	}
+	forks, err := agent.Fork(context.Background(), "env_1", 2, "/var/lib/rlworld/checkpoints")
+	if err != nil || len(forks) != 2 {
+		t.Fatalf("fork: %+v %v", forks, err)
+	}
+	committed := driver.Restores[1].DiskOverlayPath
+	if !strings.HasPrefix(committed, "/var/lib/rlworld/checkpoints/env_1_at_") || committed != driver.Restores[2].StatePath {
+		t.Fatalf("forks restore the committed snapshot: %+v", driver.Restores[1:])
+	}
+	if err := agent.Destroy(context.Background(), "env_1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(commands.commands) != 0 {
+		t.Fatalf("nothing to wire or tear down on the host: %v", commands.commands)
+	}
+}
+
 func TestInjectReachesTheGuest(t *testing.T) {
 	guest := &scriptedGuest{hashes: []string{"a"}}
 	agent, _, _, _ := newTestAgent(guest)

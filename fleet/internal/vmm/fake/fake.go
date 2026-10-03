@@ -15,16 +15,20 @@ type Driver struct {
 	vms        map[string]vmm.VM
 	Operations []string
 	FailNext   map[string]error
+	// DriverName lets tests stand in for a named driver.
+	DriverName string
+	// Restores keeps every restore spec in order.
+	Restores []vmm.RestoreSpec
 }
 
-// New returns an empty fake driver.
+// New returns an empty fake driver named fake.
 func New() *Driver {
-	return &Driver{vms: map[string]vmm.VM{}, FailNext: map[string]error{}}
+	return &Driver{vms: map[string]vmm.VM{}, FailNext: map[string]error{}, DriverName: "fake"}
 }
 
 // Name identifies the driver.
 func (driver *Driver) Name() string {
-	return "fake"
+	return driver.DriverName
 }
 
 func (driver *Driver) record(operation, vmID string) error {
@@ -43,6 +47,7 @@ func (driver *Driver) Restore(_ context.Context, spec vmm.RestoreSpec) (vmm.VM, 
 	if err := driver.record("restore", spec.VMID); err != nil {
 		return vmm.VM{}, err
 	}
+	driver.Restores = append(driver.Restores, spec)
 	state := vmm.Paused
 	if spec.Resume {
 		state = vmm.Running
