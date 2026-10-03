@@ -39,7 +39,7 @@ Status is one of todo, doing or done.
 
 ### Python services and SDK
 
-19. [todo] Env client SDK and MCP facade.
+19. [done] Env client SDK and MCP facade.
 20. [todo] Reward service: the finish pipeline (freeze, extract, verify, judge, compose, record).
 21. [todo] experimentd: specs, experiments, sweeps, preflight, dry run, launch, control and event stream; trainer launcher with Kubernetes and Slurm renderers; run tokens.
 22. [todo] Rollout worker library: episode loop, group forks, adapters, gateway calls, trajectory writes; trainer adapter shims.
