@@ -47,7 +47,7 @@ Status is one of todo, doing or done.
 ### Web console
 
 23. [done] Console scaffold: API client, spec editor with YAML view and schema validation, catalogs; experimentd catalog and endpoint registry routes; the SDK and CLI held to the console's operations by parity tests.
-24. [todo] Console preflight, launch and live: preflight panel, run dashboard over server sent events, live wall.
+24. [done] Console preflight, launch and live: preflight panel, run dashboard over server sent events, live wall.
 25. [todo] Console review: trajectory scrubber, cohort view, comparisons, reward provenance, one click actions.
 26. [todo] Console queues and admin: labeling, review queues, roles, audit log.
 
