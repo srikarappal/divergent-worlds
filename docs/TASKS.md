@@ -21,7 +21,7 @@ Status is one of todo, doing or done.
 4. [done] Judge: rubric model, prompt builder that fences untrusted screen text, structured verdict parsing, cache keyed by final state hash, ensembles for low confidence.
 5. [done] Task gates: null action, oracle, alternative solution, near miss, rerun stability and solvability gates with a gate report.
 6. [done] Curriculum: pass rate tracking per template, difficulty bucket and policy version; learnable band sampling; zero advantage group filtering.
-7. [todo] Estimator and preflight: Little's law capacity and cost model; validation, endpoint probes and trap warnings producing a preflight report.
+7. [done] Estimator and preflight: Little's law capacity and cost model; validation, endpoint probes and trap warnings producing a preflight report.
 8. [todo] Model gateway: endpoint registry, OpenAI compatible client, retries with jitter, circuit breaker, token bucket rate limits, response cache, metering, pinned versions, token in token out records.
 9. [todo] Trajectories: step and episode records, filesystem store behind an object store interface, exact replay, SFT and preference pair export.
 10. [todo] Failure clustering: labeler protocol, cluster rollups per template and policy version, verifier false negative routing.
