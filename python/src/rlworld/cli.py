@@ -144,6 +144,77 @@ def list_review_items(client: ExperimentClient, arguments: argparse.Namespace) -
                                     episode_id=arguments.episode_id)
 
 
+def auth_config(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.auth_config()
+
+
+def me(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.me()
+
+
+def list_experiments(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.list_experiments(tenant=arguments.tenant)
+
+
+def file_review_item(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.file_review_item(arguments.source, arguments.title, queue=arguments.queue, run_id=arguments.run_id,
+                                   episode_ids=arguments.episode_id, note=arguments.note)
+
+
+def update_review_item(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    label = json.loads(arguments.label_json) if arguments.label_json else None
+    return client.update_review_item(arguments.item_id, status=arguments.status, note=arguments.note, label=label)
+
+
+def calibration(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.calibration(run_id=arguments.run_id)
+
+
+def export_run(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.export_run(arguments.run_id, arguments.kind)
+
+
+def list_roles(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.list_roles()
+
+
+def set_roles(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.set_roles(arguments.subject, [role for role in arguments.roles.split(",") if role])
+
+
+def list_data_policies(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.list_data_policies()
+
+
+def set_data_policy(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.set_data_policy(arguments.tenant, yaml.safe_load(Path(arguments.policy_file).read_text()))
+
+
+def audit_log(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.audit_log(actor=arguments.actor, action=arguments.action, since=arguments.since,
+                            limit=arguments.limit)
+
+
+def pool_status(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.pool_status()
+
+
+def sweep_retention(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.sweep_retention()
+
+
+def fleet_admission(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.fleet_admission()
+
+
+def set_tenant_quota(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.set_tenant_quota(arguments.tenant, arguments.quota)
+
+
+def frame_grant(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.frame_grant()
+
+
 def list_catalog(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
     return client.list_catalog(arguments.kind)
 
@@ -172,7 +243,10 @@ HANDLERS: dict[str, OperationHandler] = {
                     get_run, get_run_spec, control_run, run_events, list_episodes, get_episode, live_wall, get_frame,
                     cohort, get_provenance, get_step_prompt, review_episode, analyze_failures, get_failures,
                     run_report, compare_policy_versions, compare_runs, list_review_items, list_catalog,
-                    list_endpoints, register_endpoint, test_endpoint, set_endpoint_key)
+                    list_endpoints, register_endpoint, test_endpoint, set_endpoint_key, auth_config, me,
+                    list_experiments, file_review_item, update_review_item, calibration, export_run, list_roles,
+                    set_roles, list_data_policies, set_data_policy, audit_log, pool_status, sweep_retention,
+                    fleet_admission, set_tenant_quota, frame_grant)
 }
 
 
@@ -186,6 +260,8 @@ def add_operation(commands: Any, command_name: str, handler: OperationHandler,
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="rlworld", description="Configure, launch and watch experiments.")
     parser.add_argument("--api-url", default=os.environ.get("RLWORLD_API_URL", DEFAULT_API_URL))
+    parser.add_argument("--token", default=os.environ.get("RLWORLD_ACCESS_TOKEN"),
+                        help="OIDC access token; defaults to RLWORLD_ACCESS_TOKEN")
     groups = parser.add_subparsers(dest="group", required=True)
 
     specs = groups.add_parser("specs", help="save, read, preflight, dry run and launch specs")
@@ -201,6 +277,8 @@ def build_parser() -> argparse.ArgumentParser:
     experiments = groups.add_parser("experiments", help="read and approve experiments")
     experiment_commands = experiments.add_subparsers(dest="command", required=True)
     add_operation(experiment_commands, "get", get_experiment, "read an experiment").add_argument("experiment_id")
+    add_operation(experiment_commands, "list", list_experiments, "list experiments").add_argument("--tenant",
+                                                                                                 default=None)
     add_operation(experiment_commands, "approve", approve_experiment, "approve a launch").add_argument("experiment_id")
 
     runs = groups.add_parser("runs", help="list, read, control and follow runs")
@@ -219,6 +297,9 @@ def build_parser() -> argparse.ArgumentParser:
     live_parser = add_operation(run_commands, "live", live_wall, "show the latest frame of running episodes")
     live_parser.add_argument("run_id")
     live_parser.add_argument("--limit", type=int, default=24)
+    export_parser = add_operation(run_commands, "export", export_run, "export SFT rows or preference pairs")
+    export_parser.add_argument("run_id")
+    export_parser.add_argument("kind", choices=("sft", "preferences"))
     add_operation(run_commands, "report", run_report, "eval report with confidence intervals").add_argument("run_id")
 
     episodes = groups.add_parser("episodes", help="list and read episodes")
@@ -266,6 +347,50 @@ def build_parser() -> argparse.ArgumentParser:
     review_list = add_operation(review_commands, "list", list_review_items, "list review items")
     for filter_name in ("queue", "status", "run-id", "episode-id"):
         review_list.add_argument(f"--{filter_name}", default=None)
+    review_file = add_operation(review_commands, "file", file_review_item, "file an item for human review")
+    review_file.add_argument("source", choices=("gates", "alert"))
+    review_file.add_argument("--title", required=True)
+    review_file.add_argument("--queue", default="review")
+    review_file.add_argument("--run-id", default="")
+    review_file.add_argument("--episode-id", action="append", default=[])
+    review_file.add_argument("--note", default="")
+    review_update = add_operation(review_commands, "update", update_review_item, "resolve, dismiss or label")
+    review_update.add_argument("item_id")
+    review_update.add_argument("--status", choices=("open", "resolved", "dismissed"), default=None)
+    review_update.add_argument("--note", default=None)
+    review_update.add_argument("--label-json", default=None)
+    add_operation(review_commands, "calibration", calibration, "agreement with human labels").add_argument(
+        "--run-id", default=None)
+
+    auth = groups.add_parser("auth", help="sign in details")
+    auth_commands = auth.add_subparsers(dest="command", required=True)
+    add_operation(auth_commands, "config", auth_config, "how to sign in")
+    add_operation(auth_commands, "me", me, "who is signed in")
+
+    admin = groups.add_parser("admin", help="roles, data policies, audit, pools and retention")
+    admin_commands = admin.add_subparsers(dest="command", required=True)
+    add_operation(admin_commands, "roles", list_roles, "roles granted by admins")
+    roles_parser = add_operation(admin_commands, "set-roles", set_roles, "grant comma separated roles")
+    roles_parser.add_argument("subject")
+    roles_parser.add_argument("roles")
+    add_operation(admin_commands, "data-policies", list_data_policies, "per tenant data policies")
+    policy_parser = add_operation(admin_commands, "set-data-policy", set_data_policy, "set from a YAML or JSON file")
+    policy_parser.add_argument("tenant")
+    policy_parser.add_argument("policy_file")
+    audit_parser = add_operation(admin_commands, "audit", audit_log, "the audit log, newest first")
+    audit_parser.add_argument("--actor", default=None)
+    audit_parser.add_argument("--action", default=None)
+    audit_parser.add_argument("--since", type=float, default=None)
+    audit_parser.add_argument("--limit", type=int, default=500)
+    add_operation(admin_commands, "pools", pool_status, "free seats and identities")
+    add_operation(admin_commands, "sweep-retention", sweep_retention, "apply retention windows now")
+
+    fleet = groups.add_parser("fleet", help="fleet admission")
+    fleet_commands = fleet.add_subparsers(dest="command", required=True)
+    add_operation(fleet_commands, "admission", fleet_admission, "capacity, quotas and usage")
+    quota_parser = add_operation(fleet_commands, "set-quota", set_tenant_quota, "set a tenant quota")
+    quota_parser.add_argument("tenant")
+    quota_parser.add_argument("quota", type=int)
 
     frames = groups.add_parser("frames", help="download frames")
     frame_commands = frames.add_subparsers(dest="command", required=True)
@@ -273,6 +398,7 @@ def build_parser() -> argparse.ArgumentParser:
     frame_get.add_argument("frame_digest")
     frame_get.add_argument("--size", choices=("full", "thumbnail"), default="full")
     frame_get.add_argument("--output", required=True)
+    add_operation(frame_commands, "grant", frame_grant, "a short lived grant to view frames")
 
     catalogs = groups.add_parser("catalogs", help="browse catalogs")
     catalog_commands = catalogs.add_subparsers(dest="command", required=True)
@@ -299,7 +425,8 @@ def to_json(result: Any) -> Any:
 def main(argv: Sequence[str] | None = None, client: ExperimentClient | None = None) -> int:
     arguments = build_parser().parse_args(argv)
     try:
-        result = HANDLERS[arguments.operation](client or ExperimentClient(arguments.api_url), arguments)
+        result = HANDLERS[arguments.operation](client or ExperimentClient(arguments.api_url,
+                                                                          access_token=arguments.token), arguments)
     except ExperimentApiError as error:
         print(json.dumps({"error": str(error), "problems": error.problems}, indent=2), file=sys.stderr)
         return 1

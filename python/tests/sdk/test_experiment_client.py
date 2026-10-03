@@ -19,7 +19,8 @@ from rlworld.specs import dump_spec_document, load_spec_document, parse_spec_doc
 OPERATIONS_PATH = Path(__file__).resolve().parents[3] / "schemas" / "api_operations.json"
 OPERATIONS = json.loads(OPERATIONS_PATH.read_text())["operations"]
 PLACEHOLDER_PATTERN = re.compile(r"\{(\w+)\}")
-SAMPLE_VALUES = {"status": "running", "size": "thumbnail", "action": "flag"}
+SAMPLE_VALUES = {"status": "running", "size": "thumbnail", "action": "flag", "item_status": "resolved",
+                 "source": "gates", "kind": "sft"}
 ENDPOINT_YAML = """name: byo_judge
 base_url: https://judge.customer.example/v1
 allowed_models: [judge_v1]
@@ -108,7 +109,8 @@ def sample_value(placeholder: re.Match) -> str:
 def test_every_console_operation_has_a_route_an_sdk_method_and_a_cli_command(operation, experiment_service):
     app = create_app(experiment_service)
     routes = {(method, rule.rule) for rule in app.url_map.iter_rules() for method in rule.methods}
-    assert (operation["method"], PLACEHOLDER_PATTERN.sub(r"<\1>", operation["path"])) in routes
+    if operation.get("service") != "fleetd":
+        assert (operation["method"], PLACEHOLDER_PATTERN.sub(r"<\1>", operation["path"])) in routes
     assert callable(getattr(ExperimentClient, operation["name"], None))
     assert operation["sdk"].startswith(f"client.{operation['name']}(")
     words = shlex.split(PLACEHOLDER_PATTERN.sub(sample_value, operation["cli"]))

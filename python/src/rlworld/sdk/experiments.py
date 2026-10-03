@@ -10,9 +10,17 @@ from typing import Any
 import httpx
 
 from rlworld.preflight.preflight import ExperimentPreflight
+from rlworld.services.admin import AuditRecord, DataPolicy
 from rlworld.services.catalogs import CatalogEntry
 from rlworld.services.experiments import DryRun, ExperimentRecord, RunEvent, RunRecord
-from rlworld.services.review import CohortEpisode, Comparison, EpisodeProvenance, FailureAnalysisView, ReviewItem
+from rlworld.services.review import (
+    CalibrationReport,
+    CohortEpisode,
+    Comparison,
+    EpisodeProvenance,
+    FailureAnalysisView,
+    ReviewItem,
+)
 from rlworld.services.trajectory_views import LiveTile
 from rlworld.trajectories.records import EpisodeRecord
 
@@ -40,13 +48,23 @@ def raise_for_error(response: httpx.Response) -> None:
 
 
 class ExperimentClient:
-    def __init__(self, base_url: str, http_client: httpx.Client | None = None, timeout_seconds: float = 60.0) -> None:
+    """Every console operation behind the one API gateway; admission routes are served by fleetd."""
+
+    def __init__(self, base_url: str, http_client: httpx.Client | None = None, timeout_seconds: float = 60.0,
+                 access_token: str | None = None) -> None:
         self.base_url = base_url.rstrip("/")
         self.http_client = http_client or httpx.Client(timeout=timeout_seconds)
+        self.access_token = access_token
+
+    def headers(self, content_type: str | None = None) -> dict[str, str]:
+        headers = {"Authorization": f"Bearer {self.access_token}"} if self.access_token else {}
+        if content_type is not None:
+            headers["Content-Type"] = content_type
+        return headers
 
     def request(self, method: str, path: str, json_body: Any = None, content: bytes | None = None,
                 params: dict[str, Any] | None = None) -> Any:
-        headers = {"Content-Type": "application/yaml"} if content is not None else None
+        headers = self.headers("application/yaml" if content is not None else None)
         response = self.http_client.request(method, f"{self.base_url}{path}", json=json_body, content=content,
                                             params=params, headers=headers)
         raise_for_error(response)
@@ -90,7 +108,8 @@ class ExperimentClient:
 
     def run_events(self, run_id: str, follow: bool = False, after: int = 0) -> Iterator[RunEvent]:
         params = {"follow": str(follow).lower(), "after": after}
-        with self.http_client.stream("GET", f"{self.base_url}/v1/runs/{run_id}/events", params=params) as response:
+        with self.http_client.stream("GET", f"{self.base_url}/v1/runs/{run_id}/events", params=params,
+                                     headers=self.headers()) as response:
             if response.status_code >= 400:
                 response.read()
                 raise_for_error(response)
@@ -112,7 +131,8 @@ class ExperimentClient:
         return [LiveTile.model_validate(tile) for tile in payload["tiles"]]
 
     def get_frame(self, frame_digest: str, size: str = "full") -> bytes:
-        response = self.http_client.get(f"{self.base_url}/v1/frames/{frame_digest}", params={"size": size})
+        response = self.http_client.get(f"{self.base_url}/v1/frames/{frame_digest}", params={"size": size},
+                                        headers=self.headers())
         raise_for_error(response)
         return response.content
 
@@ -155,6 +175,9 @@ class ExperimentClient:
         payload = self.request("GET", "/v1/review_items", params=params)
         return [ReviewItem.model_validate(item) for item in payload["items"]]
 
+    def frame_grant(self) -> dict[str, Any]:
+        return self.request("GET", "/v1/frame_grant")
+
     def list_catalog(self, kind: str) -> list[CatalogEntry]:
         return [CatalogEntry.model_validate(entry) for entry in self.request("GET", f"/v1/catalogs/{kind}")["entries"]]
 
@@ -169,3 +192,63 @@ class ExperimentClient:
 
     def set_endpoint_key(self, name: str, key: str) -> None:
         self.request("PUT", f"/v1/endpoints/{name}/key", {"key": key})
+
+    def auth_config(self) -> dict[str, Any]:
+        return self.request("GET", "/v1/auth/config")
+
+    def me(self) -> dict[str, Any]:
+        return self.request("GET", "/v1/me")
+
+    def list_experiments(self, tenant: str | None = None) -> list[ExperimentRecord]:
+        payload = self.request("GET", "/v1/experiments", params={"tenant": tenant} if tenant else None)
+        return [ExperimentRecord.model_validate(experiment) for experiment in payload["experiments"]]
+
+    def file_review_item(self, source: str, title: str, queue: str = "review", run_id: str = "",
+                         episode_ids: list[str] | None = None, note: str = "") -> ReviewItem:
+        body = {"source": source, "title": title, "queue": queue, "run_id": run_id, "episode_ids": episode_ids or [],
+                "note": note}
+        return ReviewItem.model_validate(self.request("POST", "/v1/review_items", body))
+
+    def update_review_item(self, item_id: str, status: str | None = None, note: str | None = None,
+                           label: dict[str, Any] | None = None) -> ReviewItem:
+        body = {"status": status, "note": note, "label": label}
+        return ReviewItem.model_validate(self.request("PATCH", f"/v1/review_items/{item_id}", body))
+
+    def calibration(self, run_id: str | None = None) -> CalibrationReport:
+        return CalibrationReport.model_validate(
+            self.request("GET", "/v1/calibration", params={"run_id": run_id} if run_id else None))
+
+    def export_run(self, run_id: str, kind: str) -> list[dict[str, Any]]:
+        return self.request("GET", f"/v1/runs/{run_id}/exports/{kind}")["rows"]
+
+    def list_roles(self) -> dict[str, list[str]]:
+        return self.request("GET", "/v1/admin/roles")["bindings"]
+
+    def set_roles(self, subject: str, roles: list[str]) -> dict[str, Any]:
+        return self.request("PUT", f"/v1/admin/roles/{subject}", {"roles": roles})
+
+    def list_data_policies(self) -> list[DataPolicy]:
+        payload = self.request("GET", "/v1/admin/data_policies")
+        return [DataPolicy.model_validate(policy) for policy in payload["policies"]]
+
+    def set_data_policy(self, tenant: str, policy: dict[str, Any]) -> DataPolicy:
+        return DataPolicy.model_validate(self.request("PUT", f"/v1/admin/data_policies/{tenant}", policy))
+
+    def audit_log(self, actor: str | None = None, action: str | None = None, since: float | None = None,
+                  limit: int = 500) -> list[AuditRecord]:
+        filters = {"actor": actor, "action": action, "since": since, "limit": limit}
+        params = {name: value for name, value in filters.items() if value is not None}
+        payload = self.request("GET", "/v1/admin/audit", params=params)
+        return [AuditRecord.model_validate(record) for record in payload["records"]]
+
+    def pool_status(self) -> dict[str, int]:
+        return self.request("GET", "/v1/admin/pools")["pools"]
+
+    def sweep_retention(self) -> dict[str, Any]:
+        return self.request("POST", "/v1/admin/retention/sweep")
+
+    def fleet_admission(self) -> dict[str, Any]:
+        return self.request("GET", "/v1/admission")
+
+    def set_tenant_quota(self, tenant: str, quota: int) -> dict[str, Any]:
+        return self.request("PUT", f"/v1/admission/tenants/{tenant}", {"quota": quota})
