@@ -17,6 +17,7 @@ from pydantic import BaseModel, ValidationError
 
 from rlworld.gateway.config import DuplicateEndpointError, EndpointConfig
 from rlworld.gateway.errors import EndpointNotFoundError
+from rlworld.sdk.client import FleetError
 from rlworld.services.admin import DataPolicy, DataPolicyStore, PlatformAuditLog
 from rlworld.services.alerts import AlertMonitor
 from rlworld.services.auth import DEVELOPMENT_PRINCIPAL, AuthError, ForbiddenError, PlatformAuth
@@ -36,6 +37,7 @@ from rlworld.services.experiments import (
     UnknownRecordError,
 )
 from rlworld.services.retention import RetentionSweeper
+from rlworld.services.takeover import TakeoverError, TakeoverService
 from rlworld.services.review import (
     EpisodeFilter,
     FiledItem,
@@ -60,6 +62,7 @@ POLICIES_KEY = "rlworld_data_policies"
 POOLS_KEY = "rlworld_pool_status"
 RETENTION_KEY = "rlworld_retention"
 ALERTS_KEY = "rlworld_alerts"
+TAKEOVER_KEY = "rlworld_takeover"
 ALERT_FILTERS = ("run_id", "experiment_id", "status")
 PUBLIC_RULES = frozenset({"/healthz", "/v1/auth/config"})
 FRAME_RULE = "/v1/frames/<frame_digest>"
@@ -566,6 +569,21 @@ def acknowledge_alert(alert_id: str):
     return jsonify(monitor.acknowledge(alert_id, principal().subject).model_dump(mode="json"))
 
 
+def start_takeover(run_id: str, episode_id: str):
+    takeovers: TakeoverService = configured(TAKEOVER_KEY, "takeovers")
+    return jsonify(takeovers.start(run_id, episode_id).model_dump(mode="json")), 201
+
+
+def end_takeover(run_id: str, episode_id: str):
+    takeovers: TakeoverService = configured(TAKEOVER_KEY, "takeovers")
+    return jsonify(takeovers.end(run_id, episode_id, principal().subject).model_dump(mode="json"))
+
+
+def refused_takeover(error: TakeoverError | FleetError):
+    """The episode has ended or lost its lease, or fleetd said no: an operator cannot take it over now."""
+    return jsonify({"code": "takeover_refused", "problems": [str(error)]}), 409
+
+
 def invalid_review(error: ReviewError):
     return jsonify({"code": "invalid_request", "problems": [str(error)]}), 400
 
@@ -605,6 +623,8 @@ ROUTES = (
     ("GET", "/v1/runs/<run_id>/episodes/<episode_id>/provenance", get_provenance),
     ("GET", "/v1/runs/<run_id>/episodes/<episode_id>/steps/<step_index>/prompt", get_step_prompt),
     ("POST", "/v1/runs/<run_id>/episodes/<episode_id>/actions", review_episode),
+    ("POST", "/v1/runs/<run_id>/episodes/<episode_id>/takeover", start_takeover),
+    ("POST", "/v1/runs/<run_id>/episodes/<episode_id>/takeover/end", end_takeover),
     ("POST", "/v1/runs/<run_id>/failures/analyze", analyze_failures),
     ("GET", "/v1/runs/<run_id>/failures", get_failures),
     ("GET", "/v1/runs/<run_id>/report", run_report),
@@ -644,6 +664,8 @@ ERROR_HANDLERS = (
     (DuplicateEndpointError, rejected_write),
     (ServiceUnavailableError, unavailable),
     (ReviewError, invalid_review),
+    (TakeoverError, refused_takeover),
+    (FleetError, refused_takeover),
     (AuthError, unauthenticated),
     (ForbiddenError, forbidden),
 )
@@ -656,7 +678,8 @@ def create_app(experiment_service: ExperimentService, poll_seconds: float = 1.0,
                audit_log_store: PlatformAuditLog | None = None, data_policy_store: DataPolicyStore | None = None,
                pool_status_source: PoolStatus | None = None,
                retention_sweeper: RetentionSweeper | None = None,
-               alert_monitor: AlertMonitor | None = None) -> Flask:
+               alert_monitor: AlertMonitor | None = None,
+               takeover_service: TakeoverService | None = None) -> Flask:
     app = Flask("experimentd")
     app.extensions[SERVICE_KEY] = experiment_service
     app.extensions[POLL_KEY] = (poll_seconds, sleep)
@@ -670,6 +693,7 @@ def create_app(experiment_service: ExperimentService, poll_seconds: float = 1.0,
     app.extensions[POOLS_KEY] = pool_status_source
     app.extensions[RETENTION_KEY] = retention_sweeper
     app.extensions[ALERTS_KEY] = alert_monitor
+    app.extensions[TAKEOVER_KEY] = takeover_service
     app.before_request(authenticate)
     app.after_request(record_audit)
     for method, rule, view_function in ROUTES:

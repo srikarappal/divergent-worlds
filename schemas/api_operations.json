@@ -202,6 +202,22 @@
       "sdk": "client.review_episode(\"{run_id}\", \"{episode_id}\", \"{action}\", note=\"{note}\")"
     },
     {
+      "name": "start_takeover",
+      "method": "POST",
+      "path": "/v1/runs/{run_id}/episodes/{episode_id}/takeover",
+      "summary": "Take over a running episode: its env runs for you through noVNC while the policy waits",
+      "cli": "rlworld episodes takeover {run_id} {episode_id}",
+      "sdk": "client.start_takeover(\"{run_id}\", \"{episode_id}\")"
+    },
+    {
+      "name": "end_takeover",
+      "method": "POST",
+      "path": "/v1/runs/{run_id}/episodes/{episode_id}/takeover/end",
+      "summary": "Hand the episode back; your input is kept as its demonstration",
+      "cli": "rlworld episodes end-takeover {run_id} {episode_id}",
+      "sdk": "client.end_takeover(\"{run_id}\", \"{episode_id}\")"
+    },
+    {
       "name": "analyze_failures",
       "method": "POST",
       "path": "/v1/runs/{run_id}/failures/analyze",
