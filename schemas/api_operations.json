@@ -1,0 +1,140 @@
+{
+  "description": "Public operations the web console performs. The console, the Python SDK and the rlworld CLI each implement every one; parity tests hold all three to this list.",
+  "operations": [
+    {
+      "name": "save_spec",
+      "method": "POST",
+      "path": "/v1/specs",
+      "body": "yaml",
+      "summary": "Save a spec and get its immutable digest",
+      "cli": "rlworld specs save {spec_file}",
+      "sdk": "client.save_spec(spec_yaml)"
+    },
+    {
+      "name": "get_spec",
+      "method": "GET",
+      "path": "/v1/specs/{digest}",
+      "summary": "Read a saved spec",
+      "cli": "rlworld specs get {digest}",
+      "sdk": "client.get_spec(\"{digest}\")"
+    },
+    {
+      "name": "preflight",
+      "method": "POST",
+      "path": "/v1/specs/{digest}/preflight",
+      "summary": "Validate, estimate and warn before any budget is spent",
+      "cli": "rlworld specs preflight {digest}",
+      "sdk": "client.preflight(\"{digest}\")"
+    },
+    {
+      "name": "dry_run",
+      "method": "POST",
+      "path": "/v1/specs/{digest}/dry_run",
+      "summary": "Play one episode end to end and watch it live",
+      "cli": "rlworld specs dry-run {digest}",
+      "sdk": "client.dry_run(\"{digest}\")"
+    },
+    {
+      "name": "launch",
+      "method": "POST",
+      "path": "/v1/specs/{digest}/launch",
+      "body": "json",
+      "summary": "Launch every sweep point as a run",
+      "cli": "rlworld specs launch {digest} --budget-usd {budget_usd}",
+      "sdk": "client.launch(\"{digest}\", budget_usd={budget_usd})"
+    },
+    {
+      "name": "approve_experiment",
+      "method": "POST",
+      "path": "/v1/experiments/{experiment_id}/approve",
+      "summary": "Approve a launch above the approval threshold",
+      "cli": "rlworld experiments approve {experiment_id}",
+      "sdk": "client.approve_experiment(\"{experiment_id}\")"
+    },
+    {
+      "name": "list_runs",
+      "method": "GET",
+      "path": "/v1/runs",
+      "query": ["experiment_id"],
+      "summary": "List runs, optionally of one experiment",
+      "cli": "rlworld runs list --experiment-id {experiment_id}",
+      "sdk": "client.list_runs(experiment_id=\"{experiment_id}\")"
+    },
+    {
+      "name": "get_run",
+      "method": "GET",
+      "path": "/v1/runs/{run_id}",
+      "summary": "Read a run's state and operational settings",
+      "cli": "rlworld runs get {run_id}",
+      "sdk": "client.get_run(\"{run_id}\")"
+    },
+    {
+      "name": "get_run_spec",
+      "method": "GET",
+      "path": "/v1/runs/{run_id}/spec",
+      "summary": "Read the full spec a run plays, to clone or reproduce it",
+      "cli": "rlworld runs spec {run_id}",
+      "sdk": "client.get_run_spec(\"{run_id}\")"
+    },
+    {
+      "name": "control_run",
+      "method": "POST",
+      "path": "/v1/runs/{run_id}/control",
+      "body": "json",
+      "summary": "Pause, resume, stop or change concurrency, priority or budget",
+      "cli": "rlworld runs control {run_id} {command} {value}",
+      "sdk": "client.control_run(\"{run_id}\", \"{command}\", {value})"
+    },
+    {
+      "name": "run_events",
+      "method": "GET",
+      "path": "/v1/runs/{run_id}/events",
+      "query": ["follow", "after"],
+      "summary": "Stream a run's events",
+      "cli": "rlworld runs events {run_id} --follow",
+      "sdk": "client.run_events(\"{run_id}\", follow=True)"
+    },
+    {
+      "name": "list_catalog",
+      "method": "GET",
+      "path": "/v1/catalogs/{kind}",
+      "summary": "List images, worlds, task templates, verifiers, rubrics or endpoints",
+      "cli": "rlworld catalogs list {kind}",
+      "sdk": "client.list_catalog(\"{kind}\")"
+    },
+    {
+      "name": "list_endpoints",
+      "method": "GET",
+      "path": "/v1/endpoints",
+      "summary": "List registered policy and judge endpoints",
+      "cli": "rlworld endpoints list",
+      "sdk": "client.list_endpoints()"
+    },
+    {
+      "name": "register_endpoint",
+      "method": "POST",
+      "path": "/v1/endpoints",
+      "body": "json",
+      "summary": "Register a BYO policy or judge endpoint",
+      "cli": "rlworld endpoints register {endpoint_file}",
+      "sdk": "client.register_endpoint(endpoint)"
+    },
+    {
+      "name": "test_endpoint",
+      "method": "POST",
+      "path": "/v1/endpoints/{name}/test",
+      "summary": "Probe reachability, latency, token ids and logprobs",
+      "cli": "rlworld endpoints test {name}",
+      "sdk": "client.test_endpoint(\"{name}\")"
+    },
+    {
+      "name": "set_endpoint_key",
+      "method": "PUT",
+      "path": "/v1/endpoints/{name}/key",
+      "body": "json",
+      "summary": "Store an endpoint key in the vault; keys are write only",
+      "cli": "rlworld endpoints set-key {name} < key.txt",
+      "sdk": "client.set_endpoint_key(\"{name}\", key)"
+    }
+  ]
+}
