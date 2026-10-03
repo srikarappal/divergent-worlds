@@ -4,14 +4,17 @@ Every app ships three operations: materialize writes world state into the app,
 extract reads normalized state back for verifiers and diffs, reset empties it.
 The reference integrations below target a local directory (Maildir style mail
 and plain files); in a VM the same contract runs through the guest agent or a
-sidecar such as an IMAP server.
+sidecar such as an IMAP server. Spreadsheets are read the way section 6.9 asks
+for Excel: the values the app last computed, through openpyxl.
 """
 
 import csv
 import hashlib
 import io
 import shutil
+import zipfile
 from collections.abc import Mapping, Sequence
+from datetime import date, datetime, time
 from email import policy
 from email.message import EmailMessage
 from email.parser import BytesParser
@@ -19,10 +22,16 @@ from email.utils import format_datetime, parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+import openpyxl
+from openpyxl.utils.exceptions import InvalidFileException
+
 from rlworld.worlds.model import MailMessage, World
 
 MAIL_FOLDERS = ("inbox", "sent", "drafts")
 MAX_EXTRACTED_TEXT_BYTES = 64 * 1024
+SPREADSHEET_SUFFIXES = (".xlsx", ".xlsm")
+# A guest keeps its world in the desktop user's home under this folder, where both the apps and the policy reach it.
+USER_WORLD_FOLDER = "world"
 
 
 class UnsupportedAppError(KeyError):
@@ -105,10 +114,36 @@ class MailIntegration:
         shutil.rmtree(self.mail_root(target), ignore_errors=True)
 
 
+def cell_value(value: Any) -> Any:
+    """Cell values as JSON: dates and times become ISO text."""
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat()
+    return value
+
+
+def spreadsheet_cells(content: bytes) -> tuple[str, dict[str, dict[str, Any]]]:
+    """The first sheet's non empty cells with the values the app last computed, keyed like B2."""
+    workbook = openpyxl.load_workbook(io.BytesIO(content), data_only=True, read_only=True)
+    try:
+        sheet = workbook.worksheets[0]
+        cells = {cell.coordinate: {"value": cell_value(cell.value)}
+                 for row in sheet.iter_rows() for cell in row if cell.value is not None}
+        return sheet.title, cells
+    finally:
+        workbook.close()
+
+
 def describe_file(file_path: Path) -> dict[str, Any]:
     content = file_path.read_bytes()
     description: dict[str, Any] = {"size": len(content), "sha256": hashlib.sha256(content).hexdigest()}
-    if file_path.suffix == ".csv":
+    if file_path.suffix.lower() in SPREADSHEET_SUFFIXES:
+        try:
+            sheet_name, cells = spreadsheet_cells(content)
+        except (InvalidFileException, zipfile.BadZipFile, KeyError, ValueError, OSError):
+            description["kind"] = "binary"
+        else:
+            description.update(kind="spreadsheet", sheet=sheet_name, cells=cells)
+    elif file_path.suffix == ".csv":
         description["kind"] = "csv"
         description["rows"] = list(csv.DictReader(io.StringIO(content.decode("utf-8", errors="replace"))))
     elif file_path.suffix in (".txt", ".md") and len(content) <= MAX_EXTRACTED_TEXT_BYTES:

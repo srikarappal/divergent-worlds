@@ -1,3 +1,6 @@
+from datetime import datetime
+
+import openpyxl
 import pytest
 
 from rlworld.rewards import diff_states, side_effect_violations
@@ -45,6 +48,22 @@ def test_files_extract_csv_rows_and_text(world, tmp_path):
     assert len(files_state["invoices.csv"]["rows"]) == len(world.invoices)
     assert files_state["invoices.csv"]["rows"][0]["invoice_id"] == world.invoices[0].id
     assert files_state["q1_reconciliation_notes.md"]["text"].startswith("# Q1 reconciliation")
+
+
+def test_spreadsheets_extract_the_values_the_app_computed(world, tmp_path):
+    materialize_world(world, ["files"], tmp_path)
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "Reconciliation"
+    sheet["A1"], sheet["B1"], sheet["C3"] = "open", 1234.5, datetime(2026, 3, 1, 9, 30)
+    workbook.save(tmp_path / "files" / "reconciliation.xlsx")
+    (tmp_path / "files" / "broken.xlsx").write_bytes(b"not a zip")
+    files_state = extract_world_state(["files"], tmp_path)["files"]
+    spreadsheet = files_state["reconciliation.xlsx"]
+    assert spreadsheet["kind"] == "spreadsheet" and spreadsheet["sheet"] == "Reconciliation"
+    assert spreadsheet["cells"] == {"A1": {"value": "open"}, "B1": {"value": 1234.5},
+                                    "C3": {"value": "2026-03-01T09:30:00"}}
+    assert files_state["broken.xlsx"]["kind"] == "binary"
 
 
 def test_reset_empties_every_app(world, tmp_path):
