@@ -48,6 +48,7 @@ ROUTE_ROLES: dict[tuple[str, str], frozenset[str]] = {
     ("PATCH", "/v1/review_items/<item_id>"): REVIEWERS,
     ("GET", "/v1/runs/<run_id>/exports/<kind>"): BUILDERS,
     ("GET", "/v1/admin/pools"): OPERATORS,
+    ("POST", "/v1/alerts/<alert_id>/acknowledge"): REVIEWERS,
 }
 
 

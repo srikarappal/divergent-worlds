@@ -18,6 +18,7 @@ from pydantic import BaseModel, ValidationError
 from rlworld.gateway.config import DuplicateEndpointError, EndpointConfig
 from rlworld.gateway.errors import EndpointNotFoundError
 from rlworld.services.admin import DataPolicy, DataPolicyStore, PlatformAuditLog
+from rlworld.services.alerts import AlertMonitor
 from rlworld.services.auth import DEVELOPMENT_PRINCIPAL, AuthError, ForbiddenError, PlatformAuth
 from rlworld.services.catalogs import (
     CatalogEntry,
@@ -58,6 +59,8 @@ AUDIT_KEY = "rlworld_audit_log"
 POLICIES_KEY = "rlworld_data_policies"
 POOLS_KEY = "rlworld_pool_status"
 RETENTION_KEY = "rlworld_retention"
+ALERTS_KEY = "rlworld_alerts"
+ALERT_FILTERS = ("run_id", "experiment_id", "status")
 PUBLIC_RULES = frozenset({"/healthz", "/v1/auth/config"})
 FRAME_RULE = "/v1/frames/<frame_digest>"
 RUN_TOKEN_RULES = frozenset({"/v1/runs/<run_id>/spend", "/v1/runs/<run_id>/metrics", "/v1/runs/<run_id>/finish",
@@ -552,6 +555,17 @@ def sweep_retention():
     return jsonify(asdict(sweeper.sweep()))
 
 
+def list_alerts():
+    monitor: AlertMonitor = configured(ALERTS_KEY, "alerts")
+    filters = {name: request.args[name] for name in ALERT_FILTERS if name in request.args}
+    return jsonify({"alerts": [alert.model_dump(mode="json") for alert in monitor.alerts(**filters)]})
+
+
+def acknowledge_alert(alert_id: str):
+    monitor: AlertMonitor = configured(ALERTS_KEY, "alerts")
+    return jsonify(monitor.acknowledge(alert_id, principal().subject).model_dump(mode="json"))
+
+
 def invalid_review(error: ReviewError):
     return jsonify({"code": "invalid_request", "problems": [str(error)]}), 400
 
@@ -608,6 +622,8 @@ ROUTES = (
     ("GET", "/v1/admin/audit", audit_log),
     ("GET", "/v1/admin/pools", pool_status),
     ("POST", "/v1/admin/retention/sweep", sweep_retention),
+    ("GET", "/v1/alerts", list_alerts),
+    ("POST", "/v1/alerts/<alert_id>/acknowledge", acknowledge_alert),
     ("GET", "/v1/catalogs/<kind>", list_catalog),
     ("PUT", "/v1/catalogs/<kind>/<name>", publish_catalog_entry),
     ("GET", "/v1/endpoints", list_endpoints),
@@ -639,7 +655,8 @@ def create_app(experiment_service: ExperimentService, poll_seconds: float = 1.0,
                review_service: ReviewService | None = None, auth: PlatformAuth | None = None,
                audit_log_store: PlatformAuditLog | None = None, data_policy_store: DataPolicyStore | None = None,
                pool_status_source: PoolStatus | None = None,
-               retention_sweeper: RetentionSweeper | None = None) -> Flask:
+               retention_sweeper: RetentionSweeper | None = None,
+               alert_monitor: AlertMonitor | None = None) -> Flask:
     app = Flask("experimentd")
     app.extensions[SERVICE_KEY] = experiment_service
     app.extensions[POLL_KEY] = (poll_seconds, sleep)
@@ -652,6 +669,7 @@ def create_app(experiment_service: ExperimentService, poll_seconds: float = 1.0,
     app.extensions[POLICIES_KEY] = data_policy_store or DataPolicyStore(experiment_service.tenant_of_run)
     app.extensions[POOLS_KEY] = pool_status_source
     app.extensions[RETENTION_KEY] = retention_sweeper
+    app.extensions[ALERTS_KEY] = alert_monitor
     app.before_request(authenticate)
     app.after_request(record_audit)
     for method, rule, view_function in ROUTES:
