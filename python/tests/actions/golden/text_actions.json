@@ -1,0 +1,181 @@
+{
+  "adapter": "text_actions",
+  "options": {},
+  "parse_cases": [
+    {
+      "description": "click on the smart resized screen",
+      "env_size": [1920, 1080],
+      "raw_output": "Thought: open the file menu\nAction: click(start_box='<|box_start|>(966,546)<|box_end|>')",
+      "expected_actions": [{"name": "click", "x": 960, "y": 540}]
+    },
+    {
+      "description": "box coordinates click the center",
+      "env_size": [1920, 1080],
+      "raw_output": "Action: left_double(start_box='(100,100,200,200)')",
+      "expected_actions": [{"name": "click", "x": 149, "y": 148, "count": 2}]
+    },
+    {
+      "description": "hotkeys use spaces",
+      "env_size": [1920, 1080],
+      "raw_output": "Action: hotkey(key='ctrl s')",
+      "expected_actions": [{"name": "key", "keys": ["ctrl", "s"]}]
+    },
+    {
+      "description": "typed text keeps escaped newlines",
+      "env_size": [1920, 1080],
+      "raw_output": "Action: type(content='Q3 totals\\n')",
+      "expected_actions": [{"name": "type", "text": "Q3 totals\n"}]
+    },
+    {
+      "description": "scroll uses the default notch count",
+      "env_size": [1920, 1080],
+      "raw_output": "Action: scroll(start_box='(966,546)', direction='down')",
+      "expected_actions": [{"name": "scroll", "x": 960, "y": 540, "delta_y": 5}]
+    },
+    {
+      "description": "drag clamps to the screen",
+      "env_size": [1920, 1080],
+      "raw_output": "Action: drag(start_box='(0,0)', end_box='(1932,1092)')",
+      "expected_actions": [{"name": "drag", "path": [{"x": 0, "y": 0}, {"x": 1919, "y": 1079}]}]
+    },
+    {
+      "description": "finished with content answers",
+      "env_size": [1920, 1080],
+      "raw_output": "Thought: all rows reconcile\nAction: finished(content='The total is 42')",
+      "expected_actions": [{"name": "answer", "text": "The total is 42"}]
+    },
+    {
+      "description": "finished without content is done",
+      "env_size": [1920, 1080],
+      "raw_output": "Action: finished()",
+      "expected_actions": [{"name": "done"}]
+    },
+    {
+      "description": "call_user asks with the thought",
+      "env_size": [1920, 1080],
+      "raw_output": "Thought: I cannot find the March invoice\nAction: call_user()",
+      "expected_actions": [{"name": "ask_user", "question": "I cannot find the March invoice"}]
+    },
+    {
+      "description": "several actions, one per line",
+      "env_size": [1920, 1080],
+      "raw_output": "Action: click(start_box='(966,546)')\ntype(content='hello')",
+      "expected_actions": [{"name": "click", "x": 960, "y": 540}, {"name": "type", "text": "hello"}]
+    },
+    {
+      "description": "raw newlines inside quotes do not split actions",
+      "env_size": [1920, 1080],
+      "raw_output": "Action: type(content='line one\nline two')",
+      "expected_actions": [{"name": "type", "text": "line one\nline two"}]
+    },
+    {
+      "description": "relative coordinates on a 1000 grid",
+      "options": {"coordinate_mode": "relative_1000"},
+      "env_size": [1920, 1080],
+      "raw_output": "Action: click(start_box='(500,500)')",
+      "expected_actions": [{"name": "click", "x": 960, "y": 540}]
+    }
+  ],
+  "parse_error_cases": [
+    {
+      "description": "unknown action",
+      "env_size": [1920, 1080],
+      "raw_output": "Action: launch_rockets()",
+      "error_fragment": "unknown action"
+    },
+    {
+      "description": "unbalanced parentheses",
+      "env_size": [1920, 1080],
+      "raw_output": "Action: click(start_box='(966,546)'",
+      "error_fragment": "cannot parse action"
+    },
+    {
+      "description": "positional arguments",
+      "env_size": [1920, 1080],
+      "raw_output": "Action: click('(1,2)')",
+      "error_fragment": "must look like"
+    },
+    {
+      "description": "a thought without an action",
+      "env_size": [1920, 1080],
+      "raw_output": "Thought: hmm",
+      "error_fragment": "no action found"
+    },
+    {
+      "description": "a box needs two or four numbers",
+      "env_size": [1920, 1080],
+      "raw_output": "Action: click(start_box='(1,2,3)')",
+      "error_fragment": "2 or 4 numbers"
+    },
+    {
+      "description": "calls are parsed, never evaluated",
+      "env_size": [1920, 1080],
+      "raw_output": "Action: type(content=__import__('os').getcwd())",
+      "error_fragment": "must be a literal"
+    }
+  ],
+  "render_cases": [
+    {
+      "env_size": [1920, 1080],
+      "action": {"name": "click", "x": 960, "y": 540},
+      "expected_rendered": "click(start_box='(966,546)')"
+    },
+    {
+      "env_size": [1920, 1080],
+      "action": {"name": "click", "x": 960, "y": 540, "button": "right"},
+      "expected_rendered": "right_single(start_box='(966,546)')"
+    },
+    {
+      "env_size": [1920, 1080],
+      "action": {"name": "key", "keys": ["ctrl", "s"]},
+      "expected_rendered": "hotkey(key='ctrl s')"
+    },
+    {
+      "env_size": [1920, 1080],
+      "action": {"name": "key", "keys": ["escape"]},
+      "expected_rendered": "hotkey(key='esc')"
+    },
+    {
+      "env_size": [1920, 1080],
+      "action": {"name": "type", "text": "a'b\n"},
+      "expected_rendered": "type(content='a\\'b\\n')"
+    },
+    {
+      "env_size": [1920, 1080],
+      "action": {"name": "answer", "text": "done!"},
+      "expected_rendered": "finished(content='done!')"
+    },
+    {
+      "env_size": [1920, 1080],
+      "action": {"name": "done"},
+      "expected_rendered": "finished()"
+    },
+    {
+      "env_size": [1920, 1080],
+      "action": {"name": "ask_user", "question": "which quarter?"},
+      "expected_rendered": "call_user()"
+    },
+    {
+      "env_size": [1920, 1080],
+      "action": {"name": "wait", "duration_ms": 5000},
+      "expected_rendered": "wait()"
+    },
+    {
+      "env_size": [1920, 1080],
+      "action": {"name": "scroll", "x": 960, "y": 540, "delta_y": -5},
+      "expected_rendered": "scroll(start_box='(966,546)', direction='up')"
+    }
+  ],
+  "render_error_cases": [
+    {
+      "env_size": [1920, 1080],
+      "action": {"name": "exec", "command": "ls"},
+      "error_fragment": "cannot render exec"
+    },
+    {
+      "env_size": [1920, 1080],
+      "action": {"name": "give_up", "reason": "blocked"},
+      "error_fragment": "cannot render give_up"
+    }
+  ]
+}
