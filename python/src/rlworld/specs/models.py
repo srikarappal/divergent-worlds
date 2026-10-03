@@ -24,6 +24,7 @@ PINNED_BASE_PATTERN = re.compile(r"^[a-z0-9_.]+@sha256:[0-9a-f]{64}$")
 SWEEPABLE_LAYERS = ("image", "world", "task", "run")
 
 DottedPath = Annotated[str, Field(pattern=DOTTED_PATH_PATTERN)]
+StatePathPattern = Annotated[str, Field(pattern=r"^[^/]+(/[^/]+)*$")]
 OsFamily = Literal["linux", "windows", "macos", "android"]
 VmmKind = Literal["firecracker", "qemu_templated", "cloud_windows", "apple_virtualization", "cuttlefish"]
 ActionModality = Literal["computer", "browser", "terminal", "native", "control"]
@@ -141,7 +142,9 @@ class VerifierSetSpec(SpecModel):
 
 
 class SideEffectSpec(SpecModel):
-    allowed_changes: list[str] = Field(default_factory=list)
+    """State paths the task may change, "/" separated globs such as files/*.xlsx or mail/sent."""
+
+    allowed_changes: list[StatePathPattern] = Field(default_factory=list)
 
 
 class NetworkFaultSpec(SpecModel):

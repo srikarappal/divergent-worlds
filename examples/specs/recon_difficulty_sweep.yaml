@@ -40,7 +40,7 @@ task:                                      # injected after restore, versioned w
   verifiers:
     exact: [verifiers.excel.reconciliation_values_match]
     semantic: [verifiers.mail.summary_lists_discrepant_invoices]
-  side_effects: {allowed_changes: [files/reconciliation.xlsx, mail.sent]}
+  side_effects: {allowed_changes: [files/reconciliation.xlsx, mail/sent]}
   judge_rubric: rubrics/summary_email_quality.md
   oracle: oracles.finance.reconcile_invoices
   network_faults: {latency_ms: [0, 200], packet_loss: [0.0, 0.01]}

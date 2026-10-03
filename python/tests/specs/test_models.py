@@ -67,6 +67,11 @@ def test_packet_loss_must_stay_within_one(example_payload):
     assert_rejected(set_path(example_payload, "task.network_faults.packet_loss", [0.0, 1.5]), "packet_loss")
 
 
+def test_allowed_changes_are_slash_separated_paths(example_payload):
+    payload = set_path(example_payload, "task.side_effects.allowed_changes", ["/files/report.xlsx"])
+    assert_rejected(payload, "task.side_effects.allowed_changes.0")
+
+
 def test_dns_overrides_need_a_trusted_ca(example_payload):
     assert_rejected(set_path(example_payload, "world.network.trusted_ca", None), "trusted_ca")
 

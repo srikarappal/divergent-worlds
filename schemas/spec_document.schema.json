@@ -567,9 +567,11 @@
     },
     "SideEffectSpec": {
       "additionalProperties": false,
+      "description": "State paths the task may change, \"/\" separated globs such as files/*.xlsx or mail/sent.",
       "properties": {
         "allowed_changes": {
           "items": {
+            "pattern": "^[^/]+(/[^/]+)*$",
             "type": "string"
           },
           "title": "Allowed Changes",
