@@ -2,6 +2,8 @@
 import { fillPath, operation } from "./operations";
 import type {
   AdmissionStatus,
+  Alert,
+  AlertFilter,
   AuditFilter,
   AuditRecord,
   AuthConfig,
@@ -101,6 +103,8 @@ export interface ConsoleApi {
   auditLog(filter?: AuditFilter): Promise<AuditRecord[]>;
   poolStatus(): Promise<Record<string, number>>;
   sweepRetention(): Promise<RetentionReport>;
+  listAlerts(filter?: AlertFilter): Promise<Alert[]>;
+  acknowledgeAlert(alertId: string): Promise<Alert>;
   fleetAdmission(): Promise<AdmissionStatus>;
   setTenantQuota(tenant: string, quota: number): Promise<AdmissionStatus>;
   listCatalog(kind: string): Promise<CatalogEntry[]>;
@@ -351,6 +355,14 @@ export class ApiClient implements ConsoleApi {
 
   sweepRetention(): Promise<RetentionReport> {
     return this.call("sweep_retention");
+  }
+
+  async listAlerts(filter: AlertFilter = {}): Promise<Alert[]> {
+    return (await this.call("list_alerts", { query: filter })).alerts;
+  }
+
+  acknowledgeAlert(alertId: string): Promise<Alert> {
+    return this.call("acknowledge_alert", { path: { alert_id: alertId } });
   }
 
   fleetAdmission(): Promise<AdmissionStatus> {

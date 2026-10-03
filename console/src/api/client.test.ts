@@ -16,6 +16,7 @@ const PATH_VALUES: Record<string, string> = {
   item_id: "review_000001",
   subject: "user_ada",
   tenant: "finance_lab",
+  alert_id: "alert_000001",
 };
 const EVENT_STREAM = [
   'id: 1\nevent: launched\ndata: {"sequence": 1, "at": 1.0, "kind": "launched", "detail": {}}\n\n',
@@ -83,6 +84,7 @@ function sampleArguments(operationName: string): unknown[] {
     case "audit_log":
     case "pool_status":
     case "sweep_retention":
+    case "list_alerts":
     case "fleet_admission":
       return [];
     case "file_review_item":

@@ -343,6 +343,35 @@ export type ReviewItemFilter = {
   episode_id?: string;
 };
 
+export type AlertKind = "reward_spike" | "judge_verifier_disagreement" | "error_rate_jump" | "budget_threshold"
+  | "run_completion";
+export type AlertSeverity = "info" | "warning" | "critical";
+
+export interface Alert {
+  alert_id: string;
+  kind: AlertKind;
+  severity: AlertSeverity;
+  experiment_id: string;
+  run_id: string;
+  tenant: string;
+  subject: string;
+  title: string;
+  detail: Record<string, unknown>;
+  episode_ids: string[];
+  review_item_id: string | null;
+  raised_at: number;
+  status: "open" | "acknowledged";
+  acknowledged_by: string;
+  acknowledged_at: number | null;
+  deliveries: Record<string, string>;
+}
+
+export type AlertFilter = {
+  run_id?: string;
+  experiment_id?: string;
+  status?: string;
+};
+
 export interface AuthConfig {
   enabled: boolean;
   issuer?: string;

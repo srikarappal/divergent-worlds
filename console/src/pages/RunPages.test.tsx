@@ -4,7 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { expect, test } from "vitest";
 
 import type { RunEvent } from "../api/types";
-import { experimentRecord, FakeApi, runRecord } from "../test/fakeApi";
+import { alertRecord, experimentRecord, FakeApi, runRecord } from "../test/fakeApi";
 import { episodesPerSecond, RunDashboardPage, sparklinePoints } from "./RunDashboardPage";
 import { ExperimentPage, LiveWallPage, RunsPage } from "./RunPages";
 
@@ -94,6 +94,23 @@ async function liveControlsChangeOnlyOperationalKnobs(): Promise<void> {
 }
 
 test("live controls change only operational knobs", liveControlsChangeOnlyOperationalKnobs);
+
+async function theDashboardShowsTheRunsAlerts(): Promise<void> {
+  const api = apiWithRun();
+  api.alerts = [alertRecord("alert_000001"), alertRecord("alert_000009", { run_id: "experiment_000001_run_001" })];
+  api.events = [{ sequence: 1, at: 100, kind: "alert", detail: { alert_id: "alert_000001", kind: "reward_spike" } }];
+  render(inRouter(<RunDashboardPage api={api} runId={RUN_ID} />));
+  const alerts = await screen.findByLabelText("run alerts");
+  expect(await screen.findByText("reward on task_000 jumped from 0.10 to 0.90")).toBeInTheDocument();
+  expect(alerts.querySelectorAll("tbody tr")).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Acknowledge" }));
+  expect(await screen.findByText("acknowledged by developer")).toBeInTheDocument();
+  expect(api.callsTo("acknowledgeAlert")).toEqual([["alert_000001"]]);
+  expect(api.callsTo("listAlerts").length).toBeGreaterThanOrEqual(3);
+  expect(api.callsTo("listAlerts")[0]).toEqual([{ run_id: RUN_ID }]);
+}
+
+test("the dashboard shows the run's alerts and reloads them on alert events", theDashboardShowsTheRunsAlerts);
 
 async function theLiveWallShowsThumbnails(): Promise<void> {
   const api = apiWithRun();

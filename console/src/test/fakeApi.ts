@@ -2,6 +2,8 @@
 import { ApiError, type ConsoleApi, type RunEventListener } from "../api/client";
 import type {
   AdmissionStatus,
+  Alert,
+  AlertFilter,
   AuditFilter,
   AuditRecord,
   AuthConfig,
@@ -73,6 +75,16 @@ export function episodeRecord(episodeId: string, extra: Partial<EpisodeRecord> =
   };
 }
 
+export function alertRecord(alertId: string, extra: Partial<Alert> = {}): Alert {
+  return {
+    alert_id: alertId, kind: "reward_spike", severity: "warning", experiment_id: "experiment_000001",
+    run_id: "experiment_000001_run_000", tenant: "default", subject: "task_000",
+    title: "reward on task_000 jumped from 0.10 to 0.90", detail: {}, episode_ids: ["b00000_g00000_s000_a0"],
+    review_item_id: "review_000001", raised_at: 0, status: "open", acknowledged_by: "", acknowledged_at: null,
+    deliveries: {}, ...extra,
+  };
+}
+
 export class FakeApi implements ConsoleApi {
   readonly calls: Array<[string, unknown[]]> = [];
   catalogs: Record<string, CatalogEntry[]> = {};
@@ -92,6 +104,7 @@ export class FakeApi implements ConsoleApi {
   report: EvalReport | null = null;
   comparison: Comparison = { reports: {}, shared_tasks: [] };
   reviewItems: ReviewItem[] = [];
+  alerts: Alert[] = [];
   authSettings: AuthConfig = { enabled: false };
   principal: Principal = { subject: "developer", email: "", tenant: "default",
                            roles: ["viewer", "researcher", "operator", "labeler", "admin"] };
@@ -418,6 +431,37 @@ export class FakeApi implements ConsoleApi {
   async sweepRetention(): Promise<RetentionReport> {
     this.record("sweepRetention");
     return { deleted_episodes: ["run_1/episode_old"], thumbnail_only_frames: 3, deleted_blobs: 2 };
+  }
+
+  async listAlerts(filter?: AlertFilter): Promise<Alert[]> {
+    this.record("listAlerts", filter);
+    const matching: Alert[] = [];
+    for (const alert of this.alerts) {
+      if ((filter?.run_id === undefined || alert.run_id === filter.run_id)
+          && (filter?.status === undefined || alert.status === filter.status)) {
+        matching.push(alert);
+      }
+    }
+    return matching;
+  }
+
+  async acknowledgeAlert(alertId: string): Promise<Alert> {
+    this.record("acknowledgeAlert", alertId);
+    const updated: Alert[] = [];
+    let result: Alert | undefined;
+    for (const alert of this.alerts) {
+      if (alert.alert_id === alertId) {
+        result = { ...alert, status: "acknowledged", acknowledged_by: "developer", acknowledged_at: 1 };
+        updated.push(result);
+      } else {
+        updated.push(alert);
+      }
+    }
+    this.alerts = updated;
+    if (result === undefined) {
+      throw new ApiError(404, "not_found", alertId, []);
+    }
+    return result;
   }
 
   async fleetAdmission(): Promise<AdmissionStatus> {

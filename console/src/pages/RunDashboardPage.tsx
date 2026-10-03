@@ -1,10 +1,11 @@
-// The run dashboard (DESIGN.md 6.14, Watch live): metrics over server sent events, cost burn against budget and
-// the live controls. Controls touch only operational knobs; changing tasks, endpoints or rewards is a new run.
+// The run dashboard (DESIGN.md 6.14, Watch live): metrics over server sent events, cost burn against budget, alerts
+// and the live controls. Controls touch only operational knobs; changing tasks, endpoints or rewards is a new run.
 import { Component, type ChangeEvent, type MouseEvent, type ReactElement } from "react";
 import { Link } from "react-router-dom";
 
 import type { ConsoleApi, RunEventListener } from "../api/client";
-import type { ExperimentRecord, RunEvent, RunRecord } from "../api/types";
+import type { Alert, ExperimentRecord, RunEvent, RunRecord } from "../api/types";
+import { AlertList } from "../components/AlertList";
 import { failureProblems, formatPercent, ParityPanel, ProblemList } from "../components/common";
 import { formatUsd } from "./LaunchPage";
 
@@ -25,6 +26,7 @@ interface RunDashboardState {
   spentUsd: number | null;
   events: RunEvent[];
   metrics: RunEvent[];
+  alerts: Alert[];
   concurrencyText: string;
   priority: string;
   budgetExtensionText: string;
@@ -111,9 +113,10 @@ export class RunDashboardPage extends Component<RunDashboardProps, RunDashboardS
   constructor(props: RunDashboardProps) {
     super(props);
     this.state = {
-      run: null, experiment: null, spentUsd: null, events: [], metrics: [], concurrencyText: "", priority: "",
-      budgetExtensionText: "", problems: [],
+      run: null, experiment: null, spentUsd: null, events: [], metrics: [], alerts: [], concurrencyText: "",
+      priority: "", budgetExtensionText: "", problems: [],
     };
+    this.handleAcknowledge = this.handleAcknowledge.bind(this);
     this.handleCommand = this.handleCommand.bind(this);
     this.handleConcurrencyText = this.handleConcurrencyText.bind(this);
     this.handleApplyConcurrency = this.handleApplyConcurrency.bind(this);
@@ -124,6 +127,7 @@ export class RunDashboardPage extends Component<RunDashboardProps, RunDashboardS
 
   async componentDidMount(): Promise<void> {
     await this.refresh();
+    await this.loadAlerts();
     await this.follow();
   }
 
@@ -139,6 +143,23 @@ export class RunDashboardPage extends Component<RunDashboardProps, RunDashboardS
       this.spentUsd = Math.max(this.spentUsd ?? 0, experiment.spent_usd);
       this.setState({ run, experiment, spentUsd: this.spentUsd, concurrencyText: String(run.desired_concurrency),
                       priority: run.priority });
+    } catch (error) {
+      this.setState({ problems: failureProblems(error) });
+    }
+  }
+
+  async loadAlerts(): Promise<void> {
+    try {
+      this.setState({ alerts: await this.props.api.listAlerts({ run_id: this.props.runId }) });
+    } catch (error) {
+      this.setState({ problems: failureProblems(error) });
+    }
+  }
+
+  async handleAcknowledge(alertId: string): Promise<void> {
+    try {
+      await this.props.api.acknowledgeAlert(alertId);
+      await this.loadAlerts();
     } catch (error) {
       this.setState({ problems: failureProblems(error) });
     }
@@ -167,6 +188,9 @@ export class RunDashboardPage extends Component<RunDashboardProps, RunDashboardS
     this.setState({ events: this.receivedEvents, metrics: this.receivedMetrics, spentUsd: this.spentUsd });
     if (RUN_CHANGING_EVENTS.has(event.kind)) {
       void this.refresh();
+    }
+    if (event.kind === "alert") {
+      void this.loadAlerts();
     }
   }
 
@@ -293,6 +317,10 @@ export class RunDashboardPage extends Component<RunDashboardProps, RunDashboardS
           )
           : null}
         {run !== null ? this.renderControls(run) : null}
+        <section aria-label="run alerts">
+          <h2>Alerts</h2>
+          <AlertList alerts={this.state.alerts} showRun={false} onAcknowledge={this.handleAcknowledge} />
+        </section>
         {this.renderMetrics()}
         <table aria-label="events">
           <thead><tr><th>#</th><th>Time</th><th>Event</th><th>Detail</th></tr></thead>
@@ -301,6 +329,7 @@ export class RunDashboardPage extends Component<RunDashboardProps, RunDashboardS
         <ParityPanel items={[
           { name: "run_events", values: { run_id: this.props.runId } },
           { name: "control_run", values: { run_id: this.props.runId, command: "pause" } },
+          { name: "list_alerts", values: { run_id: this.props.runId } },
         ]} />
       </div>
     );
