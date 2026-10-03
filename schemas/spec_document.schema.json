@@ -1,0 +1,831 @@
+{
+  "$defs": {
+    "ClockSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "fixed": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fixed"
+        }
+      },
+      "title": "ClockSpec",
+      "type": "object"
+    },
+    "DifficultySpec": {
+      "additionalProperties": false,
+      "properties": {
+        "ambiguity": {
+          "default": "none",
+          "enum": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
+          "title": "Ambiguity",
+          "type": "string"
+        },
+        "apps": {
+          "default": 1,
+          "exclusiveMinimum": 0,
+          "title": "Apps",
+          "type": "integer"
+        },
+        "corrupted_inputs": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Corrupted Inputs",
+          "type": "integer"
+        },
+        "dependency_depth": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Dependency Depth",
+          "type": "integer"
+        },
+        "distractors": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Distractors",
+          "type": "integer"
+        },
+        "oracle_steps": {
+          "default": 10,
+          "exclusiveMinimum": 0,
+          "title": "Oracle Steps",
+          "type": "integer"
+        }
+      },
+      "title": "DifficultySpec",
+      "type": "object"
+    },
+    "DisplaySpec": {
+      "additionalProperties": false,
+      "properties": {
+        "dpi": {
+          "default": 96,
+          "maximum": 384,
+          "minimum": 72,
+          "title": "Dpi",
+          "type": "integer"
+        },
+        "height": {
+          "maximum": 4320,
+          "minimum": 480,
+          "title": "Height",
+          "type": "integer"
+        },
+        "locale": {
+          "default": "en_US",
+          "title": "Locale",
+          "type": "string"
+        },
+        "theme": {
+          "default": "light",
+          "enum": [
+            "light",
+            "dark"
+          ],
+          "title": "Theme",
+          "type": "string"
+        },
+        "width": {
+          "maximum": 7680,
+          "minimum": 640,
+          "title": "Width",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "width",
+        "height"
+      ],
+      "title": "DisplaySpec",
+      "type": "object"
+    },
+    "EndpointSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": {
+          "title": "Endpoint",
+          "type": "string"
+        },
+        "logprobs": {
+          "default": false,
+          "title": "Logprobs",
+          "type": "boolean"
+        },
+        "max_tokens": {
+          "default": 1024,
+          "exclusiveMinimum": 0,
+          "title": "Max Tokens",
+          "type": "integer"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "temperature": {
+          "default": 1.0,
+          "maximum": 2.0,
+          "minimum": 0.0,
+          "title": "Temperature",
+          "type": "number"
+        },
+        "token_ids": {
+          "default": false,
+          "title": "Token Ids",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "endpoint",
+        "model"
+      ],
+      "title": "EndpointSpec",
+      "type": "object"
+    },
+    "ExperimentSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "budget_usd": {
+          "exclusiveMinimum": 0,
+          "title": "Budget Usd",
+          "type": "number"
+        },
+        "hypothesis": {
+          "default": "",
+          "title": "Hypothesis",
+          "type": "string"
+        },
+        "name": {
+          "pattern": "^[a-z0-9_]+$",
+          "title": "Name",
+          "type": "string"
+        },
+        "notes": {
+          "default": "",
+          "title": "Notes",
+          "type": "string"
+        },
+        "random_samples": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Random Samples"
+        },
+        "random_seed": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Random Seed",
+          "type": "integer"
+        },
+        "sweep": {
+          "additionalProperties": {
+            "items": {},
+            "type": "array"
+          },
+          "title": "Sweep",
+          "type": "object"
+        },
+        "sweep_mode": {
+          "default": "grid",
+          "enum": [
+            "grid",
+            "random"
+          ],
+          "title": "Sweep Mode",
+          "type": "string"
+        },
+        "tracker": {
+          "anyOf": [
+            {
+              "enum": [
+                "wandb",
+                "mlflow"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tracker"
+        }
+      },
+      "required": [
+        "name",
+        "budget_usd"
+      ],
+      "title": "ExperimentSpec",
+      "type": "object"
+    },
+    "IdentitySpec": {
+      "additionalProperties": false,
+      "properties": {
+        "idp": {
+          "default": "keycloak",
+          "title": "Idp",
+          "type": "string"
+        },
+        "sessions": {
+          "default": "mint_after_restore",
+          "enum": [
+            "mint_after_restore",
+            "none"
+          ],
+          "title": "Sessions",
+          "type": "string"
+        },
+        "users": {
+          "title": "Users",
+          "type": "string"
+        }
+      },
+      "required": [
+        "users"
+      ],
+      "title": "IdentitySpec",
+      "type": "object"
+    },
+    "ImageSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "apps": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Apps",
+          "type": "object"
+        },
+        "base": {
+          "title": "Base",
+          "type": "string"
+        },
+        "display": {
+          "$ref": "#/$defs/DisplaySpec"
+        },
+        "hardening": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Hardening",
+          "type": "array"
+        },
+        "id": {
+          "pattern": "^[a-z0-9_]+$",
+          "title": "Id",
+          "type": "string"
+        },
+        "os": {
+          "enum": [
+            "linux",
+            "windows",
+            "macos",
+            "android"
+          ],
+          "title": "Os",
+          "type": "string"
+        },
+        "pool": {
+          "$ref": "#/$defs/PoolSpec"
+        },
+        "ready_probe": {
+          "$ref": "#/$defs/ReadyProbeSpec"
+        }
+      },
+      "required": [
+        "id",
+        "os",
+        "base",
+        "pool",
+        "display"
+      ],
+      "title": "ImageSpec",
+      "type": "object"
+    },
+    "NetworkFaultSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "latency_ms": {
+          "default": [
+            0,
+            0
+          ],
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "minimum": 0,
+              "type": "integer"
+            }
+          ],
+          "title": "Latency Ms",
+          "type": "array"
+        },
+        "packet_loss": {
+          "default": [
+            0.0,
+            0.0
+          ],
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Packet Loss",
+          "type": "array"
+        }
+      },
+      "title": "NetworkFaultSpec",
+      "type": "object"
+    },
+    "NetworkSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "allowlist": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowlist",
+          "type": "array"
+        },
+        "dns_overrides": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Dns Overrides",
+          "type": "object"
+        },
+        "internet": {
+          "default": "none",
+          "enum": [
+            "none",
+            "replay_only",
+            "allowlist",
+            "live"
+          ],
+          "title": "Internet",
+          "type": "string"
+        },
+        "trusted_ca": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trusted Ca"
+        }
+      },
+      "title": "NetworkSpec",
+      "type": "object"
+    },
+    "PoolSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "cpu_model": {
+          "title": "Cpu Model",
+          "type": "string"
+        },
+        "machine": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Machine"
+        },
+        "vmm": {
+          "enum": [
+            "firecracker",
+            "qemu_templated",
+            "cloud_windows",
+            "apple_virtualization",
+            "cuttlefish"
+          ],
+          "title": "Vmm",
+          "type": "string"
+        }
+      },
+      "required": [
+        "vmm",
+        "cpu_model"
+      ],
+      "title": "PoolSpec",
+      "type": "object"
+    },
+    "ReadyProbeSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "screen_stable_ms": {
+          "default": 500,
+          "maximum": 10000,
+          "minimum": 100,
+          "title": "Screen Stable Ms",
+          "type": "integer"
+        },
+        "timeout_s": {
+          "default": 180,
+          "maximum": 3600,
+          "minimum": 1,
+          "title": "Timeout S",
+          "type": "integer"
+        },
+        "window": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Window"
+        }
+      },
+      "title": "ReadyProbeSpec",
+      "type": "object"
+    },
+    "RunSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "group_size": {
+          "default": 1,
+          "exclusiveMinimum": 0,
+          "title": "Group Size",
+          "type": "integer"
+        },
+        "judge": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EndpointSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "max_concurrent_envs": {
+          "exclusiveMinimum": 0,
+          "title": "Max Concurrent Envs",
+          "type": "integer"
+        },
+        "policy": {
+          "$ref": "#/$defs/EndpointSpec"
+        },
+        "priority": {
+          "enum": [
+            "interactive",
+            "eval",
+            "training"
+          ],
+          "title": "Priority",
+          "type": "string"
+        },
+        "trainer": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrainerSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "type": {
+          "enum": [
+            "rl",
+            "eval",
+            "data"
+          ],
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "policy",
+        "max_concurrent_envs",
+        "priority"
+      ],
+      "title": "RunSpec",
+      "type": "object"
+    },
+    "SideEffectSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_changes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Changes",
+          "type": "array"
+        }
+      },
+      "title": "SideEffectSpec",
+      "type": "object"
+    },
+    "TaskSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_actions": {
+          "items": {
+            "enum": [
+              "computer",
+              "browser",
+              "terminal",
+              "native",
+              "control"
+            ],
+            "type": "string"
+          },
+          "title": "Allowed Actions",
+          "type": "array"
+        },
+        "difficulty": {
+          "$ref": "#/$defs/DifficultySpec"
+        },
+        "generator": {
+          "pattern": "^[a-z_][a-z0-9_]*(\\.[a-z_][a-z0-9_]*)+$",
+          "title": "Generator",
+          "type": "string"
+        },
+        "judge_rubric": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Judge Rubric"
+        },
+        "max_steps": {
+          "default": 50,
+          "exclusiveMinimum": 0,
+          "title": "Max Steps",
+          "type": "integer"
+        },
+        "network_faults": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetworkFaultSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "observation": {
+          "items": {
+            "enum": [
+              "screenshot",
+              "accessibility_tree",
+              "dom",
+              "terminal",
+              "file_diff"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Observation",
+          "type": "array"
+        },
+        "oracle": {
+          "pattern": "^[a-z_][a-z0-9_]*(\\.[a-z_][a-z0-9_]*)+$",
+          "title": "Oracle",
+          "type": "string"
+        },
+        "side_effects": {
+          "$ref": "#/$defs/SideEffectSpec"
+        },
+        "split": {
+          "enum": [
+            "train",
+            "eval",
+            "holdout"
+          ],
+          "title": "Split",
+          "type": "string"
+        },
+        "user_simulator": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UserSimulatorSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "verifiers": {
+          "$ref": "#/$defs/VerifierSetSpec"
+        }
+      },
+      "required": [
+        "generator",
+        "allowed_actions",
+        "observation",
+        "oracle",
+        "split"
+      ],
+      "title": "TaskSpec",
+      "type": "object"
+    },
+    "TrainerSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "launcher": {
+          "enum": [
+            "kubernetes",
+            "slurm",
+            "skypilot",
+            "external"
+          ],
+          "title": "Launcher",
+          "type": "string"
+        },
+        "template": {
+          "pattern": "^[a-z0-9_]+$",
+          "title": "Template",
+          "type": "string"
+        }
+      },
+      "required": [
+        "template",
+        "launcher"
+      ],
+      "title": "TrainerSpec",
+      "type": "object"
+    },
+    "UserSimulatorSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "hidden_intent": {
+          "title": "Hidden Intent",
+          "type": "string"
+        },
+        "persona": {
+          "title": "Persona",
+          "type": "string"
+        }
+      },
+      "required": [
+        "persona",
+        "hidden_intent"
+      ],
+      "title": "UserSimulatorSpec",
+      "type": "object"
+    },
+    "VerifierSetSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "exact": {
+          "items": {
+            "pattern": "^[a-z_][a-z0-9_]*(\\.[a-z_][a-z0-9_]*)+$",
+            "type": "string"
+          },
+          "title": "Exact",
+          "type": "array"
+        },
+        "semantic": {
+          "items": {
+            "pattern": "^[a-z_][a-z0-9_]*(\\.[a-z_][a-z0-9_]*)+$",
+            "type": "string"
+          },
+          "title": "Semantic",
+          "type": "array"
+        }
+      },
+      "title": "VerifierSetSpec",
+      "type": "object"
+    },
+    "WorldSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "clock": {
+          "$ref": "#/$defs/ClockSpec"
+        },
+        "generator": {
+          "pattern": "^[a-z_][a-z0-9_]*(\\.[a-z_][a-z0-9_]*)+$",
+          "title": "Generator",
+          "type": "string"
+        },
+        "identity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IdentitySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "materialize": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Materialize",
+          "type": "array"
+        },
+        "network": {
+          "$ref": "#/$defs/NetworkSpec"
+        },
+        "seed": {
+          "minimum": 0,
+          "title": "Seed",
+          "type": "integer"
+        },
+        "size": {
+          "additionalProperties": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "title": "Size",
+          "type": "object"
+        }
+      },
+      "required": [
+        "generator",
+        "seed"
+      ],
+      "title": "WorldSpec",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "experiment": {
+      "$ref": "#/$defs/ExperimentSpec"
+    },
+    "image": {
+      "$ref": "#/$defs/ImageSpec"
+    },
+    "run": {
+      "$ref": "#/$defs/RunSpec"
+    },
+    "spec_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Spec Version",
+      "type": "integer"
+    },
+    "task": {
+      "$ref": "#/$defs/TaskSpec"
+    },
+    "world": {
+      "$ref": "#/$defs/WorldSpec"
+    }
+  },
+  "required": [
+    "experiment",
+    "image",
+    "world",
+    "task",
+    "run"
+  ],
+  "title": "SpecDocument",
+  "type": "object"
+}
