@@ -1,0 +1,45 @@
+spec_version: 1
+
+experiment:                                # the reference task on a Linux image, small enough for a laptop dev loop
+  name: reconcile_invoices_linux
+  hypothesis: damaged export rows cause most reconciliation failures in LibreOffice Calc
+  budget_usd: 50
+
+image:
+  id: noble_calc_v1
+  os: linux
+  base: ubuntu_noble@sha256:9b2f4c6e8a0d1f3b5c7e9a1d3f5b7c9e1a3c5e7f9b1d3f5a7c9e1b3d5f7a9c1e
+  pool: {vmm: firecracker, cpu_model: fleet_baseline}
+  apps: {libreoffice: "4:24.2.7-0ubuntu0.24.04.1"}
+  display: {width: 1280, height: 800, dpi: 96, theme: light, locale: en_US}
+  hardening: [no_auto_update, no_first_run, no_animations, no_telemetry]
+  ready_probe: {window: Calc, screen_stable_ms: 500}
+
+world:                                     # mail and files are the app integrations there are
+  generator: worlds.mid_market_company
+  seed: 1842
+  size: {employees: 12, customers: 20, invoices_per_customer: 2, emails_per_person: 5}
+  materialize: [mail, files]
+  identity: {idp: keycloak, users: world.employees, sessions: none}
+  clock: {fixed: "2026-03-14T09:00:00"}
+
+task:
+  generator: tasks.finance.reconcile_invoices
+  difficulty: {apps: 2, oracle_steps: 20, distractors: 3, corrupted_inputs: 2, ambiguity: none, dependency_depth: 1}
+  allowed_actions: [computer, control]
+  observation: [screenshot, accessibility_tree]
+  verifiers:
+    exact: [verifiers.excel.reconciliation_values_match]
+    semantic: [verifiers.mail.summary_lists_discrepant_invoices]
+  side_effects: {allowed_changes: [files/reconciliation.xlsx, mail/sent]}
+  oracle: oracles.finance.reconcile_invoices
+  split: eval
+
+run:
+  type: eval
+  policy: {endpoint: "http://localhost:8000/v1", model: my_policy, action_format: text_actions}
+  group_size: 1
+  tasks_per_batch: 4
+  batches: 1
+  max_concurrent_envs: 4
+  priority: eval
