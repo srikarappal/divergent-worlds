@@ -194,6 +194,8 @@ class ExperimentService:
         for run_id in experiment.run_ids:
             run = self.run(run_id)
             document = self.run_documents[run_id]
+            with self.lock:
+                run.state = "running"  # before starting, so a fast worker's completion is never overwritten
             try:
                 if run.run_type == "rl":
                     launch_context = LaunchContext(
@@ -213,8 +215,6 @@ class ExperimentService:
                     run.state = "failed"
                 self.record_event(run_id, "launch_failed", {"error": f"{type(error).__name__}: {error}"})
                 continue
-            with self.lock:
-                run.state = "running"
             self.record_event(run_id, "launched", {"job_id": run.job_id})
 
     def experiment(self, experiment_id: str) -> ExperimentRecord:
@@ -228,6 +228,13 @@ class ExperimentService:
             if run_id not in self.runs:
                 raise UnknownRecordError(run_id)
             return self.runs[run_id]
+
+    def run_document(self, run_id: str) -> SpecDocument:
+        """The sweep point's full spec, which a trainer job's rollout workers play."""
+        with self.lock:
+            if run_id not in self.run_documents:
+                raise UnknownRecordError(run_id)
+            return self.run_documents[run_id]
 
     def list_runs(self, experiment_id: str | None = None) -> list[RunRecord]:
         with self.lock:

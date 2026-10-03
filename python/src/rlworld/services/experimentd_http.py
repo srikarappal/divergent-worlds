@@ -2,7 +2,8 @@
 
 Synchronous Flask with module level handlers. The event stream is server sent
 events that either replay what happened (follow=false) or keep polling until
-the run ends.
+the run ends. Rollout workers report spend, metrics and completion with a bearer
+run token scoped to their run.
 """
 
 import json
@@ -19,14 +20,23 @@ from rlworld.services.experiments import (
     LaunchBlockedError,
     UnknownRecordError,
 )
-from rlworld.specs.document import SpecValidationError
+from rlworld.specs.document import SpecValidationError, dump_spec_document
 
 SERVICE_KEY = "rlworld_experiment_service"
 POLL_KEY = "rlworld_event_poll"
+FINISHED_STATES = ("completed", "failed")
 
 
 def service() -> ExperimentService:
     return current_app.extensions[SERVICE_KEY]
+
+
+def require_run_token(run_id: str) -> None:
+    """Worker routes take a bearer run token that is valid only for its own run."""
+    authorization = request.headers.get("Authorization", "")
+    token = authorization.removeprefix("Bearer ").strip() if authorization.startswith("Bearer ") else ""
+    if service().verify_run_token(token) != run_id:
+        raise InvalidRunTokenError(f"the run token is not scoped to {run_id}")
 
 
 def server_sent_event(sequence: int, kind: str, payload: str) -> str:
@@ -103,14 +113,36 @@ def get_run(run_id: str):
     return jsonify(service().run(run_id).model_dump(mode="json"))
 
 
+def get_run_spec(run_id: str):
+    run = service().run(run_id)
+    return jsonify({"run_id": run_id, "spec_digest": run.spec_digest,
+                    "yaml": dump_spec_document(service().run_document(run_id))})
+
+
 def control(run_id: str):
     body = request.get_json(silent=True) or {}
     return jsonify(service().control(run_id, body.get("command", ""), body.get("value")).model_dump(mode="json"))
 
 
 def spend(run_id: str):
+    require_run_token(run_id)
     body = request.get_json(silent=True) or {}
     return jsonify(service().record_spend(run_id, float(body.get("usd", 0.0))).model_dump(mode="json"))
+
+
+def metrics(run_id: str):
+    require_run_token(run_id)
+    service().publish_metrics(run_id, request.get_json(silent=True) or {})
+    return "", 204
+
+
+def finish(run_id: str):
+    require_run_token(run_id)
+    body = request.get_json(silent=True) or {}
+    state = body.get("state")
+    if state not in FINISHED_STATES:
+        raise ControlError(f"a run finishes as one of {', '.join(FINISHED_STATES)}")
+    return jsonify(service().mark_finished(run_id, state, body.get("detail", "")).model_dump(mode="json"))
 
 
 def events(run_id: str):
@@ -137,8 +169,11 @@ ROUTES = (
     ("POST", "/v1/experiments/<experiment_id>/approve", approve),
     ("GET", "/v1/runs", list_runs),
     ("GET", "/v1/runs/<run_id>", get_run),
+    ("GET", "/v1/runs/<run_id>/spec", get_run_spec),
     ("POST", "/v1/runs/<run_id>/control", control),
     ("POST", "/v1/runs/<run_id>/spend", spend),
+    ("POST", "/v1/runs/<run_id>/metrics", metrics),
+    ("POST", "/v1/runs/<run_id>/finish", finish),
     ("GET", "/v1/runs/<run_id>/events", events),
     ("POST", "/v1/run_tokens/verify", verify_token),
 )
