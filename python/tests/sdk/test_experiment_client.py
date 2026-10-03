@@ -19,7 +19,7 @@ from rlworld.specs import dump_spec_document, load_spec_document, parse_spec_doc
 OPERATIONS_PATH = Path(__file__).resolve().parents[3] / "schemas" / "api_operations.json"
 OPERATIONS = json.loads(OPERATIONS_PATH.read_text())["operations"]
 PLACEHOLDER_PATTERN = re.compile(r"\{(\w+)\}")
-SAMPLE_VALUES = {"status": "running", "size": "thumbnail"}
+SAMPLE_VALUES = {"status": "running", "size": "thumbnail", "action": "flag"}
 ENDPOINT_YAML = """name: byo_judge
 base_url: https://judge.customer.example/v1
 allowed_models: [judge_v1]

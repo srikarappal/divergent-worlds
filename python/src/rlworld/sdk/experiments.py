@@ -12,6 +12,7 @@ import httpx
 from rlworld.preflight.preflight import ExperimentPreflight
 from rlworld.services.catalogs import CatalogEntry
 from rlworld.services.experiments import DryRun, ExperimentRecord, RunEvent, RunRecord
+from rlworld.services.review import CohortEpisode, Comparison, EpisodeProvenance, FailureAnalysisView, ReviewItem
 from rlworld.services.trajectory_views import LiveTile
 from rlworld.trajectories.records import EpisodeRecord
 
@@ -114,6 +115,45 @@ class ExperimentClient:
         response = self.http_client.get(f"{self.base_url}/v1/frames/{frame_digest}", params={"size": size})
         raise_for_error(response)
         return response.content
+
+    def cohort(self, run_id: str, **filters: Any) -> list[CohortEpisode]:
+        params = {name: value for name, value in filters.items() if value is not None}
+        payload = self.request("GET", f"/v1/runs/{run_id}/cohort", params=params)
+        return [CohortEpisode.model_validate(member) for member in payload["episodes"]]
+
+    def get_provenance(self, run_id: str, episode_id: str) -> EpisodeProvenance:
+        return EpisodeProvenance.model_validate(
+            self.request("GET", f"/v1/runs/{run_id}/episodes/{episode_id}/provenance"))
+
+    def get_step_prompt(self, run_id: str, episode_id: str, step_index: int) -> list[dict[str, Any]]:
+        return self.request("GET", f"/v1/runs/{run_id}/episodes/{episode_id}/steps/{step_index}/prompt")["messages"]
+
+    def review_episode(self, run_id: str, episode_id: str, action: str, note: str = "",
+                       label: dict[str, Any] | None = None) -> ReviewItem:
+        body = {"action": action, "note": note, "label": label}
+        return ReviewItem.model_validate(self.request("POST", f"/v1/runs/{run_id}/episodes/{episode_id}/actions", body))
+
+    def analyze_failures(self, run_id: str) -> FailureAnalysisView:
+        return FailureAnalysisView.model_validate(self.request("POST", f"/v1/runs/{run_id}/failures/analyze"))
+
+    def get_failures(self, run_id: str) -> FailureAnalysisView:
+        return FailureAnalysisView.model_validate(self.request("GET", f"/v1/runs/{run_id}/failures"))
+
+    def run_report(self, run_id: str) -> dict[str, Any]:
+        return self.request("GET", f"/v1/runs/{run_id}/report")
+
+    def compare_policy_versions(self, run_id: str) -> Comparison:
+        return Comparison.model_validate(self.request("GET", f"/v1/runs/{run_id}/compare/policy_versions"))
+
+    def compare_runs(self, run_ids: list[str]) -> Comparison:
+        return Comparison.model_validate(self.request("GET", "/v1/compare/runs", params={"run_ids": ",".join(run_ids)}))
+
+    def list_review_items(self, queue: str | None = None, status: str | None = None, run_id: str | None = None,
+                          episode_id: str | None = None) -> list[ReviewItem]:
+        filters = {"queue": queue, "status": status, "run_id": run_id, "episode_id": episode_id}
+        params = {name: value for name, value in filters.items() if value is not None}
+        payload = self.request("GET", "/v1/review_items", params=params)
+        return [ReviewItem.model_validate(item) for item in payload["items"]]
 
     def list_catalog(self, kind: str) -> list[CatalogEntry]:
         return [CatalogEntry.model_validate(entry) for entry in self.request("GET", f"/v1/catalogs/{kind}")["entries"]]
