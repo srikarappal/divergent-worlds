@@ -362,6 +362,16 @@ func (service *Service) Close(leaseID string) error {
 	return nil
 }
 
+// AdmissionStatus reports fleet capacity, reservations, tenant quotas and endpoint budgets with their usage.
+func (service *Service) AdmissionStatus() admission.Status {
+	return service.leases.Admission().Status()
+}
+
+// SetTenantQuota changes a tenant's concurrent env quota.
+func (service *Service) SetTenantQuota(tenant string, quota int) error {
+	return service.leases.Admission().SetTenantQuota(tenant, quota)
+}
+
 // Leases lists active leases, optionally for one run.
 func (service *Service) Leases(runID string) []LeaseInfo {
 	var infos []LeaseInfo

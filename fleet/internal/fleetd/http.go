@@ -41,6 +41,10 @@ type finishBody struct {
 	Apps []string `json:"apps"`
 }
 
+type quotaBody struct {
+	Quota int `json:"quota"`
+}
+
 type stepResponse struct {
 	Observation    json.RawMessage `json:"observation"`
 	EnvSeconds     float64         `json:"env_seconds"`
@@ -103,21 +107,38 @@ type httpAPI struct {
 	service *Service
 }
 
+// route is one pattern of the env API and the method that serves it.
+type route struct {
+	pattern string
+	handler http.HandlerFunc
+}
+
+// routes lists the env API; the console's operations manifest names the admission routes too.
+func (api *httpAPI) routes() []route {
+	return []route{
+		{"GET /healthz", api.health},
+		{"POST /v1/leases", api.leaseGroup},
+		{"GET /v1/leases", api.listLeases},
+		{"POST /v1/leases/{leaseID}/heartbeat", api.heartbeat},
+		{"POST /v1/leases/{leaseID}/reset", api.reset},
+		{"POST /v1/leases/{leaseID}/step", api.step},
+		{"POST /v1/leases/{leaseID}/fork", api.fork},
+		{"POST /v1/leases/{leaseID}/checkpoint", api.checkpoint},
+		{"POST /v1/leases/{leaseID}/finish", api.finish},
+		{"POST /v1/leases/{leaseID}/inject", api.inject},
+		{"DELETE /v1/leases/{leaseID}", api.close},
+		{"GET /v1/admission", api.admissionStatus},
+		{"PUT /v1/admission/tenants/{tenant}", api.setTenantQuota},
+	}
+}
+
 // NewHandler exposes the service as the env API.
 func NewHandler(service *Service) http.Handler {
 	api := &httpAPI{service: service}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", api.health)
-	mux.HandleFunc("POST /v1/leases", api.leaseGroup)
-	mux.HandleFunc("GET /v1/leases", api.listLeases)
-	mux.HandleFunc("POST /v1/leases/{leaseID}/heartbeat", api.heartbeat)
-	mux.HandleFunc("POST /v1/leases/{leaseID}/reset", api.reset)
-	mux.HandleFunc("POST /v1/leases/{leaseID}/step", api.step)
-	mux.HandleFunc("POST /v1/leases/{leaseID}/fork", api.fork)
-	mux.HandleFunc("POST /v1/leases/{leaseID}/checkpoint", api.checkpoint)
-	mux.HandleFunc("POST /v1/leases/{leaseID}/finish", api.finish)
-	mux.HandleFunc("POST /v1/leases/{leaseID}/inject", api.inject)
-	mux.HandleFunc("DELETE /v1/leases/{leaseID}", api.close)
+	for _, entry := range api.routes() {
+		mux.HandleFunc(entry.pattern, entry.handler)
+	}
 	return mux
 }
 
@@ -233,4 +254,20 @@ func (api *httpAPI) close(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writer.WriteHeader(http.StatusNoContent)
+}
+
+func (api *httpAPI) admissionStatus(writer http.ResponseWriter, _ *http.Request) {
+	writeJSON(writer, http.StatusOK, api.service.AdmissionStatus())
+}
+
+func (api *httpAPI) setTenantQuota(writer http.ResponseWriter, request *http.Request) {
+	var body quotaBody
+	if !decode(writer, request, &body) {
+		return
+	}
+	if err := api.service.SetTenantQuota(request.PathValue("tenant"), body.Quota); err != nil {
+		writeJSON(writer, http.StatusBadRequest, errorResponse{Code: "bad_request", Message: err.Error()})
+		return
+	}
+	writeJSON(writer, http.StatusOK, api.service.AdmissionStatus())
 }

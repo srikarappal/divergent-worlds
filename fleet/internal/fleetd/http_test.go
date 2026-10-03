@@ -7,6 +7,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -239,5 +241,68 @@ func TestUnknownErrorsAreEnvErrors(t *testing.T) {
 	status, code := statusFor(errors.New("vm crashed"))
 	if status != http.StatusInternalServerError || code != "env_error" {
 		t.Fatalf("unknown errors must be env errors: %d %s", status, code)
+	}
+}
+
+func TestAdmissionStatusAndTenantQuotas(t *testing.T) {
+	fleet := newTestFleet(t, 8, 64_000)
+	if status, _ := fleet.call(t, http.MethodPost, "/v1/leases", leaseBody(2)); status != http.StatusCreated {
+		t.Fatalf("lease: %d", status)
+	}
+	status, payload := fleet.call(t, http.MethodPut, "/v1/admission/tenants/lab", map[string]int{"quota": 2})
+	if status != http.StatusOK || payload["tenant_quotas"].(map[string]any)["lab"].(float64) != 2 {
+		t.Fatalf("set quota: %d %v", status, payload)
+	}
+	if inUse := payload["usage"].(map[string]any)["by_tenant"].(map[string]any)["lab"].(float64); inUse != 2 {
+		t.Fatalf("lab in use: %v", inUse)
+	}
+	if status, payload = fleet.call(t, http.MethodPost, "/v1/leases", leaseBody(1)); status != http.StatusTooManyRequests ||
+		payload["code"] != "tenant_quota" {
+		t.Fatalf("lease past the quota: %d %v", status, payload)
+	}
+	if status, _ = fleet.call(t, http.MethodPut, "/v1/admission/tenants/lab", map[string]int{"quota": -1}); status !=
+		http.StatusBadRequest {
+		t.Fatalf("negative quota: %d", status)
+	}
+	if status, payload = fleet.call(t, http.MethodGet, "/v1/admission", nil); status != http.StatusOK ||
+		payload["capacity"].(float64) != 8 {
+		t.Fatalf("status: %d %v", status, payload)
+	}
+}
+
+type manifestOperation struct {
+	Name    string `json:"name"`
+	Service string `json:"service"`
+	Method  string `json:"method"`
+	Path    string `json:"path"`
+}
+
+func TestConsoleOperationsServedByFleetdAreRouted(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "schemas", "api_operations.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Operations []manifestOperation `json:"operations"`
+	}
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	patterns := map[string]bool{}
+	for _, entry := range (&httpAPI{}).routes() {
+		patterns[entry.pattern] = true
+	}
+	checked := 0
+	for _, operation := range manifest.Operations {
+		if operation.Service != "fleetd" {
+			continue
+		}
+		checked++
+		if !patterns[operation.Method+" "+operation.Path] {
+			t.Errorf("%s: fleetd serves no %s %s", operation.Name, operation.Method, operation.Path)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("the manifest names no fleetd operation")
 	}
 }
