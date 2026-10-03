@@ -15,7 +15,7 @@ from PIL import Image
 from pydantic import BaseModel
 
 from rlworld.services.experiments import UnknownRecordError
-from rlworld.trajectories.object_store import get_blob
+from rlworld.trajectories.object_store import blob_key, get_blob
 from rlworld.trajectories.records import EpisodeRecord
 from rlworld.trajectories.trajectory_store import TrajectoryStore
 
@@ -91,15 +91,19 @@ class TrajectoryViews:
         return tiles
 
     def frame(self, frame_digest: str, size: FrameSize = "full") -> tuple[bytes, str]:
+        """Past the full frame window only the thumbnail remains, so a full size request gets that instead."""
         hex_digest = frame_digest.removeprefix("sha256:")
+        object_store = self.trajectory_store.object_store
+        thumbnail_key = f"thumbnails/{self.thumbnail_width}x{self.thumbnail_height}/{hex_digest}.webp"
+        has_full_frame = object_store.exists(blob_key(hex_digest))
+        if not has_full_frame and object_store.exists(thumbnail_key):
+            return object_store.get_bytes(thumbnail_key), "image/webp"
         try:
-            frame = get_blob(self.trajectory_store.object_store, f"sha256:{hex_digest}")
+            frame = get_blob(object_store, f"sha256:{hex_digest}")
         except (KeyError, ValueError) as error:
             raise UnknownRecordError(f"frame {frame_digest}") from error
         if size == "full":
             return frame, frame_media_type(frame)
-        thumbnail_key = f"thumbnails/{self.thumbnail_width}x{self.thumbnail_height}/{hex_digest}.webp"
-        object_store = self.trajectory_store.object_store
         if not object_store.exists(thumbnail_key):
             object_store.put_bytes(thumbnail_key, thumbnail_of(frame, self.thumbnail_width, self.thumbnail_height))
         return object_store.get_bytes(thumbnail_key), "image/webp"

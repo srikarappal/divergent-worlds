@@ -41,6 +41,12 @@ class Transport(Protocol):
     def send(self, endpoint: EndpointConfig, api_key: str | None, request: ChatRequest) -> dict[str, Any]: ...
 
 
+class ScreenshotPolicy(Protocol):
+    """Per tenant data policy: may this run's frames go to this endpoint (DESIGN.md 6.7, 6.14)."""
+
+    def allows_screenshots(self, run_id: str, endpoint_name: str) -> bool: ...
+
+
 @dataclass
 class EndpointState:
     concurrency: threading.BoundedSemaphore
@@ -88,6 +94,7 @@ class ModelGateway:
         wait_timeout_seconds: float = 60.0,
         circuit_failure_threshold: int = 5,
         circuit_cooldown_seconds: float = 30.0,
+        screenshot_policy: ScreenshotPolicy | None = None,
     ) -> None:
         self.registry = registry
         self.transport = transport
@@ -102,6 +109,7 @@ class ModelGateway:
         self.wait_timeout_seconds = wait_timeout_seconds
         self.circuit_failure_threshold = circuit_failure_threshold
         self.circuit_cooldown_seconds = circuit_cooldown_seconds
+        self.screenshot_policy = screenshot_policy
         self.endpoint_states: dict[str, EndpointState] = {}
         self.states_lock = threading.Lock()
 
@@ -138,7 +146,7 @@ class ModelGateway:
         endpoint = self.registry.resolve(request.endpoint)
         if request.model not in endpoint.allowed_models:
             raise ModelNotPinnedError(f"{request.model} is not a pinned model on {endpoint.name}")
-        if contains_images(request) and not endpoint.accepts_screenshots:
+        if contains_images(request) and not self.screenshots_allowed(request.run_id, endpoint):
             raise DataPolicyViolationError(f"the tenant data policy forbids sending screenshots to {endpoint.name}")
         cache_key = request_digest(endpoint.name, request) if request.cache_mode != "off" else ""
         if cache_key and self.response_cache is not None:
@@ -152,6 +160,11 @@ class ModelGateway:
         if cache_key and self.response_cache is not None:
             self.response_cache.put(cache_key, response)
         return response
+
+    def screenshots_allowed(self, run_id: str, endpoint: EndpointConfig) -> bool:
+        if not endpoint.accepts_screenshots:
+            return False
+        return self.screenshot_policy is None or self.screenshot_policy.allows_screenshots(run_id, endpoint.name)
 
     def send_with_retries(self, endpoint: EndpointConfig, request: ChatRequest) -> ChatResponse:
         state = self.endpoint_state(endpoint)
