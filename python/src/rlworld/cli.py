@@ -203,6 +203,14 @@ def sweep_retention(client: ExperimentClient, arguments: argparse.Namespace) -> 
     return client.sweep_retention()
 
 
+def list_alerts(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.list_alerts(run_id=arguments.run_id, experiment_id=arguments.experiment_id, status=arguments.status)
+
+
+def acknowledge_alert(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.acknowledge_alert(arguments.alert_id)
+
+
 def fleet_admission(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
     return client.fleet_admission()
 
@@ -246,7 +254,7 @@ HANDLERS: dict[str, OperationHandler] = {
                     list_endpoints, register_endpoint, test_endpoint, set_endpoint_key, auth_config, me,
                     list_experiments, file_review_item, update_review_item, calibration, export_run, list_roles,
                     set_roles, list_data_policies, set_data_policy, audit_log, pool_status, sweep_retention,
-                    fleet_admission, set_tenant_quota, frame_grant)
+                    list_alerts, acknowledge_alert, fleet_admission, set_tenant_quota, frame_grant)
 }
 
 
@@ -384,6 +392,14 @@ def build_parser() -> argparse.ArgumentParser:
     audit_parser.add_argument("--limit", type=int, default=500)
     add_operation(admin_commands, "pools", pool_status, "free seats and identities")
     add_operation(admin_commands, "sweep-retention", sweep_retention, "apply retention windows now")
+
+    alerts = groups.add_parser("alerts", help="alerts raised on runs")
+    alert_commands = alerts.add_subparsers(dest="command", required=True)
+    alert_list = add_operation(alert_commands, "list", list_alerts, "list alerts")
+    alert_list.add_argument("--run-id", default=None)
+    alert_list.add_argument("--experiment-id", default=None)
+    alert_list.add_argument("--status", choices=("open", "acknowledged"), default=None)
+    add_operation(alert_commands, "ack", acknowledge_alert, "acknowledge an alert").add_argument("alert_id")
 
     fleet = groups.add_parser("fleet", help="fleet admission")
     fleet_commands = fleet.add_subparsers(dest="command", required=True)

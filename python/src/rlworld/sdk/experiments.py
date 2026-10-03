@@ -11,6 +11,7 @@ import httpx
 
 from rlworld.preflight.preflight import ExperimentPreflight
 from rlworld.services.admin import AuditRecord, DataPolicy
+from rlworld.services.alerts import Alert
 from rlworld.services.catalogs import CatalogEntry
 from rlworld.services.experiments import DryRun, ExperimentRecord, RunEvent, RunRecord
 from rlworld.services.review import (
@@ -246,6 +247,15 @@ class ExperimentClient:
 
     def sweep_retention(self) -> dict[str, Any]:
         return self.request("POST", "/v1/admin/retention/sweep")
+
+    def list_alerts(self, run_id: str | None = None, experiment_id: str | None = None,
+                    status: str | None = None) -> list[Alert]:
+        filters = {"run_id": run_id, "experiment_id": experiment_id, "status": status}
+        params = {name: value for name, value in filters.items() if value is not None}
+        return [Alert.model_validate(alert) for alert in self.request("GET", "/v1/alerts", params=params)["alerts"]]
+
+    def acknowledge_alert(self, alert_id: str) -> Alert:
+        return Alert.model_validate(self.request("POST", f"/v1/alerts/{alert_id}/acknowledge"))
 
     def fleet_admission(self) -> dict[str, Any]:
         return self.request("GET", "/v1/admission")
