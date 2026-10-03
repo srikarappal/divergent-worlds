@@ -33,7 +33,7 @@ Status is one of todo, doing or done.
 
 14. [done] Fleet scaffold and lease manager: leases with TTL and heartbeats, reaper, priority classes with reserved capacity, tenant quotas, endpoint concurrency budgets derived from rate limits.
 15. [done] Scheduler: placement by snapshot locality, capacity, OS pool, seats and quota.
-16. [todo] VMM drivers: driver interface, fake driver, Firecracker API client, QMP client, clone network plan.
+16. [done] VMM drivers: driver interface, fake driver, Firecracker API client, QMP client, clone network plan.
 17. [todo] Node agent: restore, fork, pause, resume, checkpoint and destroy; settle detection; turn based stepping.
 18. [todo] fleetd env API: lease, reset, step, fork, checkpoint, finish and close over HTTP.
 
