@@ -49,7 +49,7 @@ task:                                      # injected after restore, versioned w
 run:                                       # who plays, who grades, how much
   type: rl                                 # rl, eval or data
   trainer: {template: verl_grpo_7b_vlm, launcher: kubernetes}
-  policy: {endpoint: "http://vllm.internal/v1", model: my_policy, token_ids: true, logprobs: true}
+  policy: {endpoint: "http://vllm.internal/v1", model: my_policy, action_format: text_actions, token_ids: true, logprobs: true}
   judge: {endpoint: frontier, model: frontier_judge_2026_06}
   group_size: 8
   max_concurrent_envs: 4000

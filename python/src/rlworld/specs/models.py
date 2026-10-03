@@ -27,6 +27,7 @@ DottedPath = Annotated[str, Field(pattern=DOTTED_PATH_PATTERN)]
 OsFamily = Literal["linux", "windows", "macos", "android"]
 VmmKind = Literal["firecracker", "qemu_templated", "cloud_windows", "apple_virtualization", "cuttlefish"]
 ActionModality = Literal["computer", "browser", "terminal", "native", "control"]
+ActionFormat = Literal["computer_tool", "typed_actions", "text_actions"]
 ObservationKind = Literal["screenshot", "accessibility_tree", "dom", "terminal", "file_diff"]
 
 VMM_KINDS_BY_OS: dict[str, frozenset[str]] = {
@@ -188,6 +189,7 @@ class TaskSpec(SpecModel):
 class EndpointSpec(SpecModel):
     endpoint: str
     model: str
+    action_format: ActionFormat | None = None
     token_ids: bool = False
     logprobs: bool = False
     temperature: float = Field(default=1.0, ge=0.0, le=2.0)
@@ -216,6 +218,8 @@ class RunSpec(SpecModel):
 
     @model_validator(mode="after")
     def check_run(self) -> "RunSpec":
+        if self.policy.action_format is None:
+            raise ValueError("the policy needs an action_format so its output can be mapped to canonical actions")
         if self.type == "rl":
             if self.trainer is None:
                 raise ValueError("rl runs need a trainer template and launcher")

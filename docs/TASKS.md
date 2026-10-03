@@ -16,7 +16,7 @@ Status is one of todo, doing or done.
 ### Python core
 
 1. [done] Spec models: experiment, image, world, task and run specs; YAML load and dump; cross layer validation; canonical digests; sweep expansion; JSON Schema export.
-2. [todo] Actions and adapters: canonical action and observation models; adapters for a frontier computer use tool format, OpenAI style function calls and an open model text format; coordinate scaling and key normalization with golden tests.
+2. [done] Actions and adapters: canonical action and observation models; adapters for a frontier computer use tool format, OpenAI style function calls and an open model text format; coordinate scaling and key normalization with golden tests.
 3. [todo] Reward core: verifier protocol, tier 1 and tier 2 check helpers, world diff and side effect checks, reward composition, termination labels, reward records with provenance.
 4. [todo] Judge: rubric model, prompt builder that fences untrusted screen text, structured verdict parsing, cache keyed by final state hash, ensembles for low confidence.
 5. [todo] Task gates: null action, oracle, alternative solution, near miss, rerun stability and solvability gates with a gate report.

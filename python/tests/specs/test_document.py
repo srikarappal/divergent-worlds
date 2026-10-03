@@ -29,6 +29,13 @@ def test_rl_runs_use_train_split_tasks(example_payload):
     assert "train split" in rejection_text(set_path(example_payload, "task.split", "eval"))
 
 
+def test_the_action_format_must_express_every_allowed_modality(example_payload):
+    payload = set_path(example_payload, "task.allowed_actions", ["computer", "terminal", "control"])
+    assert "text_actions cannot express terminal" in rejection_text(payload)
+    payload = set_path(payload, "run.policy.action_format", "computer_tool")
+    assert parse_spec_document(payload).run.policy.action_format == "computer_tool"
+
+
 def test_sweep_paths_must_exist(example_payload):
     payload = set_path(example_payload, "experiment.sweep", {"task.difficulty.typos": [1, 2]})
     assert "task.difficulty.typos does not exist" in rejection_text(payload)

@@ -91,6 +91,10 @@ def test_concurrency_must_fit_a_group(example_payload):
     assert_rejected(set_path(example_payload, "run.max_concurrent_envs", 4), "max_concurrent_envs")
 
 
+def test_the_policy_needs_an_action_format(example_payload):
+    assert_rejected(set_path(example_payload, "run.policy.action_format", None), "action_format")
+
+
 def test_moving_model_aliases_are_rejected(example_payload):
     assert_rejected(set_path(example_payload, "run.judge.model", "judge_latest"), "moving alias")
 

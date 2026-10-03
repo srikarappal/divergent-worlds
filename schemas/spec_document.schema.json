@@ -115,6 +115,23 @@
     "EndpointSpec": {
       "additionalProperties": false,
       "properties": {
+        "action_format": {
+          "anyOf": [
+            {
+              "enum": [
+                "computer_tool",
+                "typed_actions",
+                "text_actions"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Action Format"
+        },
         "endpoint": {
           "title": "Endpoint",
           "type": "string"

@@ -6,6 +6,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import ValidationError, model_validator
 
+from rlworld.actions.adapters import supported_modalities
 from rlworld.specs.models import ExperimentSpec, ImageSpec, RunSpec, SpecModel, TaskSpec, WorldSpec
 
 VALUE_ERROR_PREFIX = "Value error, "
@@ -43,6 +44,14 @@ def cross_layer_problems(document: SpecDocument) -> list[str]:
         problems.append("run.judge: the task has a judge rubric but the run sets no judge endpoint")
     if document.run.type == "rl" and document.task.split != "train":
         problems.append("task.split: rl runs train only on train split tasks")
+    action_format = document.run.policy.action_format
+    if action_format is not None:
+        inexpressible_modalities = sorted(set(document.task.allowed_actions) - supported_modalities(action_format))
+        if inexpressible_modalities:
+            problems.append(
+                f"run.policy.action_format: {action_format} cannot express {', '.join(inexpressible_modalities)} "
+                "actions that the task allows"
+            )
     payload = document.model_dump(mode="json")
     for sweep_path in sorted(document.experiment.sweep):
         if not path_exists(payload, sweep_path):
