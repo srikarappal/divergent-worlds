@@ -14,7 +14,9 @@ from rlworld.gateway import RateLimitTimeoutError
 from rlworld.gateway.messages import ChatResponse
 from rlworld.rollout import EpisodePlan
 from rlworld.rollout.episode import NO_USER_REPLY
-from rlworld.sdk import UnknownLeaseError
+from rlworld.rollout.groups import GroupResult
+from rlworld.rollout.worker import RunTotals
+from rlworld.sdk import LeaseInfo, TakenOverError, UnknownLeaseError
 from rlworld.trajectories import InMemoryObjectStore, TrajectoryStore
 
 
@@ -60,6 +62,40 @@ class ExecGateway:
     def complete(self, request):
         return ChatResponse(text="", tool_calls=({"name": "exec", "arguments": '{"command": "ls"}'},),
                             served_model=request.model)
+
+
+class TakeoverFleet(FakeFleet):
+    """An operator takes over at the policy's first action, solves the task and hands back after two polls."""
+
+    def __init__(self):
+        super().__init__()
+        self.polls_left = 2
+
+    def step(self, lease_id, action):
+        if action.name == "type":
+            self.record("step", lease_id, action.name)
+            self.solved[lease_id] = True
+            raise TakenOverError(409, "taken_over", "an operator has taken over this env")
+        return super().step(lease_id, action)
+
+    def heartbeat(self, lease_id):
+        self.record("heartbeat", lease_id)
+        self.polls_left -= 1
+        return LeaseInfo(lease_id=lease_id, env_id=f"env_{lease_id}", host_id="host_a",
+                         expires_at="2026-10-03T12:10:00Z", taken_over=self.polls_left >= 0)
+
+
+class LostDuringTakeoverFleet(TakeoverFleet):
+    def heartbeat(self, lease_id):
+        raise UnknownLeaseError(404, "unknown_lease", "lease expired")
+
+
+class RecordingSleep:
+    def __init__(self):
+        self.slept = []
+
+    def sleep(self, seconds):
+        self.slept.append(seconds)
 
 
 class ExpiredLeaseFleet(FakeFleet):
@@ -180,3 +216,34 @@ def test_episodes_without_an_env_are_recorded_as_env_errors(document):
     stored = trajectory_store.load_episode("run_1", "episode_2")
     assert stored.reward.termination == "env_error" and stored.reward.error_detail == "fork failed"
     assert (episode.sample_index, stored.steps) == (2, ())
+
+
+def test_a_takeover_hands_the_episode_to_the_operator_and_scores_their_result(document):
+    fleet = TakeoverFleet()
+    sleeper = RecordingSleep()
+    episode, trajectory_store, lease = run_episode(document, fleet, ScriptedGateway(), takeover_poll_seconds=2.0,
+                                                   sleep=sleeper.sleep)
+    assert episode.human_intervened and episode.lease_id == lease.lease_id
+    assert episode.reward.termination == "success"
+    assert sleeper.slept == [2.0, 2.0]
+    assert len(fleet.calls_named("heartbeat")) >= 3 and fleet.calls_named("finish")
+    assert trajectory_store.load_steps("run_1", "episode_1") == ()
+    assert not episode.is_trainable_success
+
+
+def test_operators_losing_the_lease_make_an_env_error(document):
+    episode, _, _ = run_episode(document, LostDuringTakeoverFleet(), ScriptedGateway(), sleep=RecordingSleep().sleep)
+    assert episode.human_intervened and episode.reward.termination == "env_error"
+    assert "lease lost during the takeover" in episode.reward.error_detail
+
+
+def test_run_totals_leave_out_intervened_episodes(document):
+    fleet = FakeFleet()
+    solved, _, _ = run_episode(document, fleet, ScriptedGateway())
+    taken_over, _, _ = run_episode(document, TakeoverFleet(), ScriptedGateway(), sleep=RecordingSleep().sleep)
+    group = GroupResult("group_1", task_instance(document), (solved, taken_over))
+    totals = RunTotals()
+    totals.add(group)
+    metrics = totals.metrics()
+    assert metrics["episodes"] == 2 and metrics["human_intervened"] == 1 and metrics["success_rate"] == 1.0
+    assert group.rewards == (solved.reward,)

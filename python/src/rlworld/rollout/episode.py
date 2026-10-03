@@ -36,7 +36,7 @@ from rlworld.rewards.records import EpisodeOutcome, RewardRecord
 from rlworld.rollout.policy import PolicyClient, assistant_reply
 from rlworld.rollout.prompts import PastTurn, PromptBuilder
 from rlworld.rollout.user_simulator import UserSimulator
-from rlworld.sdk.client import FleetError, LeaseGroupRequest, LeaseInfo, SnapshotSource, StepResult
+from rlworld.sdk.client import FleetError, LeaseGroupRequest, LeaseInfo, SnapshotSource, StepResult, TakenOverError
 from rlworld.services.reward_service import EpisodeContext
 from rlworld.specs.models import TaskSpec
 from rlworld.tasks.curriculum import difficulty_key
@@ -78,6 +78,10 @@ class EntitlementSource(Protocol):
 
 class EnvironmentFailure(Exception):
     """The env, the policy endpoint or the user simulator failed; the episode becomes an env error."""
+
+
+class TakenOver(Exception):
+    """An operator took the env over: the policy stops and the episode waits for the operator to hand back."""
 
 
 @dataclass(frozen=True)
@@ -222,6 +226,8 @@ class EpisodeRunner:
         entitlements: EntitlementSource | None = None,
         heartbeat_seconds: float = 60.0,
         clock: Callable[[], float] = time.monotonic,
+        takeover_poll_seconds: float = 5.0,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.fleet = fleet
         self.policy = policy
@@ -232,9 +238,11 @@ class EpisodeRunner:
         self.entitlements = entitlements
         self.heartbeat_seconds = heartbeat_seconds
         self.clock = clock
+        self.takeover_poll_seconds = takeover_poll_seconds
+        self.sleep = sleep
         self.step_timings = StepTimingTotals()
 
-    def episode_record(self, plan: EpisodePlan) -> EpisodeRecord:
+    def episode_record(self, plan: EpisodePlan, lease_id: str | None = None) -> EpisodeRecord:
         instance = plan.instance
         return EpisodeRecord(
             episode_id=plan.episode_id,
@@ -253,6 +261,7 @@ class EpisodeRunner:
             group_id=plan.group_id,
             sample_index=plan.sample_index,
             run_type=self.settings.run_type,
+            lease_id=lease_id,
             started_at=utc_timestamp(),
         )
 
@@ -263,9 +272,22 @@ class EpisodeRunner:
                                                      instance.ground_truth)
         return writer.finish(env_error_record(detail, {}, instance.ground_truth), {})
 
+    def wait_for_takeover(self, lease_id: str, keeper: LeaseKeeper) -> str | None:
+        """The operator drives until they hand back; heartbeats keep the lease and its entitlements alive meanwhile."""
+        while True:
+            try:
+                taken_over = self.fleet.heartbeat(lease_id).taken_over
+                keeper.keep_alive()
+            except (*FLEET_FAILURES, EnvironmentFailure) as error:
+                return f"lease lost during the takeover: {describe(error)}"
+            if not taken_over:
+                return None
+            self.sleep(self.takeover_poll_seconds)
+
     def run(self, plan: EpisodePlan, lease: LeaseInfo, entitlement_lease_id: str | None = None) -> EpisodeRecord:
+        """Plays the policy until the episode ends; after an operator takes over, their result is what gets scored."""
         instance = plan.instance
-        writer = self.trajectory_store.start_episode(self.episode_record(plan), instance.initial_state,
+        writer = self.trajectory_store.start_episode(self.episode_record(plan, lease.lease_id), instance.initial_state,
                                                      instance.ground_truth)
         keeper = LeaseKeeper(self.fleet, lease.lease_id, self.entitlements, entitlement_lease_id,
                              self.heartbeat_seconds, self.clock)
@@ -286,6 +308,9 @@ class EpisodeRunner:
                     break
                 past_turns.append(PastTurn(last_turn.step.observation, last_turn.reply))
                 observation = last_turn.next_observation
+        except TakenOver:
+            writer.mark_human_intervened()
+            env_error = self.wait_for_takeover(lease.lease_id, keeper)
         except EnvironmentFailure as error:
             env_error = str(error)
         except Exception as error:  # a bug must still end in a labeled episode and a closed lease
@@ -389,6 +414,8 @@ class EpisodeRunner:
     def act(self, lease_id: str, action: ActionModel) -> StepResult:
         try:
             result = self.fleet.step(lease_id, action)
+        except TakenOverError as error:
+            raise TakenOver(str(error)) from error
         except FLEET_FAILURES as error:
             raise EnvironmentFailure(f"{action.name} step failed: {describe(error)}") from error
         if not isinstance(result.observation, Observation):

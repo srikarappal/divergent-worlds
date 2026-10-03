@@ -91,6 +91,7 @@ class RunTotals:
     successes: int = 0
     agent_errors: int = 0
     env_errors: int = 0
+    human_intervened: int = 0
     reward_sum: float = 0.0
 
     def add(self, group: GroupResult) -> None:
@@ -100,16 +101,20 @@ class RunTotals:
             if episode.termination == "env_error":
                 self.env_errors += 1
                 continue
+            if episode.human_intervened:
+                self.human_intervened += 1
+                continue
             self.successes += episode.termination == "success"
             self.agent_errors += episode.termination == "agent_error"
             self.reward_sum += episode.reward.total if episode.reward else 0.0
 
     def metrics(self) -> dict[str, Any]:
-        scored_episodes = self.episodes - self.env_errors
+        scored_episodes = self.episodes - self.env_errors - self.human_intervened
         return {
             "groups": self.groups,
             "episodes": self.episodes,
             "env_errors": self.env_errors,
+            "human_intervened": self.human_intervened,
             "agent_errors": self.agent_errors,
             "success_rate": self.successes / scored_episodes if scored_episodes else None,
             "mean_reward": self.reward_sum / scored_episodes if scored_episodes else None,

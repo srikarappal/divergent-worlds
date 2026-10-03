@@ -78,7 +78,9 @@ class GroupResult:
 
     @property
     def rewards(self) -> tuple[RewardRecord, ...]:
-        return tuple(episode.reward for episode in self.episodes if episode.reward is not None)
+        """Episodes an operator took over are left out: they measure the operator, not the policy."""
+        return tuple(episode.reward for episode in self.episodes
+                     if episode.reward is not None and not episode.human_intervened)
 
 
 def episode_identifier(group_id: str, sample_index: int, attempt: int) -> str:

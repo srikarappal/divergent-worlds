@@ -65,6 +65,7 @@ class EpisodeRecord(FrozenModel):
     group_id: str | None = None
     sample_index: NonNegativeInt = 0
     run_type: Literal["rl", "eval", "data"]
+    lease_id: str | None = None
     initial_state_ref: str | None = None
     ground_truth_ref: str | None = None
     final_state_ref: str | None = None

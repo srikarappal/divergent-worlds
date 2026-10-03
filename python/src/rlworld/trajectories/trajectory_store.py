@@ -114,6 +114,11 @@ class TrajectoryWriter:
         self.trajectory_store.object_store.put_bytes(step_key, step.model_dump_json().encode("utf-8"))
         self.next_step_index += 1
 
+    def mark_human_intervened(self) -> None:
+        """An operator took over: saved at once so the console shows it; it stays out of training and eval stats."""
+        self.episode = self.episode.model_copy(update={"human_intervened": True})
+        self.trajectory_store.save_episode(self.episode)
+
     def finish(
         self,
         reward: RewardRecord,
