@@ -69,6 +69,7 @@ class ImageSpec(SpecModel):
     base: str
     pool: PoolSpec
     apps: dict[str, str] = Field(default_factory=dict)
+    licenses: list[Annotated[str, Field(pattern=NAME_PATTERN)]] = Field(default_factory=list)
     display: DisplaySpec
     hardening: list[str] = Field(default_factory=list)
     ready_probe: ReadyProbeSpec = Field(default_factory=ReadyProbeSpec)
@@ -216,8 +217,11 @@ class RunSpec(SpecModel):
     policy: EndpointSpec
     judge: EndpointSpec | None = None
     group_size: PositiveInt = 1
+    tasks_per_batch: PositiveInt = 64
+    batches: PositiveInt = 1
     max_concurrent_envs: PositiveInt
     priority: Literal["interactive", "eval", "training"]
+    history: Literal["append_only", "sliding_window"] = "append_only"
 
     @model_validator(mode="after")
     def check_run(self) -> "RunSpec":

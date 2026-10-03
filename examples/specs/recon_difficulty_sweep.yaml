@@ -15,6 +15,7 @@ image:                                     # built rarely, snapshotted at "app r
   base: windows_server_2025_desktop@sha256:4f9c2a7d1e0b8c6a5f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c2b1a
   pool: {vmm: qemu_templated, machine: pc-q35-9.0, cpu_model: fleet_baseline}
   apps: {excel: office_ltsc_2024, edge: stable_pinned}
+  licenses: [windows_server_dc, office_ltsc]
   display: {width: 1280, height: 800, dpi: 96, theme: light, locale: en_US}
   hardening: [no_auto_update, no_defender_scan, no_first_run, no_protected_view, no_animations]
   ready_probe: {window: Excel, screen_stable_ms: 500}
@@ -52,5 +53,7 @@ run:                                       # who plays, who grades, how much
   policy: {endpoint: "http://vllm.internal/v1", model: my_policy, action_format: text_actions, token_ids: true, logprobs: true}
   judge: {endpoint: frontier, model: frontier_judge_2026_06}
   group_size: 8
+  tasks_per_batch: 512
+  batches: 200
   max_concurrent_envs: 4000
   priority: training

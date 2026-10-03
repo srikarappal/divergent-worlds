@@ -311,6 +311,14 @@
           "title": "Id",
           "type": "string"
         },
+        "licenses": {
+          "items": {
+            "pattern": "^[a-z0-9_]+$",
+            "type": "string"
+          },
+          "title": "Licenses",
+          "type": "array"
+        },
         "os": {
           "enum": [
             "linux",
@@ -501,11 +509,26 @@
     "RunSpec": {
       "additionalProperties": false,
       "properties": {
+        "batches": {
+          "default": 1,
+          "exclusiveMinimum": 0,
+          "title": "Batches",
+          "type": "integer"
+        },
         "group_size": {
           "default": 1,
           "exclusiveMinimum": 0,
           "title": "Group Size",
           "type": "integer"
+        },
+        "history": {
+          "default": "append_only",
+          "enum": [
+            "append_only",
+            "sliding_window"
+          ],
+          "title": "History",
+          "type": "string"
         },
         "judge": {
           "anyOf": [
@@ -534,6 +557,12 @@
           ],
           "title": "Priority",
           "type": "string"
+        },
+        "tasks_per_batch": {
+          "default": 64,
+          "exclusiveMinimum": 0,
+          "title": "Tasks Per Batch",
+          "type": "integer"
         },
         "trainer": {
           "anyOf": [
