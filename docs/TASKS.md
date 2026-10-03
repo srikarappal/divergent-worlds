@@ -35,7 +35,7 @@ Status is one of todo, doing or done.
 15. [done] Scheduler: placement by snapshot locality, capacity, OS pool, seats and quota.
 16. [done] VMM drivers: driver interface, fake driver, Firecracker API client, QMP client, clone network plan.
 17. [done] Node agent: restore, fork, pause, resume, checkpoint and destroy; settle detection; turn based stepping.
-18. [todo] fleetd env API: lease, reset, step, fork, checkpoint, finish and close over HTTP.
+18. [done] fleetd env API: lease, reset, step, fork, checkpoint, finish and close over HTTP.
 
 ### Python services and SDK
 
