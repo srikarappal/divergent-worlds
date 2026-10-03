@@ -264,6 +264,18 @@ func (scheduler *Scheduler) undo(assignment Assignment, request Request) {
 	state.host.WarmVMs[request.SnapshotDigest] += assignment.WarmVMsUsed
 }
 
+// ReserveOnHost reserves count VMs on one named host, as forks of a running env need.
+func (scheduler *Scheduler) ReserveOnHost(hostID string, perVM Resources, count int) error {
+	scheduler.mu.Lock()
+	defer scheduler.mu.Unlock()
+	state, found := scheduler.hosts[hostID]
+	if !found || state.host.Draining || !state.free().fits(perVM, count) {
+		return fmt.Errorf("%w: host %s cannot take %d more VMs", ErrNoCapacity, hostID, count)
+	}
+	state.allocated = state.allocated.plus(perVM, count)
+	return nil
+}
+
 // Free returns one finished VM's resources to its host.
 func (scheduler *Scheduler) Free(hostID string, perVM Resources) {
 	scheduler.mu.Lock()
