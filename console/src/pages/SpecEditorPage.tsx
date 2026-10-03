@@ -16,6 +16,7 @@ const SUGGESTION_CATALOGS = ["images", "worlds", "task_templates", "endpoints"];
 
 interface SpecEditorProps {
   api: ConsoleApi;
+  cloneRunId?: string;
 }
 
 interface SpecEditorState {
@@ -67,7 +68,7 @@ export class SpecEditorPage extends Component<SpecEditorProps, SpecEditorState> 
       saving: false,
       serverProblems: [],
       message: null,
-      cloneRunId: "",
+      cloneRunId: props.cloneRunId ?? "",
       suggestions: {},
     };
     this.handleYamlChange = this.handleYamlChange.bind(this);
@@ -82,6 +83,9 @@ export class SpecEditorPage extends Component<SpecEditorProps, SpecEditorState> 
   }
 
   async componentDidMount(): Promise<void> {
+    if (this.props.cloneRunId) {
+      await this.handleClone();
+    }
     const suggestions: Record<string, string[]> = {};
     for (const kind of SUGGESTION_CATALOGS) {
       try {

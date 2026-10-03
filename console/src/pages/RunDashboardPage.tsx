@@ -279,7 +279,8 @@ export class RunDashboardPage extends Component<RunDashboardProps, RunDashboardS
           ? (
             <p role="status">
               {run.state}, {run.run_type}, priority {run.priority}, concurrency {run.desired_concurrency}.{" "}
-              <Link to={`/runs/${run.run_id}/live`}>Live wall</Link>
+              <Link to={`/runs/${run.run_id}/live`}>Live wall</Link>{" "}
+              <Link to={`/runs/${run.run_id}/review`}>Review</Link>
             </p>
           )
           : null}
