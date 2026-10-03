@@ -154,6 +154,14 @@ def contained_path(root: Path, relative_path: str) -> Path:
     return target
 
 
+def own_tree(root: Path, owner: tuple[int, int]) -> None:
+    """Materialized world state belongs to the desktop user, whose apps and policy work in it."""
+    for directory, _, file_names in os.walk(root):
+        os.chown(directory, *owner)
+        for file_name in file_names:
+            os.chown(Path(directory) / file_name, *owner)
+
+
 def truncated(text: str, limit: int) -> str:
     return text if len(text) <= limit else f"{text[:limit]}\n[truncated {len(text) - limit} characters]"
 
@@ -281,6 +289,8 @@ class GuestAgent:
         """World state, task setup and entitlements; file changes are counted from here on."""
         if "world" in params:
             materialize_world(World.model_validate(params["world"]), params.get("apps", []), self.world_root)
+            if self.owner is not None:
+                own_tree(self.world_root, self.owner)
         for relative_path, content in params.get("files", {}).items():
             data = base64.b64decode(content["base64"]) if "base64" in content else content["text"].encode("utf-8")
             self.write_owned(contained_path(self.home, relative_path), data, 0o644)

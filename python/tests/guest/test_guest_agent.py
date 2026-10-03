@@ -1,10 +1,12 @@
 import base64
 import io
 import json
+import os
 import socket
 import struct
 import threading
 from datetime import datetime, timezone
+from pathlib import Path
 
 import httpx
 import pytest
@@ -200,6 +202,30 @@ def test_injection_writes_world_setup_and_entitlements_inside_their_roots(agent)
         {"path": "Documents/summary.txt", "change": "created"}]
     extracted = agent.handle("extract", {"apps": ["mail", "files"]})
     assert set(extracted) == {"mail", "files"} and extracted["mail"]["inbox"]
+
+
+class RecordingChown:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, path, uid, gid):
+        self.calls.append((Path(path).name, uid, gid))
+
+
+def test_the_materialized_world_belongs_to_the_desktop_user(tmp_path, monkeypatch):
+    chown = RecordingChown()
+    monkeypatch.setattr(os, "chown", chown)
+    home = tmp_path / "home"
+    home.mkdir()
+    owned = GuestAgent(
+        screen=FakeScreen(), input_runner=RecordingRunner(), accessibility=FakeAccessibility(), browser=FakeBrowser(),
+        shell=FakeShell(), hygiene=FakeHygiene(), home=home, world_root=home / "world",
+        license_root=tmp_path / "licenses", secrets_path=tmp_path / "run" / "episode.env", launchers={},
+        viewport=VIEWPORT, owner=(1000, 1000))
+    world = generate_mid_market_company(seed=7, size={"employees": 3, "customers": 2, "emails_per_person": 2})
+    owned.handle("inject", {"world": world.model_dump(mode="json"), "apps": ["files"]})
+    assert {"world", "files", "invoices.csv", "customers.csv"} <= {name for name, _, _ in chown.calls}
+    assert {(uid, gid) for _, uid, gid in chown.calls} == {(1000, 1000)}
 
 
 @pytest.mark.parametrize("payload, code", [

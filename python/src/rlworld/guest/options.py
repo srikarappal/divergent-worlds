@@ -26,7 +26,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--display", default=":0")
     parser.add_argument("--user", default="agent")
-    parser.add_argument("--world-root", type=Path, default=Path("/srv/world"))
+    parser.add_argument("--world-root", type=Path, default=None,
+                        help="where the world is materialized; the desktop user's home world folder by default")
     parser.add_argument("--license-root", type=Path, default=Path("/etc/rlworld/licenses"))
     parser.add_argument("--secrets-path", type=Path, default=Path("/run/rlworld/episode.env"))
     parser.add_argument("--cdp-endpoint", default="http://127.0.0.1:9222")

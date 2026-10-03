@@ -16,6 +16,7 @@ from rlworld.guest.cdp import CdpBrowser
 from rlworld.guest.options import parse_arguments
 from rlworld.guest.server import TokenServer, VncRelayServer, VsockServer
 from rlworld.guest.system import DisplayCommandRunner, SharedKernelHygiene, SystemHygiene, UserShell, X11Screen
+from rlworld.worlds.integrations import USER_WORLD_FOLDER
 
 
 def main() -> None:
@@ -30,7 +31,7 @@ def main() -> None:
         shell=UserShell(arguments.user, account.pw_dir, arguments.display),
         hygiene=SharedKernelHygiene() if arguments.container else SystemHygiene(),
         home=Path(account.pw_dir),
-        world_root=arguments.world_root,
+        world_root=arguments.world_root or Path(account.pw_dir) / USER_WORLD_FOLDER,
         license_root=arguments.license_root,
         secrets_path=arguments.secrets_path,
         launchers=dict(arguments.launcher),

@@ -47,6 +47,8 @@ CA_DIRECTORY = "/usr/local/share/ca-certificates/rlworld"
 RUNTIME_DIRECTORY = "/run/rlworld-desktop"
 ACCESSIBILITY_BUS_CONFIG = "/usr/share/defaults/at-spi2/accessibility.conf"
 GUEST_AGENT = "/opt/rlworld/bin/rlworld-guest-agent"
+# The guest agent's Python, with openpyxl, that scripted oracles run as the desktop user.
+GUEST_PYTHON = "/opt/rlworld/bin/python"
 GUEST_REQUIREMENTS = "guest-requirements.txt"
 CHROMIUM_POLICY_DIRECTORIES = {"chrome": "etc/opt/chrome_for_testing/policies/managed",
                                "edge": "etc/opt/edge/policies/managed"}
