@@ -12,6 +12,7 @@ dependencies = [
 ]
 
 [project.scripts]
+rlworld = "rlworld.cli:main"
 rlworld-export-schema = "rlworld.specs.schema:main"
 
 [dependency-groups]
