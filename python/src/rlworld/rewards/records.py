@@ -56,6 +56,7 @@ class Provenance(FrozenModel):
     judge_model: str | None = None
     rubric_version: str | None = None
     judge_skipped: bool = False
+    judge_cached: bool = False
     state_hash: str
     ground_truth_digest: str
     reward_policy: RewardPolicy

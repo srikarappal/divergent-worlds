@@ -23,6 +23,8 @@ class VerifierContext:
     ground_truth: dict[str, Any]
     final_action: FinalAction | None = None
     answer_text: str | None = None
+    instruction: str = ""
+    screenshots: tuple[str, ...] = ()
 
 
 class Verifier(Protocol):

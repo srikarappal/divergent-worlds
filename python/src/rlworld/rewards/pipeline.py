@@ -28,6 +28,7 @@ class JudgeOutcome:
     checks: tuple[CheckResult, ...]
     judge_model: str
     rubric_version: str
+    cached: bool = False
 
 
 class JudgeTier(Protocol):
@@ -48,6 +49,8 @@ def evaluate_episode(
     policy: RewardPolicy | None = None,
     judge: JudgeTier | None = None,
     volatile_patterns: Sequence[str] = (),
+    instruction: str = "",
+    screenshots: Sequence[str] = (),
 ) -> RewardRecord:
     reward_policy = policy or RewardPolicy()
     exact_verifiers = registry.resolve(task.verifiers.exact, "exact")
@@ -77,6 +80,8 @@ def evaluate_episode(
         ground_truth=ground_truth,
         final_action=outcome.final_action,
         answer_text=outcome.answer_text,
+        instruction=instruction,
+        screenshots=tuple(screenshots),
     )
     checks: list[CheckResult] = []
     for verifier in (*exact_verifiers, *semantic_verifiers):
@@ -96,7 +101,11 @@ def evaluate_episode(
             except Exception as error:  # endpoint failures and timeouts are env errors
                 return error_record("env_error", f"judge failed: {type(error).__name__}: {error}", base_provenance)
             checks.extend(judge_outcome.checks)
-            judge_provenance = {"judge_model": judge_outcome.judge_model, "rubric_version": judge_outcome.rubric_version}
+            judge_provenance = {
+                "judge_model": judge_outcome.judge_model,
+                "rubric_version": judge_outcome.rubric_version,
+                "judge_cached": judge_outcome.cached,
+            }
     provenance = Provenance(**base_provenance, **judge_provenance)
     return compose_reward(task, outcome, tuple(checks), violations, reward_policy, provenance)
 
