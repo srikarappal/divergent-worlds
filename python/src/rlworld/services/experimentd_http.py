@@ -9,8 +9,21 @@ run token scoped to their run.
 import json
 import time
 from collections.abc import Callable, Iterator
+from dataclasses import asdict
+from typing import Any
 
 from flask import Flask, Response, current_app, jsonify, request
+from pydantic import BaseModel, ValidationError
+
+from rlworld.gateway.config import DuplicateEndpointError, EndpointConfig
+from rlworld.gateway.errors import EndpointNotFoundError
+from rlworld.services.catalogs import (
+    CatalogEntry,
+    CatalogService,
+    CatalogWriteError,
+    EndpointService,
+    UnknownCatalogError,
+)
 
 from rlworld.services.experiments import (
     TERMINAL_STATES,
@@ -24,11 +37,39 @@ from rlworld.specs.document import SpecValidationError, dump_spec_document
 
 SERVICE_KEY = "rlworld_experiment_service"
 POLL_KEY = "rlworld_event_poll"
+CATALOGS_KEY = "rlworld_catalog_service"
+ENDPOINTS_KEY = "rlworld_endpoint_service"
 FINISHED_STATES = ("completed", "failed")
+
+
+class ServiceUnavailableError(Exception):
+    """This experimentd was started without the service a route needs."""
+
+
+class RequestValidationError(ValueError):
+    def __init__(self, problems: list[str]) -> None:
+        super().__init__("; ".join(problems))
+        self.problems = problems
 
 
 def service() -> ExperimentService:
     return current_app.extensions[SERVICE_KEY]
+
+
+def configured(extension_key: str, description: str) -> Any:
+    configured_service = current_app.extensions.get(extension_key)
+    if configured_service is None:
+        raise ServiceUnavailableError(f"{description} are not configured on this experimentd")
+    return configured_service
+
+
+def validated(model_class: type[BaseModel], payload: Any) -> Any:
+    try:
+        return model_class.model_validate(payload)
+    except ValidationError as error:
+        problems = [f"{'.'.join(str(part) for part in problem['loc']) or 'body'}: {problem['msg']}"
+                    for problem in error.errors()]
+        raise RequestValidationError(problems) from error
 
 
 def require_run_token(run_id: str) -> None:
@@ -73,6 +114,26 @@ def rejected_control(error: ControlError):
 
 def invalid_token(error: InvalidRunTokenError):
     return jsonify({"code": "invalid_run_token", "message": str(error)}), 401
+
+
+def invalid_request(error: RequestValidationError):
+    return jsonify({"code": "invalid_request", "problems": error.problems}), 400
+
+
+def unknown_catalog(error: UnknownCatalogError):
+    return jsonify({"code": "not_found", "message": f"no catalog named {error.args[0]}"}), 404
+
+
+def unknown_endpoint(error: EndpointNotFoundError):
+    return jsonify({"code": "not_found", "message": str(error)}), 404
+
+
+def rejected_write(error: ValueError):
+    return jsonify({"code": "conflict", "message": str(error)}), 409
+
+
+def unavailable(error: ServiceUnavailableError):
+    return jsonify({"code": "unavailable", "message": str(error)}), 503
 
 
 def health():
@@ -154,6 +215,38 @@ def events(run_id: str):
     return Response(stream, mimetype="text/event-stream", headers={"Cache-Control": "no-cache"})
 
 
+def list_catalog(kind: str):
+    catalog_service: CatalogService = configured(CATALOGS_KEY, "catalogs")
+    entries = [entry.model_dump(mode="json") for entry in catalog_service.entries(kind)]
+    return jsonify({"kind": kind, "entries": entries})
+
+
+def publish_catalog_entry(kind: str, name: str):
+    """Factory jobs publish images, worlds and task templates here."""
+    catalog_service: CatalogService = configured(CATALOGS_KEY, "catalogs")
+    entry = validated(CatalogEntry, {**(request.get_json(silent=True) or {}), "kind": kind, "name": name})
+    return jsonify(catalog_service.publish(entry).model_dump(mode="json"))
+
+
+def list_endpoints():
+    return jsonify({"endpoints": configured(ENDPOINTS_KEY, "endpoints").list()})
+
+
+def register_endpoint():
+    endpoint = validated(EndpointConfig, request.get_json(silent=True) or {})
+    return jsonify(configured(ENDPOINTS_KEY, "endpoints").register(endpoint)), 201
+
+
+def test_endpoint(name: str):
+    return jsonify(asdict(configured(ENDPOINTS_KEY, "endpoints").test(name)))
+
+
+def set_endpoint_key(name: str):
+    body = request.get_json(silent=True) or {}
+    configured(ENDPOINTS_KEY, "endpoints").set_key(name, str(body.get("key", "")))
+    return "", 204
+
+
 def verify_token():
     body = request.get_json(silent=True) or {}
     return jsonify({"run_id": service().verify_run_token(body.get("token", ""))})
@@ -176,6 +269,12 @@ ROUTES = (
     ("POST", "/v1/runs/<run_id>/finish", finish),
     ("GET", "/v1/runs/<run_id>/events", events),
     ("POST", "/v1/run_tokens/verify", verify_token),
+    ("GET", "/v1/catalogs/<kind>", list_catalog),
+    ("PUT", "/v1/catalogs/<kind>/<name>", publish_catalog_entry),
+    ("GET", "/v1/endpoints", list_endpoints),
+    ("POST", "/v1/endpoints", register_endpoint),
+    ("POST", "/v1/endpoints/<name>/test", test_endpoint),
+    ("PUT", "/v1/endpoints/<name>/key", set_endpoint_key),
 )
 ERROR_HANDLERS = (
     (UnknownRecordError, unknown_record),
@@ -183,14 +282,23 @@ ERROR_HANDLERS = (
     (LaunchBlockedError, blocked_launch),
     (ControlError, rejected_control),
     (InvalidRunTokenError, invalid_token),
+    (RequestValidationError, invalid_request),
+    (UnknownCatalogError, unknown_catalog),
+    (EndpointNotFoundError, unknown_endpoint),
+    (CatalogWriteError, rejected_write),
+    (DuplicateEndpointError, rejected_write),
+    (ServiceUnavailableError, unavailable),
 )
 
 
 def create_app(experiment_service: ExperimentService, poll_seconds: float = 1.0,
-               sleep: Callable[[float], None] = time.sleep) -> Flask:
+               sleep: Callable[[float], None] = time.sleep, catalog_service: CatalogService | None = None,
+               endpoint_service: EndpointService | None = None) -> Flask:
     app = Flask("experimentd")
     app.extensions[SERVICE_KEY] = experiment_service
     app.extensions[POLL_KEY] = (poll_seconds, sleep)
+    app.extensions[CATALOGS_KEY] = catalog_service
+    app.extensions[ENDPOINTS_KEY] = endpoint_service
     for method, rule, view_function in ROUTES:
         app.add_url_rule(rule, endpoint=f"{method} {rule}", view_func=view_function, methods=[method])
     for error_class, handler in ERROR_HANDLERS:

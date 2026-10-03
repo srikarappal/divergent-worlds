@@ -229,6 +229,11 @@ class ExperimentService:
                 raise UnknownRecordError(run_id)
             return self.runs[run_id]
 
+    def documents(self) -> list[SpecDocument]:
+        """Every launched run's spec, for catalog usage counts."""
+        with self.lock:
+            return list(self.run_documents.values())
+
     def run_document(self, run_id: str) -> SpecDocument:
         """The sweep point's full spec, which a trainer job's rollout workers play."""
         with self.lock:
