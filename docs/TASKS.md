@@ -25,7 +25,7 @@ Status is one of todo, doing or done.
 8. [done] Model gateway: endpoint registry, OpenAI compatible client, retries with jitter, circuit breaker, token bucket rate limits, response cache, metering, pinned versions, token in token out records.
 9. [done] Trajectories: step and episode records, filesystem store behind an object store interface, exact replay, SFT and preference pair export.
 10. [done] Failure clustering: labeler protocol, cluster rollups per template and policy version, verifier false negative routing.
-11. [todo] Worlds: seeded synthetic organization generator, app integration contract, reference mail integration, world digests.
+11. [done] Worlds: seeded synthetic organization generator, app integration contract, reference mail integration, world digests.
 12. [todo] Identity and entitlements broker: identity and seat pools, per episode session minting, leases with TTL, audit log.
 13. [todo] Network world renderers: DNS overrides, private CA issuance, egress allowlist rules, netem fault commands.
 
@@ -60,3 +60,4 @@ Status is one of todo, doing or done.
 ## Follow ups
 
 1. Native transports for frontier computer use APIs behind the gateway Transport protocol; the OpenAI compatible transport ships first.
+2. App integrations for crm, calendar, chat and browser profiles against the v1 clones; mail and files ship first as references.
