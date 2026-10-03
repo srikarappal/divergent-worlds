@@ -10,6 +10,7 @@ errors and count; failures of the env, the policy endpoint or the user
 simulator are env errors, which are excluded from training.
 """
 
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -136,6 +137,34 @@ def describe(error: Exception) -> str:
     return f"{type(error).__name__}: {error}"
 
 
+class StepTimingTotals:
+    """Model, env and settle time summed over every step the runner wrote, for the run dashboard's latency split."""
+
+    def __init__(self) -> None:
+        self.steps = 0
+        self.model_seconds = 0.0
+        self.env_seconds = 0.0
+        self.settle_seconds = 0.0
+        self.lock = threading.Lock()
+
+    def add(self, timings: StepTimings) -> None:
+        with self.lock:
+            self.steps += 1
+            self.model_seconds += timings.model_seconds
+            self.env_seconds += timings.env_seconds
+            self.settle_seconds += timings.settle_seconds
+
+    def metrics(self) -> dict[str, float | int | None]:
+        with self.lock:
+            steps = self.steps
+            return {
+                "steps": steps,
+                "mean_model_seconds": self.model_seconds / steps if steps else None,
+                "mean_env_seconds": self.env_seconds / steps if steps else None,
+                "mean_settle_seconds": self.settle_seconds / steps if steps else None,
+            }
+
+
 class LeaseKeeper:
     """Heartbeats an env lease and renews its entitlements while the episode runs."""
 
@@ -203,6 +232,7 @@ class EpisodeRunner:
         self.entitlements = entitlements
         self.heartbeat_seconds = heartbeat_seconds
         self.clock = clock
+        self.step_timings = StepTimingTotals()
 
     def episode_record(self, plan: EpisodePlan) -> EpisodeRecord:
         instance = plan.instance
@@ -250,6 +280,7 @@ class EpisodeRunner:
             while len(past_turns) < instance.task.max_steps:
                 last_turn = self.play_turn(plan, lease.lease_id, keeper, writer, builder, past_turns, observation)
                 writer.write_step(last_turn.step)
+                self.step_timings.add(last_turn.step.timings)
                 final_observation = last_turn.next_observation or last_turn.step.observation
                 if last_turn.ends_episode:
                     break

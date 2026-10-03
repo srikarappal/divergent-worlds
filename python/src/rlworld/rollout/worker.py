@@ -24,7 +24,7 @@ from rlworld.gateway.metering import UsageMeter
 from rlworld.rollout.control import RunControlError
 from rlworld.rollout.episode import TaskInstance, describe
 from rlworld.rollout.groups import GroupResult, GroupRunner, RunStoppedError, episode_identifier
-from rlworld.services.experiments import TERMINAL_STATES, RunRecord
+from rlworld.services.experiments import TERMINAL_STATES, DryRun, RunRecord
 from rlworld.specs.document import SpecDocument
 from rlworld.tasks.curriculum import (
     CandidateTask,
@@ -266,6 +266,12 @@ class RolloutWorker:
             with self.lock:
                 self.reported_spend_usd -= unreported_usd
 
+    def gateway_metrics(self) -> dict[str, Any]:
+        if self.meter is None:
+            return {}
+        summaries = self.meter.summary(self.run_id).values()
+        return {"rate_limit_wait_seconds": sum(summary.rate_limit_wait_seconds for summary in summaries)}
+
     def publish_metrics(self, force: bool = False, extra: dict[str, Any] | None = None) -> None:
         if self.control is None:
             return
@@ -273,7 +279,8 @@ class RolloutWorker:
             if not force and self.clock() - self.metrics_published_at < self.metrics_interval_seconds:
                 return
             self.metrics_published_at = self.clock()
-            metrics = {**self.totals.metrics(), **(extra or {})}
+            metrics = {**self.totals.metrics(), **self.group_runner.episode_runner.step_timings.metrics(),
+                       **self.gateway_metrics(), **(extra or {})}
         try:
             self.control.publish_metrics(self.run_id, metrics)
         except RunControlError:
@@ -298,12 +305,12 @@ class RolloutWorker:
     def play_dry_run(self, candidate: CandidateTask) -> GroupResult:
         return self.group_runner.run(self.task_provider.instance(candidate), 1, 0, self.run_id, DRY_RUN_PRIORITY)
 
-    def start_dry_run(self) -> str:
-        """Plays one episode of the first task at interactive priority in the background; returns its episode id."""
+    def start_dry_run(self) -> DryRun:
+        """Plays one episode of the first task at interactive priority in the background."""
         candidate = self.task_provider.candidates()[0]
         threading.Thread(target=self.play_dry_run, args=(candidate,), name=f"rollout_{self.run_id}",
                          daemon=True).start()
-        return episode_identifier(self.run_id, 0, 0)
+        return DryRun(run_id=self.run_id, episode_id=episode_identifier(self.run_id, 0, 0))
 
 
 WorkerFactory = Callable[[str, SpecDocument], RolloutWorker]
@@ -333,7 +340,7 @@ class PlatformRunExecutor:
         if worker is not None:
             worker.apply_desired_state(run)
 
-    def dry_run(self, document: SpecDocument) -> str:
+    def dry_run(self, document: SpecDocument) -> DryRun:
         return self.build_worker(f"dry_run_{next(self.dry_run_numbers):06d}", document).start_dry_run()
 
     def wait(self, run_id: str, timeout_seconds: float | None = None) -> bool:

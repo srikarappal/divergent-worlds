@@ -166,6 +166,10 @@ def test_spend_is_reported_once_per_dollar(document):
     reports = len(control.spend)
     worker.report_spend()
     assert len(control.spend) == reports
+    latest = control.metrics[-1]
+    assert latest["steps"] == len(gateway.requests) and latest["rate_limit_wait_seconds"] == 0
+    assert latest["mean_model_seconds"] == 1.5
+    assert latest["mean_env_seconds"] == pytest.approx(0.4 * 2 / latest["steps"])
 
 
 def test_the_platform_executor_runs_eval_runs_and_dry_runs(example_payload, tmp_path):
@@ -186,8 +190,8 @@ def test_the_platform_executor_runs_eval_runs_and_dry_runs(example_payload, tmp_
     assert service.run(run_id).state == "completed"
     assert any(event.kind == "metrics" for event in service.run_events(run_id))
     assert len(trajectory_store.list_episode_ids(run_id)) == 8
-    episode_id = service.dry_run(digest)
-    assert episode_id == "dry_run_000001_s000_a0"
+    dry_run = service.dry_run(digest)
+    assert (dry_run.run_id, dry_run.episode_id) == ("dry_run_000001", "dry_run_000001_s000_a0")
     dry_run_thread = next(thread for thread in threading.enumerate() if thread.name == "rollout_dry_run_000001")
     dry_run_thread.join(10)
-    assert trajectory_store.load_episode("dry_run_000001", episode_id).reward.termination == "success"
+    assert trajectory_store.load_episode(dry_run.run_id, dry_run.episode_id).reward.termination == "success"
