@@ -19,6 +19,7 @@ from typing import Any, Literal, Protocol
 from pydantic import BaseModel, Field
 
 from rlworld.preflight.preflight import ExperimentPreflight, PreflightContext, run_experiment_preflight
+from rlworld.services.auth import DEFAULT_TENANT
 from rlworld.services.trainer_launch import LaunchContext, TrainerLauncher
 from rlworld.specs.digest import document_digest, run_spec_digest
 from rlworld.specs.document import SpecDocument, load_spec_document
@@ -57,6 +58,7 @@ class RunEvent(BaseModel):
 class RunRecord(BaseModel):
     run_id: str
     experiment_id: str
+    tenant: str = DEFAULT_TENANT
     run_name: str
     spec_digest: str
     run_digest: str
@@ -71,6 +73,7 @@ class RunRecord(BaseModel):
 
 class ExperimentRecord(BaseModel):
     experiment_id: str
+    tenant: str = DEFAULT_TENANT
     spec_digest: str
     name: str
     budget_usd: float
@@ -155,7 +158,7 @@ class ExperimentService:
             run_events = self.events.setdefault(run_id, [])
             run_events.append(RunEvent(sequence=len(run_events) + 1, at=self.clock(), kind=kind, detail=detail or {}))
 
-    def launch(self, digest: str, budget_usd: float | None = None) -> ExperimentRecord:
+    def launch(self, digest: str, budget_usd: float | None = None, tenant: str = DEFAULT_TENANT) -> ExperimentRecord:
         document = self.spec(digest)[1]
         report = self.preflight(digest)
         if not report.is_valid:
@@ -174,13 +177,14 @@ class ExperimentService:
             with self.lock:
                 self.run_documents[run_id] = point.document
                 self.runs[run_id] = RunRecord(
-                    run_id=run_id, experiment_id=experiment_id, run_name=point.run_name,
+                    run_id=run_id, experiment_id=experiment_id, tenant=tenant, run_name=point.run_name,
                     spec_digest=document_digest(point.document), run_digest=run_spec_digest(point.document),
                     run_type=point.document.run.type, assignments=point.assignments, state="awaiting_approval",
                     desired_concurrency=point.document.run.max_concurrent_envs,
                     priority=point.document.run.priority, created_at=self.clock(),
                 )
-        experiment = ExperimentRecord(experiment_id=experiment_id, spec_digest=digest, name=document.experiment.name,
+        experiment = ExperimentRecord(experiment_id=experiment_id, tenant=tenant, spec_digest=digest,
+                                      name=document.experiment.name,
                                       budget_usd=budget, estimated_cost_usd=report.estimated_cost_usd,
                                       run_ids=run_ids, approved=not needs_approval)
         with self.lock:
@@ -206,7 +210,7 @@ class ExperimentService:
             try:
                 if run.run_type == "rl":
                     launch_context = LaunchContext(
-                        run_id=run_id, tenant=document.experiment.name, cost_center=document.experiment.name,
+                        run_id=run_id, tenant=run.tenant, cost_center=document.experiment.name,
                         fleet_url=self.fleet_url, experimentd_url=self.experimentd_url,
                         policy_endpoint=document.run.policy.endpoint, run_token=self.issue_run_token(run_id),
                         token_file_path=f"/run/rlworld/{run_id}.token",
@@ -229,6 +233,17 @@ class ExperimentService:
             if experiment_id not in self.experiments:
                 raise UnknownRecordError(experiment_id)
             return self.experiments[experiment_id]
+
+    def list_experiments(self, tenant: str | None = None) -> list[ExperimentRecord]:
+        with self.lock:
+            return [experiment for experiment in self.experiments.values()
+                    if tenant is None or experiment.tenant == tenant]
+
+    def tenant_of_run(self, run_id: str) -> str:
+        """Dry runs and runs started elsewhere have no record here; they fall under the default tenant."""
+        with self.lock:
+            run = self.runs.get(run_id)
+        return run.tenant if run is not None else DEFAULT_TENANT
 
     def run(self, run_id: str) -> RunRecord:
         with self.lock:

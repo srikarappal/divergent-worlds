@@ -152,6 +152,14 @@
       "sdk": "client.get_frame(\"{frame_digest}\", size=\"{size}\")"
     },
     {
+      "name": "frame_grant",
+      "method": "GET",
+      "path": "/v1/frame_grant",
+      "summary": "A short lived grant to view frames, appended to frame URLs",
+      "cli": "rlworld frames grant",
+      "sdk": "client.frame_grant()"
+    },
+    {
       "name": "cohort",
       "method": "GET",
       "path": "/v1/runs/{run_id}/cohort",
@@ -291,6 +299,153 @@
       "summary": "Store an endpoint key in the vault; keys are write only",
       "cli": "rlworld endpoints set-key {name} < key.txt",
       "sdk": "client.set_endpoint_key(\"{name}\", key)"
+    },
+    {
+      "name": "auth_config",
+      "method": "GET",
+      "path": "/v1/auth/config",
+      "summary": "How to sign in: the OIDC issuer and client, or that sign in is off",
+      "cli": "rlworld auth config",
+      "sdk": "client.auth_config()"
+    },
+    {
+      "name": "me",
+      "method": "GET",
+      "path": "/v1/me",
+      "summary": "Who is signed in, with tenant and roles",
+      "cli": "rlworld auth me",
+      "sdk": "client.me()"
+    },
+    {
+      "name": "list_experiments",
+      "method": "GET",
+      "path": "/v1/experiments",
+      "query": [
+        "tenant"
+      ],
+      "summary": "Experiments with budgets and spend, optionally for one tenant",
+      "cli": "rlworld experiments list --tenant {tenant}",
+      "sdk": "client.list_experiments(tenant=\"{tenant}\")"
+    },
+    {
+      "name": "file_review_item",
+      "method": "POST",
+      "path": "/v1/review_items",
+      "body": "json",
+      "summary": "File a task failing its gates or an episode behind an alert for human review",
+      "cli": "rlworld review file {source} --title {title} --queue {queue}",
+      "sdk": "client.file_review_item(source=\"{source}\", title=\"{title}\", queue=\"{queue}\")"
+    },
+    {
+      "name": "update_review_item",
+      "method": "PATCH",
+      "path": "/v1/review_items/{item_id}",
+      "body": "json",
+      "summary": "Resolve or dismiss a review item, with a label for labeling items",
+      "cli": "rlworld review update {item_id} --status {item_status}",
+      "sdk": "client.update_review_item(\"{item_id}\", status=\"{item_status}\")"
+    },
+    {
+      "name": "calibration",
+      "method": "GET",
+      "path": "/v1/calibration",
+      "query": [
+        "run_id"
+      ],
+      "summary": "Verifier precision and recall and judge kappa against human labels",
+      "cli": "rlworld review calibration --run-id {run_id}",
+      "sdk": "client.calibration(run_id=\"{run_id}\")"
+    },
+    {
+      "name": "export_run",
+      "method": "GET",
+      "path": "/v1/runs/{run_id}/exports/{kind}",
+      "summary": "SFT rows or preference pairs, when the tenant's data policy allows the export",
+      "cli": "rlworld runs export {run_id} {kind}",
+      "sdk": "client.export_run(\"{run_id}\", \"{kind}\")"
+    },
+    {
+      "name": "list_roles",
+      "method": "GET",
+      "path": "/v1/admin/roles",
+      "summary": "Roles granted by admins",
+      "cli": "rlworld admin roles",
+      "sdk": "client.list_roles()"
+    },
+    {
+      "name": "set_roles",
+      "method": "PUT",
+      "path": "/v1/admin/roles/{subject}",
+      "body": "json",
+      "summary": "Grant a user roles: viewer, researcher, operator, labeler or admin",
+      "cli": "rlworld admin set-roles {subject} {roles}",
+      "sdk": "client.set_roles(\"{subject}\", [\"{roles}\"])"
+    },
+    {
+      "name": "list_data_policies",
+      "method": "GET",
+      "path": "/v1/admin/data_policies",
+      "summary": "Per tenant screenshot endpoints, retention windows and export rights",
+      "cli": "rlworld admin data-policies",
+      "sdk": "client.list_data_policies()"
+    },
+    {
+      "name": "set_data_policy",
+      "method": "PUT",
+      "path": "/v1/admin/data_policies/{tenant}",
+      "body": "json",
+      "summary": "Set a tenant's data policy",
+      "cli": "rlworld admin set-data-policy {tenant} {policy_file}",
+      "sdk": "client.set_data_policy(\"{tenant}\", policy)"
+    },
+    {
+      "name": "audit_log",
+      "method": "GET",
+      "path": "/v1/admin/audit",
+      "query": [
+        "actor",
+        "action",
+        "since",
+        "limit"
+      ],
+      "summary": "Every launch, edit, stop, approval, role change and key write, newest first",
+      "cli": "rlworld admin audit --actor {actor}",
+      "sdk": "client.audit_log(actor=\"{actor}\")"
+    },
+    {
+      "name": "pool_status",
+      "method": "GET",
+      "path": "/v1/admin/pools",
+      "summary": "Free license seats and identities per pool",
+      "cli": "rlworld admin pools",
+      "sdk": "client.pool_status()"
+    },
+    {
+      "name": "sweep_retention",
+      "method": "POST",
+      "path": "/v1/admin/retention/sweep",
+      "summary": "Apply every tenant's retention windows now",
+      "cli": "rlworld admin sweep-retention",
+      "sdk": "client.sweep_retention()"
+    },
+    {
+      "name": "fleet_admission",
+      "service": "fleetd",
+      "method": "GET",
+      "path": "/v1/admission",
+      "summary": "Fleet capacity, reservations, tenant quotas and endpoint budgets with what is in use",
+      "cli": "rlworld fleet admission",
+      "sdk": "client.fleet_admission()"
+    },
+    {
+      "name": "set_tenant_quota",
+      "service": "fleetd",
+      "method": "PUT",
+      "path": "/v1/admission/tenants/{tenant}",
+      "body": "json",
+      "summary": "Set a tenant's concurrent env quota; zero means unlimited",
+      "cli": "rlworld fleet set-quota {tenant} {quota}",
+      "sdk": "client.set_tenant_quota(\"{tenant}\", {quota})"
     }
   ]
 }
