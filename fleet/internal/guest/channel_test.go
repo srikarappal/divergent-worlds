@@ -1,0 +1,188 @@
+package guest
+
+import (
+	"bufio"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+// fakeVsock plays Firecracker's hybrid vsock socket and the guest agent behind it.
+type fakeVsock struct {
+	mu        sync.Mutex
+	listener  net.Listener
+	directory string
+	refuse    bool
+	requests  []map[string]any
+	replies   map[string]string
+}
+
+func (fake *fakeVsock) socketPath(string) string {
+	return filepath.Join(fake.directory, "v.sock")
+}
+
+func (fake *fakeVsock) serve() {
+	for {
+		connection, err := fake.listener.Accept()
+		if err != nil {
+			return
+		}
+		fake.answer(connection)
+	}
+}
+
+func (fake *fakeVsock) answer(connection net.Conn) {
+	defer connection.Close()
+	reader := bufio.NewReader(connection)
+	handshake, err := reader.ReadString('\n')
+	if err != nil || handshake != "CONNECT 5005\n" {
+		return
+	}
+	fake.mu.Lock()
+	refuse := fake.refuse
+	fake.mu.Unlock()
+	if refuse {
+		connection.Write([]byte("FAILURE\n"))
+		return
+	}
+	connection.Write([]byte("OK 1073741824\n"))
+	line, err := reader.ReadBytes('\n')
+	if err != nil {
+		return
+	}
+	var request map[string]any
+	json.Unmarshal(line, &request)
+	fake.mu.Lock()
+	fake.requests = append(fake.requests, request)
+	reply := fake.replies[request["method"].(string)]
+	fake.mu.Unlock()
+	connection.Write([]byte(strings.ReplaceAll(reply, "ID", "1") + "\n"))
+}
+
+func (fake *fakeVsock) close() {
+	fake.listener.Close()
+	os.RemoveAll(fake.directory)
+}
+
+func startFakeVsock(t *testing.T, replies map[string]string) *fakeVsock {
+	t.Helper()
+	directory, err := os.MkdirTemp("/tmp", "vsock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("unix", filepath.Join(directory, "v.sock"))
+	if err != nil {
+		os.RemoveAll(directory)
+		t.Fatal(err)
+	}
+	fake := &fakeVsock{listener: listener, directory: directory, replies: replies}
+	t.Cleanup(fake.close)
+	go fake.serve()
+	return fake
+}
+
+func newTestChannel(t *testing.T, fake *fakeVsock) (*Channel, string) {
+	t.Helper()
+	frameRoot := t.TempDir()
+	return NewChannel(fake.socketPath, 5005, NewFilesystemFrames(frameRoot), 2*time.Second), frameRoot
+}
+
+func TestPrepareSendsTheWorldClockAndEntropy(t *testing.T) {
+	fake := startFakeVsock(t, map[string]string{"prepare": `{"id": ID, "result": {}}`})
+	channel, _ := newTestChannel(t, fake)
+	worldTime := time.Date(2026, 3, 14, 9, 0, 5, 0, time.UTC)
+	if err := channel.Prepare(context.Background(), "vm_1", worldTime, []byte{1, 2, 3}); err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	if err := channel.Prepare(context.Background(), "vm_1", worldTime, nil); err != nil {
+		t.Fatalf("prepare without entropy: %v", err)
+	}
+	params := fake.requests[0]["params"].(map[string]any)
+	if params["now"] != "2026-03-14T09:00:05Z" || params["entropy"] != base64.StdEncoding.EncodeToString([]byte{1, 2, 3}) {
+		t.Fatalf("prepare params: %v", params)
+	}
+	if _, sent := fake.requests[1]["params"].(map[string]any)["entropy"]; sent {
+		t.Fatal("entropy was sent again")
+	}
+}
+
+func TestObserveStoresTheScreenshotAsABlob(t *testing.T) {
+	frame := []byte("RIFF....WEBPVP8 frame")
+	reply := `{"id": ID, "result": {"step_index": 0, "screenshot_data": "` + base64.StdEncoding.EncodeToString(frame) +
+		`", "screenshot_size": [1280, 800], "accessibility": []}}`
+	fake := startFakeVsock(t, map[string]string{"observe": reply})
+	channel, frameRoot := newTestChannel(t, fake)
+	raw, err := channel.Observe(context.Background(), "vm_1", []string{"screenshot", "accessibility_tree"})
+	if err != nil {
+		t.Fatalf("observe: %v", err)
+	}
+	var observation map[string]any
+	json.Unmarshal(raw, &observation)
+	screenshot := observation["screenshot"].(map[string]any)
+	digest := screenshot["sha256"].(string)
+	if screenshot["uri"] != "blob:sha256:"+digest || screenshot["width"].(float64) != 1280 ||
+		screenshot["image_format"] != "webp" {
+		t.Fatalf("screenshot ref: %v", screenshot)
+	}
+	if _, kept := observation["screenshot_data"]; kept {
+		t.Fatal("the raw frame stayed in the observation")
+	}
+	stored, err := os.ReadFile(filepath.Join(frameRoot, "blobs", digest[:2], digest))
+	if err != nil || string(stored) != string(frame) {
+		t.Fatalf("stored frame: %q %v", stored, err)
+	}
+	kinds := fake.requests[0]["params"].(map[string]any)["kinds"].([]any)
+	if len(kinds) != 2 || kinds[1] != "accessibility_tree" {
+		t.Fatalf("observation kinds: %v", kinds)
+	}
+}
+
+func TestGuestErrorsAndRefusedHandshakes(t *testing.T) {
+	fake := startFakeVsock(t, map[string]string{
+		"act":         `{"id": ID, "error": {"code": "unsupported_action", "message": "no native API"}}`,
+		"screen_hash": `{"id": ID, "result": "abc123"}`,
+		"extract":     `{"id": ID, "result": {"files": {}}}`,
+	})
+	channel, _ := newTestChannel(t, fake)
+	err := channel.Act(context.Background(), "vm_1", json.RawMessage(`{"name": "native_call"}`))
+	var failure *Error
+	if !errors.As(err, &failure) || failure.Code != "unsupported_action" {
+		t.Fatalf("act: %v", err)
+	}
+	if hash, err := channel.ScreenHash(context.Background(), "vm_1"); err != nil || hash != "abc123" {
+		t.Fatalf("screen hash: %q %v", hash, err)
+	}
+	if state, err := channel.Extract(context.Background(), "vm_1", []string{"files"}); err != nil ||
+		string(state) != `{"files": {}}` {
+		t.Fatalf("extract: %s %v", state, err)
+	}
+	fake.mu.Lock()
+	fake.refuse = true
+	fake.mu.Unlock()
+	if err := channel.Inject(context.Background(), "vm_1", json.RawMessage(`{}`)); err == nil ||
+		!strings.Contains(err.Error(), "refused") {
+		t.Fatalf("refused handshake: %v", err)
+	}
+}
+
+func TestFramesAreStoredOnce(t *testing.T) {
+	root := t.TempDir()
+	frames := NewFilesystemFrames(root)
+	first, err := frames.Put([]byte("same screen"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _ := frames.Put([]byte("same screen"))
+	entries, _ := os.ReadDir(filepath.Join(root, "blobs", first[:2]))
+	if first != second || len(entries) != 1 {
+		t.Fatalf("digests %s %s, files %d", first, second, len(entries))
+	}
+}
