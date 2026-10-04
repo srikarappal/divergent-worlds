@@ -40,7 +40,7 @@ from rlworld.rollout.prompts import PastTurn, PromptBuilder
 from rlworld.rollout.user_simulator import NpcSimulator, UserSimulator
 from rlworld.rollout.world_events import MissingSimulatorError, NonPlayer, ScheduledDelivery, WorldScript
 from rlworld.sdk.client import FleetError, LeaseGroupRequest, LeaseInfo, SnapshotSource, StepResult, TakenOverError
-from rlworld.services.reward_service import EpisodeContext
+from rlworld.services.reward_service import EpisodeContext, EpisodeObserver
 from rlworld.specs.models import TaskSpec
 from rlworld.tasks.curriculum import difficulty_key
 from rlworld.trajectories.records import EpisodeKey, EpisodeRecord, ModelTurn, StepRecord, StepTimings
@@ -234,6 +234,7 @@ class EpisodeRunner:
         takeover_poll_seconds: float = 5.0,
         sleep: Callable[[float], None] = time.sleep,
         npc_simulator: NpcSimulator | None = None,
+        observer: EpisodeObserver | None = None,
     ) -> None:
         self.fleet = fleet
         self.policy = policy
@@ -247,6 +248,7 @@ class EpisodeRunner:
         self.takeover_poll_seconds = takeover_poll_seconds
         self.sleep = sleep
         self.npc_simulator = npc_simulator
+        self.observer = observer
         self.step_timings = StepTimingTotals()
 
     def episode_record(self, plan: EpisodePlan, lease_id: str | None = None) -> EpisodeRecord:
@@ -277,6 +279,8 @@ class EpisodeRunner:
         instance = plan.instance
         writer = self.trajectory_store.start_episode(self.episode_record(plan), instance.initial_state,
                                                      instance.ground_truth)
+        if self.observer is not None:
+            self.observer.episode_scored("env_error")
         return writer.finish(env_error_record(detail, {}, instance.ground_truth), {})
 
     def wait_for_takeover(self, lease_id: str, keeper: LeaseKeeper) -> str | None:

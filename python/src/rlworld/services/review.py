@@ -27,6 +27,7 @@ from rlworld.judge.calibration import LabeledVerdict, agreement_report, calibrat
 from rlworld.rewards.diff import diff_states
 from rlworld.rewards.records import RewardRecord, StateChange
 from rlworld.services.experiments import UnknownRecordError
+from rlworld.services.metrics import PlatformMetrics
 from rlworld.services.trajectory_views import TrajectoryViews
 from rlworld.trajectories.exports import eval_report
 from rlworld.trajectories.records import EpisodeRecord
@@ -196,10 +197,11 @@ def analysis_key(run_id: str) -> str:
 
 class ReviewService:
     def __init__(self, views: TrajectoryViews, llm_labeler: LlmFailureLabeler | None = None,
-                 clock: Callable[[], float] = time.time) -> None:
+                 clock: Callable[[], float] = time.time, metrics: PlatformMetrics | None = None) -> None:
         self.views = views
         self.llm_labeler = llm_labeler
         self.clock = clock
+        self.metrics = metrics
         self.items: dict[str, ReviewItem] = {}
         self.item_numbers = itertools.count(1)
         self.lock = threading.Lock()
@@ -286,9 +288,12 @@ class ReviewService:
         task_rates = [(row.success_rates[clone_run_id], row.success_rates[real_run_id])
                       for row in comparison.shared_tasks]
         try:
-            return clone_fidelity(app, clone_run_id, real_run_id, task_rates)
+            report = clone_fidelity(app, clone_run_id, real_run_id, task_rates)
         except FidelityError as error:
             raise ReviewError(str(error)) from error
+        if self.metrics is not None:
+            self.metrics.clone_fidelity_measured(report)
+        return report
 
     def compare_policy_versions(self, run_id: str) -> Comparison:
         by_version: dict[str, list[EpisodeRecord]] = defaultdict(list)
@@ -374,12 +379,16 @@ class ReviewService:
                     judge_labels.append(LabeledVerdict(episode_id, item_id, judge_checks[item_id], bool(human_passed)))
                     judged_episodes.add(episode_id)
         judge_report = agreement_report(judge_labels) if judge_labels else {}
+        verifier = VerifierAgreement(
+            labels=verdicts,
+            precision=true_passes / (true_passes + false_passes) if true_passes + false_passes else None,
+            recall=true_passes / (true_passes + false_fails) if true_passes + false_fails else None,
+            false_passes=false_passes, false_fails=false_fails)
+        calibrated = verifier.precision is not None and verifier.recall is not None
+        if self.metrics is not None and run_id is None and calibrated:
+            self.metrics.verifier_calibrated(verifier.precision, verifier.recall)
         return CalibrationReport(
-            verifier=VerifierAgreement(
-                labels=verdicts,
-                precision=true_passes / (true_passes + false_passes) if true_passes + false_passes else None,
-                recall=true_passes / (true_passes + false_fails) if true_passes + false_fails else None,
-                false_passes=false_passes, false_fails=false_fails),
+            verifier=verifier,
             judge={item_id: asdict(stats) for item_id, stats in judge_report.items()},
             judge_problems=(calibration_problems(judge_report, episode_count=len(judged_episodes))
                             if judge_report else []),

@@ -106,6 +106,7 @@ class EntitlementBroker:
             for pool in seat_pools
         }
         self.free_accounts = {pool.persona_key: deque(pool.accounts) for pool in identity_pools}
+        self.identity_pool_sizes = {pool.persona_key: len(pool.accounts) for pool in identity_pools}
         self.session_minter = session_minter
         self.secret_issuer = secret_issuer
         self.audit_log = audit_log or AuditLog()

@@ -21,6 +21,10 @@ from rlworld.trajectories.exports import retention_class
 from rlworld.trajectories.trajectory_store import TrajectoryWriter
 
 
+class EpisodeObserver(Protocol):
+    def episode_scored(self, termination: str) -> None: ...
+
+
 class FleetFinisher(Protocol):
     def finish(self, lease_id: str, apps: list[str]) -> dict[str, Any]: ...
 
@@ -53,6 +57,7 @@ class RewardService:
         audit_snapshot_rate: float = 0.0,
         full_retention_rate: float = 0.05,
         random_generator: random.Random | None = None,
+        observer: EpisodeObserver | None = None,
     ) -> None:
         self.fleet = fleet
         self.registry = registry
@@ -62,6 +67,7 @@ class RewardService:
         self.audit_snapshot_rate = audit_snapshot_rate
         self.full_retention_rate = full_retention_rate
         self.random_generator = random_generator or random.Random()
+        self.observer = observer
 
     def audit_snapshot(self, lease_id: str) -> str | None:
         """Best effort: a failed audit snapshot never costs the episode its reward."""
@@ -105,6 +111,8 @@ class RewardService:
             else:
                 final_snapshot_ref = self.audit_snapshot(context.lease_id)
                 reward = self.score(context, outcome, final_state)
+            if self.observer is not None:
+                self.observer.episode_scored(reward.termination)
             if writer is not None:
                 scored_episode = writer.episode.model_copy(update={"reward": reward})
                 retention = retention_class(scored_episode, self.full_retention_rate, self.random_generator.random())

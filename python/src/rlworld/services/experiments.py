@@ -342,6 +342,22 @@ class ExperimentService:
         self.run(run_id)
         self.record_event(run_id, "metrics", metrics)
 
+    def cost_per_thousand_episodes(self) -> dict[str, float]:
+        """Each run's spend per 1,000 scored episodes, from its spend events and its latest published metrics."""
+        with self.lock:
+            events_by_run = {run_id: list(events) for run_id, events in self.events.items()}
+        costs = {}
+        for run_id, events in events_by_run.items():
+            published = [event.detail for event in events if event.kind == "metrics"]
+            if not published:
+                continue
+            latest = published[-1]
+            scored = latest.get("episodes", 0) - latest.get("env_errors", 0) - latest.get("human_intervened", 0)
+            if scored > 0:
+                spent = sum(event.detail.get("amount_usd", 0.0) for event in events if event.kind == "spend")
+                costs[run_id] = 1000 * spent / scored
+        return costs
+
     def run_events(self, run_id: str, after_sequence: int = 0) -> list[RunEvent]:
         self.run(run_id)
         with self.lock:

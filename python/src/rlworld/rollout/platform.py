@@ -28,6 +28,7 @@ from rlworld.rollout.groups import EnvShape, GroupRunner, LeaseSettings
 from rlworld.rollout.policy import PolicyClient
 from rlworld.rollout.user_simulator import GatewayNpcSimulator, GatewayUserSimulator
 from rlworld.rollout.worker import RolloutWorker, RunControl
+from rlworld.services.metrics import EpisodeMetrics, PlatformMetrics
 from rlworld.services.reward_service import RewardService
 from rlworld.specs.document import SpecDocument
 from rlworld.specs.models import EndpointSpec
@@ -72,7 +73,8 @@ class PlatformWorkers:
                  tenants: Callable[[str], str], judge_secret: bytes, rubric_library: RubricLibrary | None = None,
                  user_simulator: SimulatorEndpoint | None = None, entitlements: EntitlementSource | None = None,
                  meter: UsageMeter | None = None, control: RunControl | None = None,
-                 worlds: WorldPreparer | None = None, screen: TaskScreen | None = None) -> None:
+                 worlds: WorldPreparer | None = None, screen: TaskScreen | None = None,
+                 metrics: PlatformMetrics | None = None) -> None:
         self.fleet = fleet
         self.gateway = gateway
         self.trajectory_store = trajectory_store
@@ -88,6 +90,7 @@ class PlatformWorkers:
         self.control = control
         self.worlds = worlds
         self.screen = screen
+        self.metrics = metrics
 
     def judge(self, run_id: str, document: SpecDocument) -> JudgeTier | None:
         """The run's judge grades tasks with a rubric; the rest are graded by verifiers alone."""
@@ -100,7 +103,10 @@ class PlatformWorkers:
         adapter = get_adapter(document.run.policy.action_format)
         geometry = adapter.model_geometry(document.image.display.width, document.image.display.height)
         policy = PolicyClient(self.gateway, document.run.policy, adapter, geometry, run_id, document.run.type)
-        finisher = RewardService(self.fleet, self.registry.verifier_registry, judge=self.judge(run_id, document))
+        observer = (EpisodeMetrics(self.metrics, document.image.id, document.world.materialize)
+                    if self.metrics is not None else None)
+        finisher = RewardService(self.fleet, self.registry.verifier_registry, judge=self.judge(run_id, document),
+                                 observer=observer)
         simulator = colleagues = None
         if self.user_simulator is not None:
             colleagues = GatewayNpcSimulator(self.gateway, self.user_simulator.endpoint, self.user_simulator.model,
@@ -111,7 +117,7 @@ class PlatformWorkers:
         settings = EpisodeSettings(run_id, document.run.type, document.image.os, tuple(document.world.materialize),
                                    document.run.history)
         episodes = EpisodeRunner(self.fleet, policy, finisher, self.trajectory_store, settings, simulator,
-                                 self.entitlements, npc_simulator=colleagues)
+                                 self.entitlements, npc_simulator=colleagues, observer=observer)
         lease = LeaseSettings(run_id=run_id, tenant=self.tenants(run_id), cost_center=document.experiment.name,
                               policy_endpoint=document.run.policy.endpoint,
                               shape=self.shapes[document.image.pool.vmm], licenses=tuple(document.image.licenses))

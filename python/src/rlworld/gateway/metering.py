@@ -1,9 +1,13 @@
-"""Per call metering: model version, sampling, latency, tokens, cost and errors (DESIGN.md 6.8)."""
+"""Per call metering: model version, sampling, latency, tokens, cost and errors (DESIGN.md 6.8).
+
+Listeners, such as the platform metrics, hear about every call as it is recorded.
+"""
 
 import threading
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 
 @dataclass(frozen=True)
@@ -49,14 +53,21 @@ class UsageSummary:
         return self.total_latency_seconds / successful_live_calls if successful_live_calls else 0.0
 
 
+class CallListener(Protocol):
+    def call_recorded(self, record: CallRecord) -> None: ...
+
+
 class UsageMeter:
-    def __init__(self) -> None:
+    def __init__(self, listeners: Sequence[CallListener] = ()) -> None:
         self.records: list[CallRecord] = []
         self.lock = threading.Lock()
+        self.listeners = tuple(listeners)
 
     def record(self, call_record: CallRecord) -> None:
         with self.lock:
             self.records.append(call_record)
+        for listener in self.listeners:
+            listener.call_recorded(call_record)
 
     def summary(self, run_id: str | None = None) -> dict[str, UsageSummary]:
         """Usage per endpoint, optionally for one run."""
