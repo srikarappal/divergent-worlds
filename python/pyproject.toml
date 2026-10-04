@@ -22,6 +22,7 @@ rlworld-export-schema = "rlworld.specs.schema:main"
 rlworld-guest-agent = "rlworld.guest.main:main"
 rlworld-build-image = "rlworld.images.builder:main"
 rlworld-experimentd = "rlworld.services.experimentd_main:main"
+rlworld-import-osworld = "rlworld.tasks.osworld:main"
 
 [dependency-groups]
 dev = [
