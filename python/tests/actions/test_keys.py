@@ -4,6 +4,7 @@ from rlworld.actions.keys import (
     KeyNameError,
     normalize_key,
     normalize_key_combo,
+    render_playwright_combo,
     render_text_combo,
     render_typed_keys,
     render_xdotool_combo,
@@ -75,9 +76,12 @@ def test_renderers():
     assert render_text_combo(keys) == "ctrl shift pagedown"
     assert render_xdotool_combo(("meta", "f4")) == "super+F4"
     assert render_typed_keys(("left", "a")) == ["ARROWLEFT", "A"]
+    assert render_playwright_combo(keys) == "Control+Shift+PageDown"
+    assert render_playwright_combo(("meta", "up", "space", "f12", "a")) == "Meta+ArrowUp+Space+F12+a"
 
 
 def test_rendered_combos_normalize_back():
     for keys in [("ctrl", "+"), ("alt", "f4"), ("meta", "escape"), ("shift", "-")]:
         assert normalize_key_combo(render_xdotool_combo(keys)) == keys
         assert normalize_key_combo(render_typed_keys(keys)) == keys
+        assert normalize_key_combo(render_playwright_combo(keys)) == keys

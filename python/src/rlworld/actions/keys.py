@@ -116,6 +116,31 @@ TEXT_NAMES = {
     "caps_lock": "capslock",
     "print_screen": "printscreen",
 }
+# Playwright's key names, which BrowserGym's keyboard_press takes; single characters stay as they are.
+PLAYWRIGHT_NAMES = {
+    "ctrl": "Control",
+    "alt": "Alt",
+    "shift": "Shift",
+    "meta": "Meta",
+    "enter": "Enter",
+    "tab": "Tab",
+    "escape": "Escape",
+    "backspace": "Backspace",
+    "delete": "Delete",
+    "insert": "Insert",
+    "space": "Space",
+    "up": "ArrowUp",
+    "down": "ArrowDown",
+    "left": "ArrowLeft",
+    "right": "ArrowRight",
+    "home": "Home",
+    "end": "End",
+    "page_up": "PageUp",
+    "page_down": "PageDown",
+    "caps_lock": "CapsLock",
+    "print_screen": "PrintScreen",
+    **{function_key: function_key.upper() for function_key in FUNCTION_KEYS},
+}
 
 
 def normalize_key(raw_key: str) -> str:
@@ -164,3 +189,7 @@ def render_typed_keys(keys: tuple[str, ...]) -> list[str]:
 
 def render_text_combo(keys: tuple[str, ...]) -> str:
     return " ".join(TEXT_NAMES.get(key, key) for key in keys)
+
+
+def render_playwright_combo(keys: tuple[str, ...]) -> str:
+    return "+".join(PLAYWRIGHT_NAMES.get(key, key) for key in keys)

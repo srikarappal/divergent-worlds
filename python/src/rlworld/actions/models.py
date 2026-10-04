@@ -22,6 +22,8 @@ from rlworld.actions.accessibility import PrunedNode
 from rlworld.actions.keys import MODIFIER_ORDER, normalize_key_combo
 
 MouseButton = Literal["left", "right", "middle"]
+# DOM observations carry each element's id in this attribute, the BrowserGym bid convention; browser actions use it.
+ELEMENT_ATTRIBUTE = "data-rlworld-id"
 
 
 class FrozenModel(BaseModel):
