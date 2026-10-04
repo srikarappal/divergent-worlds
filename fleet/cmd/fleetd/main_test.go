@@ -16,8 +16,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"rlworld/fleet/internal/guest"
+	"rlworld/fleet/internal/snapshot"
 )
 
 // containerAgent plays the guest agent inside a dev container: the token, then one JSON request per connection.
@@ -323,4 +325,72 @@ func TestShutdownDestroysEveryEnv(t *testing.T) {
 	if len(built.node.Envs()) != 0 {
 		t.Fatalf("shutdown leaves envs: %v", built.node.Envs())
 	}
+}
+
+func firecrackerSnapshotConfig(t *testing.T) map[string]any {
+	payload := laptopConfig(t)
+	payload["driver"] = "firecracker"
+	payload["host"] = map[string]any{"id": "kvm_1", "pool": "linux", "cpu_millicores": 96000, "memory_mib": 393216}
+	payload["firecracker"] = map[string]any{"jailer_path": "/usr/bin/jailer", "firecracker_path": "/usr/bin/firecracker",
+		"chroot_base_dir": t.TempDir(), "uid": 1000, "gid": 1000, "cpu_template_path": "/etc/rlworld/baseline.json"}
+	payload["snapshots"] = map[string]any{"store_dir": t.TempDir(), "cache_dir": t.TempDir(), "vmm_version": "1.12.0",
+		"cpu_model": "fleet_baseline", "lazy_memory": true, "retention_days": 30, "grace_hours": 2}
+	return payload
+}
+
+func TestSnapshotStoresNeedAVMPoolAndItsBinding(t *testing.T) {
+	docker := laptopConfig(t)
+	docker["snapshots"] = map[string]any{"store_dir": t.TempDir(), "cache_dir": t.TempDir(), "vmm_version": "1",
+		"cpu_model": "x"}
+	if _, err := loadConfig(writeConfig(t, docker)); err == nil || !strings.Contains(err.Error(), "docker images") {
+		t.Fatalf("a snapshot store on the docker backend: %v", err)
+	}
+	unbound := firecrackerSnapshotConfig(t)
+	unbound["snapshots"] = map[string]any{"store_dir": t.TempDir()}
+	if _, err := loadConfig(writeConfig(t, unbound)); err == nil || !strings.Contains(err.Error(), "cpu_model") {
+		t.Fatalf("a snapshot store without its binding: %v", err)
+	}
+	loaded, err := loadConfig(writeConfig(t, firecrackerSnapshotConfig(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings, enabled := loaded.snapshotSettings()
+	want := snapshot.Compatibility{Pool: "linux", VMM: "firecracker", VMMVersion: "1.12.0", CPUModel: "fleet_baseline"}
+	if !enabled || settings.Compatibility != want || settings.Retention.MinAge != 30*24*time.Hour ||
+		settings.Retention.Grace != 2*time.Hour || settings.WorkDir != loaded.Snapshots.CacheDir {
+		t.Fatalf("settings: %+v", settings)
+	}
+	if _, enabled := (config{}).snapshotSettings(); enabled {
+		t.Fatal("no store dir means no snapshot store")
+	}
+}
+
+func TestAFirecrackerHostServesItsSnapshotStore(t *testing.T) {
+	payload := firecrackerSnapshotConfig(t)
+	loaded, err := loadConfig(writeConfig(t, payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	built, err := newFleet(loaded, tools{commands: &refusingCommands{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !built.snapshots {
+		t.Fatal("the snapshot store is on")
+	}
+	server := httptest.NewServer(built.handler)
+	t.Cleanup(server.Close)
+	response, err := http.Get(server.URL + "/v1/snapshots")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var listed map[string][]any
+	if err := json.NewDecoder(response.Body).Decode(&listed); err != nil || response.StatusCode != http.StatusOK ||
+		listed["current"] == nil {
+		t.Fatalf("list snapshots: %d %v %v", response.StatusCode, listed, err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	collectSnapshots(ctx, built.service, time.Millisecond)
 }

@@ -39,6 +39,9 @@ type Node interface {
 	Checkpoint(ctx context.Context, envID, statePath, memoryPath string) (vmm.SnapshotRef, error)
 	Extract(ctx context.Context, envID string, apps []string) (json.RawMessage, error)
 	Inject(ctx context.Context, envID string, payload json.RawMessage) error
+	Prefetch(ctx context.Context, digest string) error
+	CachedSnapshots() ([]string, error)
+	BuildSnapshot(ctx context.Context, request nodeagent.BuildRequest) (nodeagent.BuildResult, error)
 	Pause(ctx context.Context, envID string) error
 	Resume(ctx context.Context, envID string) error
 	DialVNC(ctx context.Context, envID string) (net.Conn, *bufio.Reader, error)
@@ -101,6 +104,8 @@ type Service struct {
 	checkpointDir string
 	nextEnvNumber int
 	now           func() time.Time
+	snapshots     *SnapshotSettings
+	prefetches    sync.WaitGroup
 }
 
 // NewService wires lease endings to env teardown and capacity release.
@@ -203,6 +208,9 @@ func (service *Service) admitAndStart(ctx context.Context, request GroupRequest,
 			service.abandon(admitted, nil, request.PerVM)
 			return nil, err
 		}
+		if request.Snapshot.Digest != "" {
+			service.scheduler.MarkSnapshotCached(created.HostID, request.Snapshot.Digest)
+		}
 		infos = append(infos, LeaseInfo{LeaseID: created.ID, EnvID: envID, HostID: created.HostID,
 			ExpiresAt: created.ExpiresAt})
 	}
@@ -226,7 +234,8 @@ func (service *Service) abandon(admitted []lease.Lease, unadmittedHostIDs []stri
 }
 
 func startRequest(envID string, request GroupRequest, snapshot Snapshot) nodeagent.StartRequest {
-	return nodeagent.StartRequest{EnvID: envID, StatePath: snapshot.StatePath, MemoryPath: snapshot.MemoryPath,
+	return nodeagent.StartRequest{EnvID: envID, SnapshotDigest: snapshot.Digest, StatePath: snapshot.StatePath,
+		MemoryPath:   snapshot.MemoryPath,
 		BaseDiskPath: snapshot.BaseDiskPath, MemoryMiB: request.PerVM.MemoryMiB, VCPUs: request.VCPUs,
 		WorldTime: request.WorldTime, ObservationKinds: request.ObservationKinds}
 }

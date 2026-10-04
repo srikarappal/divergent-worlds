@@ -10,6 +10,7 @@ import (
 	"rlworld/fleet/internal/lease"
 	"rlworld/fleet/internal/nodeagent"
 	"rlworld/fleet/internal/scheduler"
+	"rlworld/fleet/internal/snapshot"
 )
 
 type leaseGroupBody struct {
@@ -87,6 +88,16 @@ func statusFor(err error) (int, string) {
 		return http.StatusConflict, "no_takeover"
 	case errors.Is(err, ErrUnknownTakeover):
 		return http.StatusNotFound, "unknown_takeover"
+	case errors.Is(err, snapshot.ErrNotFound):
+		return http.StatusNotFound, "unknown_snapshot"
+	case errors.Is(err, snapshot.ErrIncompatible):
+		return http.StatusConflict, "incompatible_snapshot"
+	case errors.Is(err, snapshot.ErrBadDigest), errors.Is(err, ErrBadSnapshotRequest):
+		return http.StatusBadRequest, "bad_request"
+	case errors.Is(err, ErrBadImageBuild):
+		return http.StatusUnprocessableEntity, "bad_image_build"
+	case errors.Is(err, ErrNoSnapshots), errors.Is(err, nodeagent.ErrNoSnapshotStore):
+		return http.StatusServiceUnavailable, "no_snapshot_store"
 	default:
 		return http.StatusInternalServerError, "env_error"
 	}
@@ -138,6 +149,14 @@ func (api *httpAPI) routes() []route {
 		{"POST /v1/leases/{leaseID}/takeover", api.startTakeover},
 		{"DELETE /v1/leases/{leaseID}/takeover", api.endTakeover},
 		{"GET /v1/takeover/{sessionID}", api.takeoverRelay},
+		{"POST /v1/snapshots/build", api.buildSnapshot},
+		{"POST /v1/snapshots/collect", api.collectSnapshots},
+		{"GET /v1/snapshots", api.listSnapshots},
+		{"GET /v1/snapshots/current", api.currentSnapshot},
+		{"GET /v1/snapshots/{digest}", api.getSnapshot},
+		{"POST /v1/snapshots/{digest}/prefetch", api.prefetchSnapshot},
+		{"PUT /v1/snapshots/{digest}/pins/{holder}", api.pinSnapshot},
+		{"DELETE /v1/snapshots/{digest}/pins/{holder}", api.unpinSnapshot},
 		{"GET /v1/admission", api.admissionStatus},
 		{"PUT /v1/admission/tenants/{tenant}", api.setTenantQuota},
 	}
@@ -285,4 +304,87 @@ func (api *httpAPI) setTenantQuota(writer http.ResponseWriter, request *http.Req
 		return
 	}
 	writeJSON(writer, http.StatusOK, api.service.AdmissionStatus())
+}
+
+// buildSnapshot runs for minutes: the image boots, waits for its readiness probe and its snapshot is published.
+func (api *httpAPI) buildSnapshot(writer http.ResponseWriter, request *http.Request) {
+	var body SnapshotBuild
+	if !decode(writer, request, &body) {
+		return
+	}
+	manifest, err := api.service.BuildSnapshot(request.Context(), body)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusCreated, manifest)
+}
+
+func (api *httpAPI) collectSnapshots(writer http.ResponseWriter, request *http.Request) {
+	report, err := api.service.CollectSnapshots(request.Context())
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, report)
+}
+
+func (api *httpAPI) listSnapshots(writer http.ResponseWriter, request *http.Request) {
+	currents, err := api.service.CurrentSnapshots(request.Context())
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"current": append([]snapshot.Current{}, currents...)})
+}
+
+func (api *httpAPI) currentSnapshot(writer http.ResponseWriter, request *http.Request) {
+	query := request.URL.Query()
+	current, err := api.service.CurrentSnapshot(request.Context(), query.Get("image_digest"), query.Get("pool"))
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, current)
+}
+
+func (api *httpAPI) getSnapshot(writer http.ResponseWriter, request *http.Request) {
+	detail, err := api.service.Snapshot(request.Context(), request.PathValue("digest"))
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	detail.Pins = append([]snapshot.Pin{}, detail.Pins...)
+	writeJSON(writer, http.StatusOK, detail)
+}
+
+func (api *httpAPI) prefetchSnapshot(writer http.ResponseWriter, request *http.Request) {
+	var body PrefetchRequest
+	if !decode(writer, request, &body) {
+		return
+	}
+	hostIDs, err := api.service.PrefetchSnapshot(request.Context(), request.PathValue("digest"), body)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusAccepted, map[string]any{"hosts": append([]string{}, hostIDs...)})
+}
+
+func (api *httpAPI) pinSnapshot(writer http.ResponseWriter, request *http.Request) {
+	pin, err := api.service.PinSnapshot(request.Context(), request.PathValue("digest"), request.PathValue("holder"))
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, pin)
+}
+
+func (api *httpAPI) unpinSnapshot(writer http.ResponseWriter, request *http.Request) {
+	if err := api.service.UnpinSnapshot(request.Context(), request.PathValue("digest"),
+		request.PathValue("holder")); err != nil {
+		writeError(writer, err)
+		return
+	}
+	writer.WriteHeader(http.StatusNoContent)
 }
