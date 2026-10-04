@@ -29,8 +29,23 @@ type InstanceInfo struct {
 	VMMVersion string `json:"vmm_version"`
 }
 
+// BootConfig is everything a cold boot sets before InstanceStart; paths are inside the jail.
+type BootConfig struct {
+	VCPUs       int
+	MemoryMiB   int
+	CPUTemplate json.RawMessage
+	KernelPath  string
+	BootArgs    string
+	DiskPath    string
+	VsockPath   string
+	GuestCID    int
+	TapName     string
+	GuestMAC    string
+}
+
 // API is the subset of the Firecracker API the driver uses.
 type API interface {
+	BootVM(ctx context.Context, config BootConfig) error
 	LoadSnapshot(ctx context.Context, statePath, memoryPath string, useUffd, resume bool) error
 	SetPaused(ctx context.Context, paused bool) error
 	CreateSnapshot(ctx context.Context, kind, statePath, memoryPath string) error
@@ -96,6 +111,38 @@ func (client *APIClient) call(ctx context.Context, method, path string, body any
 	}
 	if decoded != nil && len(responseBody) > 0 {
 		return json.Unmarshal(responseBody, decoded)
+	}
+	return nil
+}
+
+// apiCall is one request of a cold boot.
+type apiCall struct {
+	method string
+	path   string
+	body   any
+}
+
+// BootVM configures the machine, its CPU template, kernel, root disk, vsock and NIC, then starts it.
+func (client *APIClient) BootVM(ctx context.Context, config BootConfig) error {
+	calls := []apiCall{{http.MethodPut, "/machine-config", map[string]any{"vcpu_count": config.VCPUs,
+		"mem_size_mib": config.MemoryMiB, "smt": false, "track_dirty_pages": true}}}
+	if len(config.CPUTemplate) > 0 {
+		calls = append(calls, apiCall{http.MethodPut, "/cpu-config", config.CPUTemplate})
+	}
+	calls = append(calls,
+		apiCall{http.MethodPut, "/boot-source", map[string]string{"kernel_image_path": config.KernelPath,
+			"boot_args": config.BootArgs}},
+		apiCall{http.MethodPut, "/drives/rootfs", map[string]any{"drive_id": "rootfs", "path_on_host": config.DiskPath,
+			"is_root_device": true, "is_read_only": false}},
+		apiCall{http.MethodPut, "/vsock", map[string]any{"guest_cid": config.GuestCID, "uds_path": config.VsockPath}},
+		apiCall{http.MethodPut, "/network-interfaces/eth0", map[string]string{"iface_id": "eth0",
+			"host_dev_name": config.TapName, "guest_mac": config.GuestMAC}},
+		apiCall{http.MethodPut, "/actions", map[string]string{"action_type": "InstanceStart"}},
+	)
+	for _, call := range calls {
+		if err := client.call(ctx, call.method, call.path, call.body, nil); err != nil {
+			return fmt.Errorf("%s %s: %w", call.method, call.path, err)
+		}
 	}
 	return nil
 }

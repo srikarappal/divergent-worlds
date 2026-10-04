@@ -20,6 +20,8 @@ const (
 	TapGatewayCIDR = "172.16.0.1/24"
 	// TapName is the tap every snapshot expects.
 	TapName = "tap0"
+	// GuestMAC is the guest NIC's address in every snapshot, so clones keep their ARP entries.
+	GuestMAC = "06:00:ac:10:00:02"
 )
 
 var (
