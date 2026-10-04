@@ -3,9 +3,11 @@ import yaml
 
 from rlworld.services.trainer_launch import (
     LaunchContext,
+    SubprocessCommandRunner,
     TrainerLauncher,
     TrainerTemplate,
     kubernetes_name,
+    load_trainer_templates,
     render_kubernetes,
     render_skypilot,
     render_slurm,
@@ -107,3 +109,21 @@ def test_launch_errors(tmp_path):
         launcher.launch("slurm", TEMPLATE.name, CONTEXT)
     with pytest.raises(KeyError):
         launcher.launch("kubernetes", "missing_template", CONTEXT)
+
+
+def test_the_cli_runner_returns_what_the_backend_printed(tmp_path):
+    runner = SubprocessCommandRunner()
+    assert runner.run(["sh", "-c", "echo Submitted batch job 4242"], tmp_path) == "Submitted batch job 4242\n"
+    with pytest.raises(RuntimeError, match="exited with 3: quota exceeded"):
+        runner.run(["sh", "-c", "echo quota exceeded >&2; exit 3"], tmp_path)
+
+
+def test_trainer_templates_load_by_name(tmp_path):
+    path = tmp_path / "trainers.yaml"
+    path.write_text(yaml.safe_dump({"templates": [
+        {"name": "verl_grpo_7b_vlm", "image": "registry.example/verl:0.4", "command": ["python", "-m", "verl"]},
+        {"name": "skyrl_grpo", "image": "registry.example/skyrl:1.2", "command": ["skyrl", "train"], "nodes": 2}]}))
+    templates = load_trainer_templates(path)
+    assert sorted(templates) == ["skyrl_grpo", "verl_grpo_7b_vlm"] and templates["skyrl_grpo"].nodes == 2
+    path.write_text("templates: []\n")
+    assert load_trainer_templates(path) == {}

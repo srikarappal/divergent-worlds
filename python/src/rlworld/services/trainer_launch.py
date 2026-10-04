@@ -9,6 +9,7 @@ with the token. The platform launches trainers but never becomes one.
 
 import re
 import shlex
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol
@@ -55,6 +56,24 @@ class RenderedLaunch:
 
 class CommandRunner(Protocol):
     def run(self, argv: list[str], working_directory: Path) -> str: ...
+
+
+class SubprocessCommandRunner:
+    """Submits with the backend's CLI (kubectl, sbatch or sky) and returns what it printed."""
+
+    def run(self, argv: list[str], working_directory: Path) -> str:
+        completed = subprocess.run(argv, cwd=working_directory, capture_output=True, text=True)
+        if completed.returncode != 0:
+            raise RuntimeError(f"{' '.join(argv[:2])} exited with {completed.returncode}: "
+                               f"{completed.stderr.strip()[:500]}")
+        return completed.stdout
+
+
+def load_trainer_templates(templates_path: Path) -> dict[str, TrainerTemplate]:
+    """Trainer templates by name from a YAML file with a templates list."""
+    payload = yaml.safe_load(templates_path.read_text()) or {}
+    templates = [TrainerTemplate.model_validate(entry) for entry in payload.get("templates", [])]
+    return {template.name: template for template in templates}
 
 
 def kubernetes_name(run_id: str) -> str:
