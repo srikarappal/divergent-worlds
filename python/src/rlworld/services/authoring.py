@@ -37,7 +37,13 @@ from rlworld.specs.document import SpecDocument
 from rlworld.tasks.curriculum import CandidateTask
 from rlworld.tasks.gates import GateConfig, GateInputs, GateReport, SolutionAttempt, TaskGateRunner
 from rlworld.tasks.generators import TaskGenerationError
-from rlworld.tasks.registry import RegistryTaskProvider, SnapshotResolver, TaskRegistry, UnknownSnapshotError
+from rlworld.tasks.registry import (
+    RegistryTaskProvider,
+    SnapshotResolver,
+    TaskRegistry,
+    UnknownSnapshotError,
+    WorldPreparer,
+)
 
 AUTHORING_LEASE_TTL_SECONDS = 3600
 AUTHORING_PRIORITY = "interactive"
@@ -93,7 +99,7 @@ class AuthoringService:
                  fleet: AuthoringFleet, review_service: ReviewService, shapes: Mapping[str, EnvShape],
                  judge: JudgeTier | None = None, solvability: SolvabilityProbe | None = None,
                  gate_config: GateConfig | None = None, gate_reports: GateReports | None = None,
-                 clock: Callable[[], float] = time.time) -> None:
+                 worlds: WorldPreparer | None = None, clock: Callable[[], float] = time.time) -> None:
         self.experiment_service = experiment_service
         self.registry = registry
         self.snapshots = snapshots
@@ -104,6 +110,7 @@ class AuthoringService:
         self.solvability = solvability
         self.gate_config = gate_config or GateConfig()
         self.gate_reports = gate_reports
+        self.worlds = worlds
         self.clock = clock
         self.drafts: dict[str, Draft] = {}
         self.gate_runs: dict[str, threading.Thread] = {}
@@ -117,7 +124,7 @@ class AuthoringService:
         if vmm not in self.shapes:
             raise AuthoringError(f"no env shape is configured for {vmm} pools")
         try:
-            provider = RegistryTaskProvider(self.registry, document, self.snapshots)
+            provider = RegistryTaskProvider(self.registry, document, self.snapshots, worlds=self.worlds)
         except (TaskGenerationError, UnknownSnapshotError) as error:
             raise AuthoringError(error.args[0]) from error
         candidates = provider.candidates()

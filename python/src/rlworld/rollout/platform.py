@@ -31,7 +31,7 @@ from rlworld.services.reward_service import RewardService
 from rlworld.specs.document import SpecDocument
 from rlworld.specs.models import EndpointSpec
 from rlworld.tasks.gates import SolutionAttempt
-from rlworld.tasks.registry import RegistryTaskProvider, SnapshotResolver, TaskRegistry
+from rlworld.tasks.registry import RegistryTaskProvider, SnapshotResolver, TaskRegistry, WorldPreparer
 from rlworld.trajectories.records import EpisodeRecord
 from rlworld.trajectories.trajectory_store import TrajectoryStore
 
@@ -70,7 +70,8 @@ class PlatformWorkers:
                  registry: TaskRegistry, snapshots: SnapshotResolver, shapes: Mapping[str, EnvShape],
                  tenants: Callable[[str], str], judge_secret: bytes, rubric_library: RubricLibrary | None = None,
                  user_simulator: SimulatorEndpoint | None = None, entitlements: EntitlementSource | None = None,
-                 meter: UsageMeter | None = None, control: RunControl | None = None) -> None:
+                 meter: UsageMeter | None = None, control: RunControl | None = None,
+                 worlds: WorldPreparer | None = None) -> None:
         self.fleet = fleet
         self.gateway = gateway
         self.trajectory_store = trajectory_store
@@ -84,6 +85,7 @@ class PlatformWorkers:
         self.entitlements = entitlements
         self.meter = meter
         self.control = control
+        self.worlds = worlds
 
     def judge(self, run_id: str, document: SpecDocument) -> JudgeTier | None:
         """The run's judge grades tasks with a rubric; the rest are graded by verifiers alone."""
@@ -111,7 +113,7 @@ class PlatformWorkers:
         return GroupRunner(self.fleet, episodes, lease, self.entitlements)
 
     def __call__(self, run_id: str, document: SpecDocument) -> RolloutWorker:
-        provider = RegistryTaskProvider(self.registry, document, self.snapshots)
+        provider = RegistryTaskProvider(self.registry, document, self.snapshots, worlds=self.worlds)
         return RolloutWorker(run_id, document, self.group_runner(run_id, document), provider, control=self.control,
                              meter=self.meter)
 

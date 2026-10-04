@@ -70,12 +70,20 @@ from rlworld.services.trainer_launch import (
 )
 from rlworld.services.trajectory_views import TrajectoryViews
 from rlworld.specs.models import EndpointSpec
-from rlworld.tasks.registry import FleetSnapshots, SnapshotResolver, StaticSnapshots, default_task_registry
+from rlworld.tasks.registry import (
+    FleetSnapshots,
+    FleetWorlds,
+    SnapshotResolver,
+    StaticSnapshots,
+    default_task_registry,
+)
 from rlworld.trajectories.object_store import FilesystemObjectStore
 from rlworld.trajectories.trajectory_store import TrajectoryStore
 
 LOGGER = logging.getLogger(__name__)
 GATEWAY_TIMEOUT_SECONDS = 600.0
+# Deciding how a new world loads on a base snapshot restores and measures envs, which takes minutes.
+FLEET_TIMEOUT_SECONDS = 900.0
 CONFIG_PATH_FIELDS = ("state_dir", "object_store_dir", "endpoints_file", "rubrics_dir", "trainer_templates_file")
 
 
@@ -343,9 +351,10 @@ def build_experimentd(config: ExperimentdConfig, environment: Mapping[str, str],
     verifier_registry = VerifierRegistry()
     task_registry = default_task_registry(verifier_registry)
     rubric_library = RubricLibrary(config.rubrics_dir) if config.rubrics_dir else None
-    fleet = fleet or FleetClient(config.fleet_url)
+    fleet = fleet or FleetClient(config.fleet_url, timeout_seconds=FLEET_TIMEOUT_SECONDS)
     shapes = pool_shapes(config)
     snapshots = snapshot_resolver(config, fleet)
+    worlds = FleetWorlds(fleet, shapes) if config.snapshot_store else None
     gate_reports = GateReports()
     probe = GatewayEndpointProbe(gateway, registry)
     broker = entitlement_broker(config, environment)
@@ -359,11 +368,11 @@ def build_experimentd(config: ExperimentdConfig, environment: Mapping[str, str],
     simulator = (SimulatorEndpoint(config.user_simulator.endpoint, config.user_simulator.model)
                  if config.user_simulator else None)
     workers = PlatformWorkers(fleet, gateway, trajectory_store, task_registry, snapshots, shapes, default_tenant,
-                              judge_secret, rubric_library, simulator, broker, meter)
+                              judge_secret, rubric_library, simulator, broker, meter, worlds=worlds)
     executor = PlatformRunExecutor(workers)
     launcher = TrainerLauncher(trainer_templates(config), launch_runner or SubprocessCommandRunner(),
                                config.state_dir / "launches")
-    run_snapshots = RunSnapshots(fleet, snapshots, shapes) if config.snapshot_store else None
+    run_snapshots = RunSnapshots(fleet, snapshots, shapes, worlds) if config.snapshot_store else None
     experiment_service = ExperimentService(preflight_context, executor, launcher, run_token_secret, config.fleet_url,
                                            config.public_url, config.approval_threshold_usd,
                                            run_snapshots=run_snapshots)
@@ -380,9 +389,9 @@ def build_experimentd(config: ExperimentdConfig, environment: Mapping[str, str],
     solvability = PlatformSolvabilityProbe(workers, config.strong_agent) if config.strong_agent else None
     gate_judge = judge_tier(config, gateway, rubric_library, judge_secret)
     authoring = AuthoringService(experiment_service, task_registry, snapshots, fleet, review, shapes, judge=gate_judge,
-                                 solvability=solvability, gate_reports=gate_reports)
+                                 solvability=solvability, gate_reports=gate_reports, worlds=worlds)
     reruns = (GateReruns(experiment_service, task_registry, gate_reports, fleet, review, shapes,
-                         catalog_service=catalogs, judge=gate_judge, solvability=solvability)
+                         catalog_service=catalogs, judge=gate_judge, solvability=solvability, worlds=worlds)
               if config.snapshot_store else None)
     app = create_app(experiment_service, catalog_service=catalogs,
                      endpoint_service=EndpointService(registry, vault, probe), trajectory_views=views,

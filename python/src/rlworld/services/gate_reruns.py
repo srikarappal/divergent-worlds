@@ -33,7 +33,7 @@ from rlworld.specs.document import SpecDocument
 from rlworld.specs.models import ImageSpec
 from rlworld.tasks.curriculum import CandidateTask
 from rlworld.tasks.gates import GateConfig, GateInputs, TaskGateRunner
-from rlworld.tasks.registry import RegistryTaskProvider, TaskRegistry
+from rlworld.tasks.registry import RegistryTaskProvider, TaskRegistry, WorldPreparer
 
 GATE_RERUN_PRIORITY = "eval"
 GATE_RERUN_ENDPOINT = "gates"
@@ -80,7 +80,7 @@ class GateReruns:
                  fleet: RerunFleet, review_service: ReviewService, shapes: Mapping[str, EnvShape],
                  catalog_service: CatalogService | None = None, judge: JudgeTier | None = None,
                  solvability: SolvabilityProbe | None = None, gate_config: GateConfig | None = None,
-                 clock: Callable[[], float] = time.time) -> None:
+                 worlds: WorldPreparer | None = None, clock: Callable[[], float] = time.time) -> None:
         self.experiment_service = experiment_service
         self.registry = registry
         self.reports = reports
@@ -91,6 +91,7 @@ class GateReruns:
         self.judge = judge
         self.solvability = solvability
         self.gate_config = gate_config or GateConfig()
+        self.worlds = worlds
         self.clock = clock
         self.run_numbers = itertools.count(1)
         self.failed: dict[tuple[str, str], str] = {}
@@ -130,7 +131,8 @@ class GateReruns:
 
     def rerun(self, record: GateRecord, current: dict[str, Any]) -> GateRecord:
         document = self.document_on(record, current)
-        provider = RegistryTaskProvider(self.registry, document, FixedSnapshot(current["snapshot"]))
+        provider = RegistryTaskProvider(self.registry, document, FixedSnapshot(current["snapshot"]),
+                                        worlds=self.worlds)
         candidate = provider.candidates()[record.recipe.task_index]
         instance = provider.instance(candidate)
         envs = FreshEnvs(fleet=self.fleet, shape=self.shapes[document.image.pool.vmm], document=document,

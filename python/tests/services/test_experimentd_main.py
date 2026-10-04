@@ -29,6 +29,7 @@ LAPTOP = EXAMPLES / "experimentd" / "laptop.yaml"
 REFERENCE_SPEC = EXAMPLES / "specs" / "reconcile_invoices_linux.yaml"
 SECRETS = {"RLWORLD_RUN_TOKEN_SECRET": "run token secret", "RLWORLD_JUDGE_SECRET": "judge secret"}
 SNAPSHOT_STORE_FLEET_DIGEST = "sha256:" + "5e" * 32
+WORLD_SNAPSHOT_DIGEST = "sha256:" + "3c" * 32
 
 
 class ScriptedTransport:
@@ -75,6 +76,10 @@ class SnapshotStoreFleet(FakeFleet):
 
     def prefetch_snapshot(self, digest, pool, envs, memory_mib, cpu_millicores, gpus=0):
         return ["laptop"]
+
+    def prepare_world(self, base_digest, world_digest, payload, apps, pool, memory_mib, cpu_millicores, vcpus):
+        """This world loads slowly, so fleetd snapshotted it."""
+        return {"base": base_digest, "world": world_digest, "snapshot": WORLD_SNAPSHOT_DIGEST}
 
 
 def laptop_config(tmp_path, **changes):
@@ -155,7 +160,7 @@ def test_experimentd_plays_an_eval_run_from_spec_to_episodes(tmp_path):
     assert catalog["kind"] == "task_templates"
 
 
-def test_a_snapshot_store_turns_on_pins_prefetch_and_gate_reruns(tmp_path):
+def test_a_snapshot_store_turns_on_pins_prefetch_world_snapshots_and_gate_reruns(tmp_path):
     fleet = SnapshotStoreFleet()
     config = laptop_config(tmp_path, snapshot_store=True, static_snapshots={})
     experimentd = build_experimentd(config, SECRETS, fleet=fleet, transport=ScriptedTransport(),
@@ -167,8 +172,11 @@ def test_a_snapshot_store_turns_on_pins_prefetch_and_gate_reruns(tmp_path):
         "digest"]
     run_id = client.post(f"/v1/specs/{digest}/launch", json={"budget_usd": 10.0}).get_json()["run_ids"][0]
     assert experimentd.executor.wait(run_id, timeout_seconds=120)
-    assert fleet.pins == [(SNAPSHOT_STORE_FLEET_DIGEST, f"eval_report:{run_id}")]
-    assert {call[3] for call in fleet.calls_named("lease_group")} == {SNAPSHOT_STORE_FLEET_DIGEST}
+    assert fleet.pins == [(SNAPSHOT_STORE_FLEET_DIGEST, f"eval_report:{run_id}"),
+                          (WORLD_SNAPSHOT_DIGEST, f"eval_report:{run_id}")]
+    assert {call[3] for call in fleet.calls_named("lease_group")} == {WORLD_SNAPSHOT_DIGEST}
+    injected = [call[2] for call in fleet.calls_named("inject")]
+    assert injected and all(len(payload["world"]["emails"]) < 10 for payload in injected)
     assert experimentd.gate_reruns.poll() == []
 
 

@@ -5,9 +5,11 @@ from rlworld.rollout.groups import EnvShape
 from rlworld.sdk.client import SnapshotNotFoundError
 from rlworld.services.run_snapshots import PIN_HOLDERS, RunSnapshots
 from rlworld.specs import dump_spec_document, parse_spec_document, spec_digest
-from rlworld.tasks.registry import FleetSnapshots, UnknownSnapshotError
+from rlworld.sdk.client import SnapshotSource
+from rlworld.tasks.registry import FleetSnapshots, FleetWorlds, UnknownSnapshotError
 
 SNAPSHOT = "sha256:" + "5e" * 32
+WORLD_SNAPSHOT = "sha256:" + "3c" * 32
 
 
 class SnapshotFleet:
@@ -31,6 +33,9 @@ class SnapshotFleet:
         self.prefetches.append((digest, pool, envs, memory_mib, cpu_millicores, gpus))
         return ["kvm_1", "kvm_2"]
 
+    def prepare_world(self, base_digest, world_digest, payload, apps, pool, memory_mib, cpu_millicores, vcpus):
+        return {"base": base_digest, "world": world_digest, "snapshot": WORLD_SNAPSHOT}
+
 
 def prepared_service(example_payload, tmp_path, fleet):
     payload = eval_payload(example_payload)
@@ -51,7 +56,7 @@ def test_launching_pins_and_prefetches_every_runs_snapshot(example_payload, tmp_
     assert fleet.prefetches[0] == (SNAPSHOT, "windows", document.run.max_concurrent_envs, 6144, 2000, 0)
     events = service.run_events(run_id, 0)
     assert [event.kind for event in events] == ["snapshot", "launched"]
-    assert events[0].detail == {"snapshot": SNAPSHOT, "pinned_for": f"eval_report:{run_id}",
+    assert events[0].detail == {"snapshot": SNAPSHOT, "world_snapshot": None, "pinned_for": f"eval_report:{run_id}",
                                 "prefetching_on": ["kvm_1", "kvm_2"]}
     assert service.run(run_id).state == "running"
 
@@ -79,3 +84,16 @@ def test_each_run_type_pins_for_what_it_produces(example_payload, tmp_path):
     with pytest.raises(UnknownSnapshotError):
         RunSnapshots(SnapshotFleet(current=False), FleetSnapshots(SnapshotFleet(current=False), {}),
                      {}).prepare(run, document)
+
+
+def test_a_world_snapshot_is_pinned_and_prefetched_with_its_base(example_payload, tmp_path):
+    fleet = SnapshotFleet()
+    service, digest = prepared_service(example_payload, tmp_path, fleet)
+    service.run_snapshots.worlds = FleetWorlds(fleet, service.run_snapshots.shapes)
+    run_id = service.launch(digest, budget_usd=100.0).run_ids[0]
+    holder = f"eval_report:{run_id}"
+    assert (SNAPSHOT, holder) in fleet.pins and (WORLD_SNAPSHOT, holder) in fleet.pins
+    assert {prefetch[0] for prefetch in fleet.prefetches} == {SNAPSHOT, WORLD_SNAPSHOT}
+    detail = service.run_events(run_id, 0)[0].detail
+    assert (detail["snapshot"], detail["world_snapshot"]) == (SNAPSHOT, WORLD_SNAPSHOT)
+    assert isinstance(service.run_snapshots.snapshots.snapshot(service.run_document(run_id).image), SnapshotSource)
