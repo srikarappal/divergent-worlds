@@ -1,5 +1,6 @@
-"""SDK: fleet client, Gymnasium style env, the MCP tools facade and the experiment API client."""
+"""SDK: fleet client, Gymnasium style env, the BrowserGym and MCP facades and the experiment API client."""
 
+from rlworld.sdk.browsergym import BrowserGymActions, BrowserGymEnv, ExperimentFrames
 from rlworld.sdk.client import (
     AdmissionRejectedError,
     EnvError,
@@ -21,11 +22,14 @@ from rlworld.sdk.mcp_server import EnvToolServer
 
 __all__ = [
     "AdmissionRejectedError",
+    "BrowserGymActions",
+    "BrowserGymEnv",
     "ComputerUseEnv",
     "EnvError",
     "EnvToolServer",
     "ExperimentApiError",
     "ExperimentClient",
+    "ExperimentFrames",
     "FleetClient",
     "FleetError",
     "InputFrozenError",
