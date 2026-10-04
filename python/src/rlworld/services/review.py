@@ -22,6 +22,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from rlworld.analysis.failures import FailureLabel, LlmFailureLabeler, analyze_failures
+from rlworld.analysis.fidelity import CloneFidelity, FidelityError, clone_fidelity
 from rlworld.judge.calibration import LabeledVerdict, agreement_report, calibration_problems
 from rlworld.rewards.diff import diff_states
 from rlworld.rewards.records import RewardRecord, StateChange
@@ -272,6 +273,22 @@ class ReviewService:
 
     def compare_runs(self, run_ids: Sequence[str]) -> Comparison:
         return compare({run_id: self.views.episodes(run_id, "finished") for run_id in run_ids})
+
+    def clone_fidelity(self, app: str, clone_run_id: str, real_run_id: str) -> CloneFidelity:
+        """An app clone's run against the real app's run on the tasks both scored; eval runs only."""
+        if clone_run_id == real_run_id:
+            raise ReviewError("clone fidelity compares a clone run with a different run on the real app")
+        runs = {run_id: self.views.episodes(run_id, "finished") for run_id in (clone_run_id, real_run_id)}
+        for run_id, episodes in runs.items():
+            if any(episode.run_type != "eval" for episode in episodes):
+                raise ReviewError(f"clone fidelity uses the eval slice only and {run_id} is not an eval run")
+        comparison = compare(runs)
+        task_rates = [(row.success_rates[clone_run_id], row.success_rates[real_run_id])
+                      for row in comparison.shared_tasks]
+        try:
+            return clone_fidelity(app, clone_run_id, real_run_id, task_rates)
+        except FidelityError as error:
+            raise ReviewError(str(error)) from error
 
     def compare_policy_versions(self, run_id: str) -> Comparison:
         by_version: dict[str, list[EpisodeRecord]] = defaultdict(list)

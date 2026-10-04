@@ -303,6 +303,19 @@
       "sdk": "client.compare_runs([\"{run_id}\", \"{other_run_id}\"])"
     },
     {
+      "name": "clone_fidelity",
+      "method": "GET",
+      "path": "/v1/compare/fidelity",
+      "query": [
+        "app",
+        "clone_run_id",
+        "real_run_id"
+      ],
+      "summary": "Success on an app clone against success on the real app over the tasks both eval runs share",
+      "cli": "rlworld compare fidelity {app} {run_id} {other_run_id}",
+      "sdk": "client.clone_fidelity(\"{app}\", \"{run_id}\", \"{other_run_id}\")"
+    },
+    {
       "name": "compare_policy_versions",
       "method": "GET",
       "path": "/v1/runs/{run_id}/compare/policy_versions",

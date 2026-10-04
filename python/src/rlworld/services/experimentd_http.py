@@ -455,6 +455,14 @@ def compare_policy_versions(run_id: str):
     return jsonify(review().compare_policy_versions(run_id).model_dump(mode="json"))
 
 
+def clone_fidelity():
+    missing = [name for name in ("app", "clone_run_id", "real_run_id") if not request.args.get(name)]
+    if missing:
+        raise RequestValidationError([f"{name}: required" for name in missing])
+    report = review().clone_fidelity(request.args["app"], request.args["clone_run_id"], request.args["real_run_id"])
+    return jsonify(report.model_dump(mode="json"))
+
+
 def review_episode(run_id: str, episode_id: str):
     review_request = validated(ReviewRequest, request.get_json(silent=True) or {})
     return jsonify(review().act(run_id, episode_id, review_request).model_dump(mode="json")), 201
@@ -681,6 +689,7 @@ ROUTES = (
     ("GET", "/v1/runs/<run_id>/report", run_report),
     ("GET", "/v1/runs/<run_id>/compare/policy_versions", compare_policy_versions),
     ("GET", "/v1/compare/runs", compare_runs),
+    ("GET", "/v1/compare/fidelity", clone_fidelity),
     ("GET", "/v1/review_items", list_review_items),
     ("POST", "/v1/review_items", file_review_item),
     ("PATCH", "/v1/review_items/<item_id>", update_review_item),
