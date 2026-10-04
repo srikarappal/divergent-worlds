@@ -140,6 +140,7 @@ async function theShellSignsUsersInAndShowsTheirNavigation(): Promise<void> {
   expect(signIn.calls).toEqual(["start", "finish /auth/callback"]);
   expect(navigations).toEqual(["/"]);
   expect(screen.queryByRole("link", { name: "Admin" })).toBeNull();
+  expect(screen.queryByRole("link", { name: "Author" })).toBeNull();
   expect(api.grant).toBe("grant.1.sig");
   fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
   expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();

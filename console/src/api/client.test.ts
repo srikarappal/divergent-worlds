@@ -17,6 +17,8 @@ const PATH_VALUES: Record<string, string> = {
   subject: "user_ada",
   tenant: "finance_lab",
   alert_id: "alert_000001",
+  session_id: "authoring_000001",
+  recording_id: "recording_000001",
 };
 const EVENT_STREAM = [
   'id: 1\nevent: launched\ndata: {"sequence": 1, "at": 1.0, "kind": "launched", "detail": {}}\n\n',
@@ -74,6 +76,12 @@ function sampleArguments(operationName: string): unknown[] {
     case "start_takeover":
     case "end_takeover":
       return [PATH_VALUES.run_id, PATH_VALUES.episode_id];
+    case "start_authoring":
+      return [PATH_VALUES.digest, 2];
+    case "begin_recording":
+      return [PATH_VALUES.session_id, "near_miss"];
+    case "end_recording":
+      return [PATH_VALUES.session_id, PATH_VALUES.recording_id];
     case "compare_runs":
       return [[PATH_VALUES.run_id, "experiment_000001_run_001"]];
     case "list_review_items":
@@ -149,6 +157,21 @@ async function requestBodiesFollowTheManifest(): Promise<void> {
 }
 
 test("request bodies and queries follow the manifest", requestBodiesFollowTheManifest);
+
+async function authoringRequestsCarryTheSpecAndTheRecordingKind(): Promise<void> {
+  const transport = new RecordingTransport();
+  const client = new ApiClient("/api", transport);
+  await client.startAuthoring("sha256:abc");
+  await client.beginRecording("authoring_000001");
+  await client.beginRecording("authoring_000001", "near_miss");
+  expect(transport.requests[0].url).toBe("/api/v1/authoring");
+  expect(JSON.parse(String(transport.requests[0].init?.body))).toEqual({ spec_digest: "sha256:abc", task_index: 0 });
+  expect(transport.requests[1].url).toBe("/api/v1/authoring/authoring_000001/recordings");
+  expect(JSON.parse(String(transport.requests[1].init?.body))).toEqual({ kind: "oracle" });
+  expect(JSON.parse(String(transport.requests[2].init?.body))).toEqual({ kind: "near_miss" });
+}
+
+test("authoring requests carry the spec and the recording kind", authoringRequestsCarryTheSpecAndTheRecordingKind);
 
 async function errorsCarryTheProblemList(): Promise<void> {
   const problems = ["task: live internet is for eval runs only"];

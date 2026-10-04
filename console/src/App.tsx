@@ -17,6 +17,7 @@ import type { AuthConfig, Principal } from "./api/types";
 import { failureProblems, ProblemList } from "./components/common";
 import { AdminPage } from "./pages/AdminPage";
 import { AlertsPage } from "./pages/AlertsPage";
+import { AuthoringPage } from "./pages/AuthoringPage";
 import { QueuesPage } from "./pages/QueuesPage";
 import type { NavigateTo } from "./pages/ReviewPages";
 import { EpisodeLiveView } from "./components/EpisodeLiveView";
@@ -33,6 +34,7 @@ interface RouteProps {
 }
 
 const QUEUE_ROLES = ["researcher", "operator", "labeler", "admin"];
+const BUILDER_ROLES = ["researcher", "operator", "admin"];
 const ADMIN_ROLES = ["operator", "admin"];
 
 function hasAnyRole(principal: Principal | null, roles: readonly string[]): boolean {
@@ -119,6 +121,19 @@ function RunReviewRoute(props: RouteProps): ReactElement {
   return <RunReviewPage key={runId} api={props.api} runId={runId} />;
 }
 
+interface AuthoringRouteProps extends RouteProps {
+  screens?: ScreenAccess;
+}
+
+// /authoring starts a session from a spec (prefilled from ?spec=); /authoring/:sessionId works on one.
+function AuthoringRoute(props: AuthoringRouteProps): ReactElement {
+  const sessionId = useParams().sessionId;
+  const navigate = useNavigate();
+  const spec = useSearchParams()[0].get("spec") ?? "";
+  return <AuthoringPage key={sessionId ?? ""} api={props.api} navigate={navigate} sessionId={sessionId}
+                        initialDigest={spec} screens={props.screens} />;
+}
+
 function CompareRoute(props: RouteProps): ReactElement {
   const runs = useSearchParams()[0].get("runs") ?? "";
   return <ComparePage key={runs} api={props.api} runIds={runs.split(",")} />;
@@ -141,6 +156,7 @@ export function ConsoleRoutes(props: ConsoleRoutesProps): ReactElement {
           <NavLink to="/catalogs">Catalogs</NavLink>
           <NavLink to="/runs" end>Runs</NavLink>
           <NavLink to="/alerts">Alerts</NavLink>
+          {hasAnyRole(principal, BUILDER_ROLES) ? <NavLink to="/authoring">Author</NavLink> : null}
           {hasAnyRole(principal, QUEUE_ROLES) ? <NavLink to="/queues">Queues</NavLink> : null}
           {hasAnyRole(principal, ADMIN_ROLES) ? <NavLink to="/admin">Admin</NavLink> : null}
         </nav>
@@ -166,6 +182,9 @@ export function ConsoleRoutes(props: ConsoleRoutesProps): ReactElement {
           <Route path="/runs/:runId/cohort" element={<CohortRoute api={props.api} />} />
           <Route path="/runs/:runId/review" element={<RunReviewRoute api={props.api} />} />
           <Route path="/compare" element={<CompareRoute api={props.api} />} />
+          <Route path="/authoring" element={<AuthoringRoute api={props.api} screens={props.screens} />} />
+          <Route path="/authoring/:sessionId"
+                 element={<AuthoringRoute api={props.api} screens={props.screens} />} />
           <Route path="/queues" element={<QueuesPage api={props.api} />} />
           <Route path="/admin" element={<AdminPage api={props.api} />} />
         </Routes>

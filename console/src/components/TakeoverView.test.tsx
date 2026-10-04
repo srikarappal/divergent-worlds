@@ -2,26 +2,9 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { expect, test } from "vitest";
 
 import { episodeRecord, FakeApi } from "../test/fakeApi";
+import { FakeConnector } from "../test/fakeScreens";
 import { EpisodeLiveView } from "./EpisodeLiveView";
-import { relayUrl, type ScreenConnector, type ScreenSession, TakeoverControls, TakeoverView } from "./TakeoverView";
-
-class FakeScreen implements ScreenSession {
-  disconnects = 0;
-
-  disconnect(): void {
-    this.disconnects += 1;
-  }
-}
-
-class FakeConnector implements ScreenConnector {
-  readonly connections: Array<{ target: HTMLElement; url: string }> = [];
-  readonly screen = new FakeScreen();
-
-  connect(target: HTMLElement, url: string): ScreenSession {
-    this.connections.push({ target, url });
-    return this.screen;
-  }
-}
+import { relayUrl, TakeoverControls, TakeoverView } from "./TakeoverView";
 
 const RELAY_BASE = "wss://console.example/fleet/";
 

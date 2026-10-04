@@ -320,7 +320,7 @@ export type ReviewAction = "flag" | "label" | "verifier_bug" | "task_draft" | "a
 
 export interface ReviewItem {
   item_id: string;
-  action: ReviewAction | "bug_ticket" | "gate_failure" | "alert";
+  action: ReviewAction | "bug_ticket" | "gate_failure" | "alert" | "task_submission";
   queue: string;
   run_id: string;
   episode_ids: string[];
@@ -333,7 +333,7 @@ export interface ReviewItem {
   created_at: number;
   resolved_by: string;
   resolved_at: number | null;
-  source: "console" | "failure_analysis" | "gates" | "alert";
+  source: "console" | "failure_analysis" | "gates" | "alert" | "authoring";
 }
 
 export type ReviewItemFilter = {
@@ -395,6 +395,54 @@ export interface Demonstration {
   pause_error: string;
   events: InputEvent[];
   actions: Record<string, unknown>[];
+}
+
+export type RecordingKind = "oracle" | "alternative" | "near_miss";
+export type GateStatus = "not_run" | "running" | "passed" | "failed" | "error";
+
+// One teleop attempt in a fresh dev env: the author's input as canonical actions.
+export interface Recording {
+  recording_id: string;
+  kind: RecordingKind;
+  status: "recording" | "saving" | "recorded" | "failed";
+  recorded_by: string;
+  lease_id: string;
+  actions: Record<string, unknown>[];
+  complete: boolean;
+  lost_reason: string;
+  error: string;
+}
+
+export interface GateOutcome {
+  name: string;
+  passed: boolean;
+  detail: string;
+  attempts: Record<string, unknown>[];
+}
+
+export interface AuthoringSession {
+  session_id: string;
+  spec_digest: string;
+  author: string;
+  tenant: string;
+  task_id: string;
+  template: string;
+  instruction: string;
+  hidden_intent: string;
+  created_at: number;
+  recordings: Recording[];
+  gate_status: GateStatus;
+  gate_results: GateOutcome[];
+  gate_error: string;
+  review_item_id: string | null;
+}
+
+// takeover_session_id is the relay's one time credential; the console uses it once to connect and keeps it nowhere.
+export interface RecordingStart {
+  recording: Recording;
+  takeover_session_id: string;
+  relay_path: string;
+  expires_at: string;
 }
 
 export type AlertFilter = {

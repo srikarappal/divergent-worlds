@@ -7,6 +7,7 @@ import type {
   AuditFilter,
   AuditRecord,
   AuthConfig,
+  AuthoringSession,
   CalibrationReport,
   CatalogEntry,
   CohortEpisode,
@@ -29,6 +30,9 @@ import type {
   LiveTile,
   Principal,
   ProbeResult,
+  Recording,
+  RecordingKind,
+  RecordingStart,
   RetentionReport,
   ReviewAction,
   ReviewItem,
@@ -85,6 +89,12 @@ export interface ConsoleApi {
                 label?: Record<string, unknown>): Promise<ReviewItem>;
   startTakeover(runId: string, episodeId: string): Promise<TakeoverSession>;
   endTakeover(runId: string, episodeId: string): Promise<Demonstration>;
+  startAuthoring(specDigest: string, taskIndex?: number): Promise<AuthoringSession>;
+  getAuthoring(sessionId: string): Promise<AuthoringSession>;
+  beginRecording(sessionId: string, kind?: RecordingKind): Promise<RecordingStart>;
+  endRecording(sessionId: string, recordingId: string): Promise<Recording>;
+  runAuthoringGates(sessionId: string): Promise<AuthoringSession>;
+  submitAuthoring(sessionId: string): Promise<AuthoringSession>;
   analyzeFailures(runId: string): Promise<FailureAnalysis>;
   getFailures(runId: string): Promise<FailureAnalysis>;
   runReport(runId: string): Promise<EvalReport>;
@@ -367,6 +377,30 @@ export class ApiClient implements ConsoleApi {
 
   endTakeover(runId: string, episodeId: string): Promise<Demonstration> {
     return this.call("end_takeover", { path: { run_id: runId, episode_id: episodeId } });
+  }
+
+  startAuthoring(specDigest: string, taskIndex = 0): Promise<AuthoringSession> {
+    return this.call("start_authoring", { body: { spec_digest: specDigest, task_index: taskIndex } });
+  }
+
+  getAuthoring(sessionId: string): Promise<AuthoringSession> {
+    return this.call("get_authoring", { path: { session_id: sessionId } });
+  }
+
+  beginRecording(sessionId: string, kind: RecordingKind = "oracle"): Promise<RecordingStart> {
+    return this.call("begin_recording", { path: { session_id: sessionId }, body: { kind } });
+  }
+
+  endRecording(sessionId: string, recordingId: string): Promise<Recording> {
+    return this.call("end_recording", { path: { session_id: sessionId, recording_id: recordingId } });
+  }
+
+  runAuthoringGates(sessionId: string): Promise<AuthoringSession> {
+    return this.call("run_authoring_gates", { path: { session_id: sessionId } });
+  }
+
+  submitAuthoring(sessionId: string): Promise<AuthoringSession> {
+    return this.call("submit_authoring", { path: { session_id: sessionId } });
   }
 
   async listAlerts(filter: AlertFilter = {}): Promise<Alert[]> {

@@ -7,6 +7,7 @@ import type {
   AuditFilter,
   AuditRecord,
   AuthConfig,
+  AuthoringSession,
   CalibrationReport,
   CatalogEntry,
   CohortEpisode,
@@ -26,9 +27,14 @@ import type {
   FiledReviewItem,
   FrameGrant,
   FrameSize,
+  GateOutcome,
+  GateStatus,
   LiveTile,
   Principal,
   ProbeResult,
+  Recording,
+  RecordingKind,
+  RecordingStart,
   RetentionReport,
   ReviewAction,
   ReviewItem,
@@ -87,6 +93,20 @@ export function alertRecord(alertId: string, extra: Partial<Alert> = {}): Alert 
   };
 }
 
+export function authoringSession(sessionId: string, extra: Partial<AuthoringSession> = {}): AuthoringSession {
+  return {
+    session_id: sessionId, spec_digest: "sha256:abc123", author: "developer", tenant: "default",
+    task_id: "task_000", template: "tasks.finance.reconcile_invoices",
+    instruction: "Reconcile the invoices issued in March 2026 using ~/world/files/invoices.csv.", hidden_intent: "",
+    created_at: 0, recordings: [], gate_status: "not_run", gate_results: [], gate_error: "", review_item_id: null,
+    ...extra,
+  };
+}
+
+export function gateOutcome(name: string, passed: boolean, detail = ""): GateOutcome {
+  return { name, passed, detail, attempts: [] };
+}
+
 export class FakeApi implements ConsoleApi {
   readonly calls: Array<[string, unknown[]]> = [];
   catalogs: Record<string, CatalogEntry[]> = {};
@@ -126,6 +146,12 @@ export class FakeApi implements ConsoleApi {
   saveFailure: ApiError | null = null;
   launchFailure: ApiError | null = null;
   digest = "sha256:abc123";
+  authoringSessions: Record<string, AuthoringSession> = {};
+  // What the next gate run reports once a poll finds it finished.
+  gateReport: { status: GateStatus; results: GateOutcome[]; error: string } = { status: "passed", results: [],
+                                                                               error: "" };
+  recordingFailure: ApiError | null = null;
+  private recordingCount = 0;
 
   record(name: string, ...args: unknown[]): void {
     this.calls.push([name, args]);
@@ -287,6 +313,93 @@ export class FakeApi implements ConsoleApi {
     };
     this.reviewItems = [...this.reviewItems, item];
     return item;
+  }
+
+  storedSession(sessionId: string): AuthoringSession {
+    const session = this.authoringSessions[sessionId];
+    if (session === undefined) {
+      throw new ApiError(404, "not_found", sessionId, []);
+    }
+    return session;
+  }
+
+  async startAuthoring(specDigest: string, taskIndex?: number): Promise<AuthoringSession> {
+    this.record("startAuthoring", specDigest, taskIndex);
+    const sessionId = `authoring_${String(Object.keys(this.authoringSessions).length + 1).padStart(6, "0")}`;
+    const session = authoringSession(sessionId, { spec_digest: specDigest, task_id: `task_00${taskIndex ?? 0}` });
+    this.authoringSessions[sessionId] = session;
+    return session;
+  }
+
+  // A running gate run finishes by the first read after it started, with whatever gateReport says.
+  async getAuthoring(sessionId: string): Promise<AuthoringSession> {
+    this.record("getAuthoring", sessionId);
+    const session = this.storedSession(sessionId);
+    if (session.gate_status !== "running") {
+      return session;
+    }
+    const finished = { ...session, gate_status: this.gateReport.status, gate_results: this.gateReport.results,
+                       gate_error: this.gateReport.error };
+    this.authoringSessions[sessionId] = finished;
+    return finished;
+  }
+
+  async beginRecording(sessionId: string, kind?: RecordingKind): Promise<RecordingStart> {
+    this.record("beginRecording", sessionId, kind);
+    if (this.recordingFailure !== null) {
+      throw this.recordingFailure;
+    }
+    this.recordingCount += 1;
+    const session = this.storedSession(sessionId);
+    const recording: Recording = {
+      recording_id: `recording_${String(this.recordingCount).padStart(6, "0")}`, kind: kind ?? "oracle",
+      status: "recording", recorded_by: "developer", lease_id: `lease_${this.recordingCount}`, actions: [],
+      complete: true, lost_reason: "", error: "",
+    };
+    this.authoringSessions[sessionId] = { ...session, recordings: [...session.recordings, recording] };
+    const credential = `credential_${this.recordingCount}`;
+    return { recording, takeover_session_id: credential, relay_path: `/v1/takeover/${credential}`,
+             expires_at: "2026-10-03T12:02:00Z" };
+  }
+
+  async endRecording(sessionId: string, recordingId: string): Promise<Recording> {
+    this.record("endRecording", sessionId, recordingId);
+    const session = this.storedSession(sessionId);
+    const recordings: Recording[] = [];
+    let ended: Recording | undefined;
+    for (const recording of session.recordings) {
+      if (recording.recording_id === recordingId && recording.status === "recording") {
+        ended = { ...recording, status: "recorded",
+                  actions: [{ name: "click", x: 40, y: 50 }, { name: "type", text: "1" }] };
+        recordings.push(ended);
+      } else {
+        recordings.push(recording);
+      }
+    }
+    if (ended === undefined) {
+      throw new ApiError(409, "authoring_refused", "rejected", [`${recordingId} is not recording`]);
+    }
+    this.authoringSessions[sessionId] = { ...session, recordings };
+    return ended;
+  }
+
+  async runAuthoringGates(sessionId: string): Promise<AuthoringSession> {
+    this.record("runAuthoringGates", sessionId);
+    const running = { ...this.storedSession(sessionId), gate_status: "running" as const };
+    this.authoringSessions[sessionId] = running;
+    return running;
+  }
+
+  async submitAuthoring(sessionId: string): Promise<AuthoringSession> {
+    this.record("submitAuthoring", sessionId);
+    const session = this.storedSession(sessionId);
+    if (session.gate_status !== "passed" && session.gate_status !== "failed") {
+      throw new ApiError(409, "authoring_refused", "rejected",
+                         ["run the gates before submitting; the report is what reviewers judge"]);
+    }
+    const submitted = { ...session, review_item_id: "review_000001" };
+    this.authoringSessions[sessionId] = submitted;
+    return submitted;
   }
 
   async analyzeFailures(runId: string): Promise<FailureAnalysis> {
