@@ -15,6 +15,11 @@ such as an imported public suite task's result file. The plan stays in this
 process until extraction, out of the policy's reach. Reads never follow links
 the policy may have planted and commands run outside the user's login shell,
 whose profile the policy can edit.
+
+Mid task the host delivers records into running apps, such as an email that
+arrives or a colleague's chat reply; their files are the world's doing, so
+the agent's own file changes stay counted as they were. Each observation
+reports the agent's chat posts since the last one, which colleagues answer.
 """
 
 import base64
@@ -47,7 +52,12 @@ from rlworld.actions.models import (
     parse_action,
 )
 from rlworld.guest.protocol import READ_STEP_KINDS, TASK_READS_KEY, GuestFailure
-from rlworld.worlds.integrations import extract_world_state, materialize_world
+from rlworld.worlds.integrations import (
+    ChatIntegration,
+    deliver_record,
+    extract_world_state,
+    materialize_world,
+)
 from rlworld.worlds.model import World
 
 BUTTON_NUMBERS = {"left": "1", "middle": "2", "right": "3"}
@@ -258,6 +268,8 @@ class GuestAgent:
         self.sleep = sleep
         self.monotonic = monotonic
         self.reads: dict[str, Any] | None = None
+        self.apps: tuple[str, ...] = ()
+        self.reported_posts: set[str] = set()
         self.pending_terminal: TerminalOutput | None = None
         self.baseline = file_snapshot(home)
         self.busy_marks = itertools.count()
@@ -332,7 +344,20 @@ class GuestAgent:
             self.pending_terminal = None
         if "file_diff" in kinds:
             observation["file_changes"] = file_changes(self.baseline, file_snapshot(self.home))
+        posts = self.new_chat_posts()
+        if posts:
+            observation["chat_posts"] = posts
         return observation
+
+    def new_chat_posts(self) -> list[dict[str, Any]]:
+        """The agent persona's chat messages since the last observation, each reported once."""
+        if "chat" not in self.apps:
+            return []
+        posts = [message for message in ChatIntegration().owner_posts(self.world_root)
+                 if message.id not in self.reported_posts]
+        self.reported_posts.update(message.id for message in posts)
+        return [{"id": message.id, "channel": message.channel, "text": message.text,
+                 "sent_at": message.sent_at.isoformat()} for message in posts]
 
     def write_owned(self, target: Path, data: bytes, mode: int) -> None:
         """Folders it creates inside the home belong to the desktop user as well, so apps can save beside the file."""
@@ -347,11 +372,22 @@ class GuestAgent:
             os.chown(target, *self.owner)
 
     def inject(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Task setup, or records delivered into running apps mid task."""
+        if params.keys() - {"deliveries"}:
+            self.set_up(params)
+        for delivery in params.get("deliveries", []):
+            self.deliver(delivery)
+        return {}
+
+    def set_up(self, params: dict[str, Any]) -> None:
         """World state, task setup and entitlements; file changes are counted from here on."""
         if "world" in params:
-            materialize_world(World.model_validate(params["world"]), params.get("apps", []), self.world_root)
+            self.apps = tuple(params.get("apps", []))
+            materialize_world(World.model_validate(params["world"]), self.apps, self.world_root)
             if self.owner is not None:
                 own_tree(self.world_root, self.owner)
+            if "chat" in self.apps:
+                self.reported_posts = {message.id for message in ChatIntegration().owner_posts(self.world_root)}
         for relative_path, content in params.get("files", {}).items():
             self.write_owned(contained_path(self.home, relative_path), file_content(content), 0o644)
         for product, token in params.get("license_tokens", {}).items():
@@ -370,7 +406,21 @@ class GuestAgent:
         if "reads" in params:
             self.reads = params["reads"]
         self.baseline = file_snapshot(self.home)
-        return {}
+
+    def deliver(self, delivery: dict[str, Any]) -> None:
+        """A record lands in a running app; the files it writes join the baseline, so they never read as the
+        agent's changes."""
+        if delivery.get("app") not in self.apps:
+            raise GuestFailure("bad_request", f"{delivery.get('app')} is not an app of this world")
+        before = file_snapshot(self.home)
+        try:
+            deliver_record(delivery["app"], delivery["record"], self.world_root)
+        except (KeyError, ValueError) as error:
+            raise GuestFailure("bad_request", f"cannot deliver to {delivery['app']}: {error}") from error
+        if self.owner is not None:
+            own_tree(self.world_root, self.owner)
+        after = file_snapshot(self.home)
+        self.baseline.update({path: stamp for path, stamp in after.items() if before.get(path) != stamp})
 
     def run_step(self, step: dict[str, Any]) -> None:
         """One ordered task setup step; commands run as the desktop user and their exit codes do not stop setup."""

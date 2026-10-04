@@ -91,13 +91,13 @@ class FakeClock:
         self.now += seconds
 
 
-def build_agent(tmp_path, shell=None, accessibility=None, clock=None, owner=None):
+def build_agent(tmp_path, shell=None, accessibility=None, clock=None, owner=None, world_inside_home=False):
     home = tmp_path / "home"
     home.mkdir(parents=True, exist_ok=True)
     clock = clock or FakeClock()
     return GuestAgent(
         screen=BlankScreen(), input_runner=IgnoredRunner(), accessibility=accessibility or WindowsAppear("Files"),
         browser=NoBrowser(), shell=shell or ScriptedShell(), hygiene=QuietHygiene(), home=home,
-        world_root=tmp_path / "world", license_root=tmp_path / "licenses",
+        world_root=home / "world" if world_inside_home else tmp_path / "world", license_root=tmp_path / "licenses",
         secrets_path=tmp_path / "run" / "episode.env", launchers={"Calc": "libreoffice --calc"}, viewport=VIEWPORT,
         owner=owner, sleep=clock.sleep, monotonic=clock.monotonic)

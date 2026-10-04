@@ -5,6 +5,7 @@ translate to and from each model's own coordinate convention.
 """
 
 from collections.abc import Iterable, Sequence
+from datetime import datetime
 from typing import Annotated, Any, ClassVar, Literal
 
 from pydantic import (
@@ -301,6 +302,15 @@ class FileChange(FrozenModel):
     change: Literal["created", "modified", "deleted"]
 
 
+class ChatPost(FrozenModel):
+    """A chat message the agent posted since the last observation, for colleagues who answer in chat."""
+
+    id: str
+    channel: str
+    text: str
+    sent_at: datetime
+
+
 class Observation(FrozenModel):
     step_index: NonNegativeInt
     screenshot: ScreenshotRef | None = None
@@ -310,3 +320,4 @@ class Observation(FrozenModel):
     file_changes: tuple[FileChange, ...] | None = None
     user_reply: str | None = None
     native_result: Any = None
+    chat_posts: tuple[ChatPost, ...] | None = None
