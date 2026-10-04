@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"rlworld/fleet/internal/netplan"
 	"rlworld/fleet/internal/vmm"
 )
 
@@ -23,6 +24,10 @@ type Config struct {
 	MigrationPollDelay time.Duration
 }
 
+// ignoreSharedCapability keeps guest RAM out of the migration stream: templates and clones share the RAM file.
+var ignoreSharedCapability = map[string]any{"capabilities": []map[string]any{
+	{"capability": "x-ignore-shared", "state": true}}}
+
 // Dialer opens the QMP channel; tests swap in a fake.
 type Dialer func(ctx context.Context, socketPath string) (QMP, error)
 
@@ -35,6 +40,9 @@ type instance struct {
 	process vmm.Process
 	qmp     QMP
 	state   vmm.State
+	// template VMs were cold booted with RAM shared into memoryPath, which their snapshot keeps as its memory.
+	template   bool
+	memoryPath string
 }
 
 // Driver restores clones by VM templating: guest RAM is a file mapped private, so clones share
@@ -71,28 +79,67 @@ func (driver *Driver) QMPSocketPath(vmID string) string {
 	return filepath.Join(driver.config.RunDir, vmID+".qmp")
 }
 
-// TemplatingArgs builds the QEMU command line for one clone, run inside its network namespace.
-func (driver *Driver) TemplatingArgs(spec vmm.RestoreSpec) []string {
-	memorySize := strconv.Itoa(spec.MemoryMiB) + "M"
-	argv := []string{}
-	if spec.Namespace != "" {
-		argv = append(argv, "ip", "netns", "exec", spec.Namespace)
+// machineArgs is the command line a template and its clones share, so device state migrates between them. The
+// template writes guest RAM through to its file; clones map that file private and wait for the device state.
+func (driver *Driver) machineArgs(vmID, namespace string, vcpus, memoryMiB int, memoryPath, diskPath string,
+	template bool) []string {
+	memorySize := strconv.Itoa(memoryMiB) + "M"
+	share := "off"
+	if template {
+		share = "on"
 	}
-	return append(argv,
+	argv := []string{}
+	if namespace != "" {
+		argv = append(argv, "ip", "netns", "exec", namespace)
+	}
+	argv = append(argv,
 		driver.config.QEMUPath,
-		"-name", spec.VMID,
+		"-name", vmID,
 		"-machine", driver.config.MachineType+",accel=kvm,memory-backend=guest_ram",
 		"-cpu", driver.config.CPUModel,
-		"-smp", strconv.Itoa(spec.VCPUs),
+		"-smp", strconv.Itoa(vcpus),
 		"-m", memorySize,
-		"-object", "memory-backend-file,id=guest_ram,size="+memorySize+",mem-path="+spec.MemoryPath+",share=off",
-		"-drive", "file="+spec.DiskOverlayPath+",if=virtio,format=qcow2,cache=none",
-		"-nic", "tap,ifname=tap0,script=no,downscript=no,model=virtio-net-pci",
+		"-object", "memory-backend-file,id=guest_ram,size="+memorySize+",mem-path="+memoryPath+",share="+share,
+		"-drive", "file="+diskPath+",if=virtio,format=qcow2,cache=none",
+		"-nic", "tap,ifname="+netplan.TapName+",script=no,downscript=no,model=virtio-net-pci,mac="+netplan.GuestMAC,
 		"-device", "qemu-xhci", "-device", "usb-tablet",
 		"-vga", "std", "-display", "none",
-		"-qmp", "unix:"+driver.QMPSocketPath(spec.VMID)+",server=on,wait=off",
-		"-incoming", "defer",
+		"-qmp", "unix:"+driver.QMPSocketPath(vmID)+",server=on,wait=off",
 	)
+	if !template {
+		argv = append(argv, "-incoming", "defer")
+	}
+	return argv
+}
+
+// TemplatingArgs builds the QEMU command line for one clone, run inside its network namespace.
+func (driver *Driver) TemplatingArgs(spec vmm.RestoreSpec) []string {
+	return driver.machineArgs(spec.VMID, spec.Namespace, spec.VCPUs, spec.MemoryMiB, spec.MemoryPath,
+		spec.DiskOverlayPath, false)
+}
+
+// TemplateArgs builds the command line of the template boot the snapshot builder takes a base snapshot of.
+func (driver *Driver) TemplateArgs(spec vmm.BootSpec) []string {
+	return driver.machineArgs(spec.VMID, spec.Namespace, spec.VCPUs, spec.MemoryMiB, spec.MemoryPath, spec.DiskPath,
+		true)
+}
+
+// Boot cold boots a template from its disk with guest RAM shared into spec.MemoryPath.
+func (driver *Driver) Boot(ctx context.Context, spec vmm.BootSpec) (vmm.VM, error) {
+	process, err := driver.runner.Start(ctx, driver.TemplateArgs(spec))
+	if err != nil {
+		return vmm.VM{}, fmt.Errorf("start qemu for %s: %w", spec.VMID, err)
+	}
+	channel, err := driver.dialWhenReady(ctx, driver.QMPSocketPath(spec.VMID))
+	if err != nil {
+		vmm.Stop(process)
+		return vmm.VM{}, err
+	}
+	driver.mu.Lock()
+	driver.vmsByID[spec.VMID] = &instance{process: process, qmp: channel, state: vmm.Running, template: true,
+		memoryPath: spec.MemoryPath}
+	driver.mu.Unlock()
+	return vmm.VM{ID: spec.VMID, State: vmm.Running, Driver: driver.Name()}, nil
 }
 
 func (driver *Driver) dialWhenReady(ctx context.Context, socketPath string) (QMP, error) {
@@ -155,8 +202,7 @@ func (driver *Driver) Restore(ctx context.Context, spec vmm.RestoreSpec) (vmm.VM
 		command   string
 		arguments any
 	}{
-		{"migrate-set-capabilities", map[string]any{"capabilities": []map[string]any{
-			{"capability": "x-ignore-shared", "state": true}}}},
+		{"migrate-set-capabilities", ignoreSharedCapability},
 		{"migrate-incoming", map[string]any{"uri": "file:" + spec.StatePath}},
 	}
 	for _, step := range restoreSteps {
@@ -231,8 +277,10 @@ func (driver *Driver) Resume(ctx context.Context, vmID string) error {
 	return nil
 }
 
-// Snapshot pauses and migrates the full state to a file; private RAM has diverged, so all of it is written.
-func (driver *Driver) Snapshot(ctx context.Context, vmID string, kind vmm.SnapshotKind, statePath, _ string) (vmm.SnapshotRef, error) {
+// Snapshot pauses and migrates the state to a file. A clone's private RAM has diverged, so all of it is written;
+// a template's RAM already sits in its shared file, so only device state is written and that file is the memory.
+func (driver *Driver) Snapshot(ctx context.Context, vmID string, kind vmm.SnapshotKind, statePath,
+	_ string) (vmm.SnapshotRef, error) {
 	if kind == vmm.Diff {
 		return vmm.SnapshotRef{}, errors.New("qemu templating writes full checkpoints only")
 	}
@@ -243,13 +291,44 @@ func (driver *Driver) Snapshot(ctx context.Context, vmID string, kind vmm.Snapsh
 	if err != nil {
 		return vmm.SnapshotRef{}, err
 	}
+	if target.template {
+		if _, err := target.qmp.Execute(ctx, "migrate-set-capabilities", ignoreSharedCapability); err != nil {
+			return vmm.SnapshotRef{}, err
+		}
+	}
 	if _, err := target.qmp.Execute(ctx, "migrate", map[string]any{"uri": "file:" + statePath}); err != nil {
 		return vmm.SnapshotRef{}, err
 	}
 	if err := driver.waitForMigration(ctx, target.qmp); err != nil {
 		return vmm.SnapshotRef{}, err
 	}
+	if target.template {
+		return vmm.SnapshotRef{StatePath: statePath, MemoryPath: target.memoryPath, Kind: vmm.Full}, nil
+	}
 	return vmm.SnapshotRef{StatePath: statePath, Kind: vmm.Full}, nil
+}
+
+// VMMVersion is the QEMU version the VM's snapshots are bound to.
+func (driver *Driver) VMMVersion(ctx context.Context, vmID string) (string, error) {
+	target, err := driver.lookup(vmID)
+	if err != nil {
+		return "", err
+	}
+	reply, err := target.qmp.Execute(ctx, "query-version", nil)
+	if err != nil {
+		return "", err
+	}
+	var version struct {
+		QEMU struct {
+			Major int `json:"major"`
+			Minor int `json:"minor"`
+			Micro int `json:"micro"`
+		} `json:"qemu"`
+	}
+	if err := json.Unmarshal(reply, &version); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%d.%d.%d", version.QEMU.Major, version.QEMU.Minor, version.QEMU.Micro), nil
 }
 
 // Destroy asks QEMU to quit, then kills the process either way.
@@ -273,7 +352,8 @@ func (driver *Driver) CaptureScreen(ctx context.Context, vmID, outputPath string
 }
 
 // SendPointer moves the absolute pointer and optionally presses or releases a button.
-func (driver *Driver) SendPointer(ctx context.Context, vmID string, x, y, screenWidth, screenHeight int, button string, down bool) error {
+func (driver *Driver) SendPointer(ctx context.Context, vmID string, x, y, screenWidth, screenHeight int,
+	button string, down bool) error {
 	events := PointerEvents(x, y, screenWidth, screenHeight, button, down)
 	return driver.execute(ctx, vmID, "input-send-event", map[string]any{"events": events})
 }

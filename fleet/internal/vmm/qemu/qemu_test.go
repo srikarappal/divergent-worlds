@@ -110,6 +110,9 @@ func (fake *fakeQMP) Execute(_ context.Context, command string, arguments any) (
 		fake.migrationPolls++
 		return json.RawMessage(`{"status": "` + status + `"}`), nil
 	}
+	if command == "query-version" {
+		return json.RawMessage(`{"qemu": {"major": 9, "minor": 0, "micro": 2}, "package": ""}`), nil
+	}
 	return json.RawMessage(`{}`), nil
 }
 
@@ -176,7 +179,8 @@ func TestRestoreLoadsDeviceStateThenRuns(t *testing.T) {
 	if err != nil || restored.State != vmm.Running {
 		t.Fatalf("restore: %+v %v", restored, err)
 	}
-	want := []string{"migrate-set-capabilities", "migrate-incoming", "query-migrate", "query-migrate", "query-migrate", "cont"}
+	want := []string{"migrate-set-capabilities", "migrate-incoming", "query-migrate", "query-migrate",
+		"query-migrate", "cont"}
 	if !slices.Equal(channel.commands, want) {
 		t.Fatalf("commands %v, want %v", channel.commands, want)
 	}
@@ -264,5 +268,69 @@ func TestKeyAndPointerEvents(t *testing.T) {
 	pointer := PointerEvents(10, 20, 1280, 800, "left", true)
 	if len(pointer) != 3 || pointer[2]["type"] != "btn" {
 		t.Fatalf("pointer events %v", pointer)
+	}
+}
+
+func templateSpec() vmm.BootSpec {
+	return vmm.BootSpec{VMID: "win_template", DiskPath: "/builds/win/disk", MemoryPath: "/builds/win/memory",
+		MemoryMiB: 4096, VCPUs: 2, Namespace: "clone00009"}
+}
+
+func TestTemplatesAndClonesShareEveryDeviceArgument(t *testing.T) {
+	driver, _ := newTestDriver(&fakeQMP{})
+	template := driver.TemplateArgs(templateSpec())
+	joined := strings.Join(template, " ")
+	if !strings.Contains(joined, "mem-path=/builds/win/memory,share=on") || strings.Contains(joined, "-incoming") {
+		t.Fatalf("a template writes RAM through to its file and boots: %q", joined)
+	}
+	clone := driver.TemplatingArgs(vmm.RestoreSpec{VMID: "win_template", StatePath: "/builds/win/state",
+		MemoryPath: "/builds/win/memory", DiskOverlayPath: "/builds/win/disk", MemoryMiB: 4096, VCPUs: 2,
+		Namespace: "clone00009"})
+	if !slices.Equal(clone[:len(template)], replaced(template, "share=on", "share=off")) ||
+		!slices.Equal(clone[len(template):], []string{"-incoming", "defer"}) {
+		t.Fatalf("clones differ from the template only in private RAM and waiting:\n%v\n%v", template, clone)
+	}
+	if !strings.Contains(joined, "mac=06:00:ac:10:00:02") {
+		t.Fatalf("every snapshot keeps the guest MAC: %q", joined)
+	}
+}
+
+func replaced(argv []string, old, new string) []string {
+	var result []string
+	for _, argument := range argv {
+		result = append(result, strings.ReplaceAll(argument, old, new))
+	}
+	return result
+}
+
+func TestATemplateSnapshotWritesOnlyDeviceStateAndKeepsItsRAMFile(t *testing.T) {
+	ctx := context.Background()
+	channel := &fakeQMP{migrationStatus: []string{"completed"}}
+	driver, runner := newTestDriver(channel)
+	booted, err := driver.Boot(ctx, templateSpec())
+	if err != nil || booted.State != vmm.Running {
+		t.Fatalf("boot: %+v %v", booted, err)
+	}
+	if strings.Contains(strings.Join(runner.argv, " "), "-incoming") {
+		t.Fatalf("a template boots instead of waiting: %v", runner.argv)
+	}
+	version, err := driver.VMMVersion(ctx, "win_template")
+	if err != nil || version != "9.0.2" {
+		t.Fatalf("version: %q %v", version, err)
+	}
+	snapshot, err := driver.Snapshot(ctx, "win_template", vmm.Full, "/builds/win/state", "")
+	if err != nil || snapshot.MemoryPath != "/builds/win/memory" || snapshot.StatePath != "/builds/win/state" {
+		t.Fatalf("template snapshot: %+v %v", snapshot, err)
+	}
+	want := []string{"query-version", "stop", "migrate-set-capabilities", "migrate", "query-migrate"}
+	if !slices.Equal(channel.commands, want) {
+		t.Fatalf("commands %v, want %v", channel.commands, want)
+	}
+	capabilities, _ := json.Marshal(channel.arguments[2])
+	if !strings.Contains(string(capabilities), `"x-ignore-shared"`) {
+		t.Fatalf("the template's RAM stays out of the state file: %s", capabilities)
+	}
+	if _, err := driver.VMMVersion(ctx, "missing"); !errors.Is(err, vmm.ErrUnknownVM) {
+		t.Fatalf("version of an unknown vm: %v", err)
 	}
 }
