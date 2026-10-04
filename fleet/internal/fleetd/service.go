@@ -41,6 +41,9 @@ type Node interface {
 	Inject(ctx context.Context, envID string, payload json.RawMessage) error
 	Prefetch(ctx context.Context, digest string) error
 	CachedSnapshots() ([]string, error)
+	Warm(ctx context.Context, template nodeagent.StartRequest) (nodeagent.EnvInfo, error)
+	WarmEnvs() map[string]int
+	Cool(ctx context.Context, digest string, count int) (int, error)
 	BuildSnapshot(ctx context.Context, request nodeagent.BuildRequest) (nodeagent.BuildResult, error)
 	Pause(ctx context.Context, envID string) error
 	Resume(ctx context.Context, envID string) error
@@ -106,6 +109,7 @@ type Service struct {
 	now           func() time.Time
 	snapshots     *SnapshotSettings
 	prefetches    sync.WaitGroup
+	warm          *warmPool
 }
 
 // NewService wires lease endings to env teardown and capacity release.
@@ -204,14 +208,19 @@ func (service *Service) admitAndStart(ctx context.Context, request GroupRequest,
 		service.bindings[created.ID] = &binding{envID: envID, hostID: created.HostID, request: request,
 			snapshot: request.Snapshot}
 		service.mu.Unlock()
-		if _, err := node.Start(ctx, startRequest(envID, request, request.Snapshot)); err != nil {
+		started, err := node.Start(ctx, startRequest(envID, request, request.Snapshot))
+		if err != nil {
 			service.abandon(admitted, nil, request.PerVM)
 			return nil, err
 		}
+		service.mu.Lock()
+		service.bindings[created.ID].envID = started.EnvID
+		service.mu.Unlock()
 		if request.Snapshot.Digest != "" {
 			service.scheduler.MarkSnapshotCached(created.HostID, request.Snapshot.Digest)
 		}
-		infos = append(infos, LeaseInfo{LeaseID: created.ID, EnvID: envID, HostID: created.HostID,
+		service.noteLease(created.HostID, request, started.Warm)
+		infos = append(infos, LeaseInfo{LeaseID: created.ID, EnvID: started.EnvID, HostID: created.HostID,
 			ExpiresAt: created.ExpiresAt})
 	}
 	return infos, nil
@@ -235,9 +244,8 @@ func (service *Service) abandon(admitted []lease.Lease, unadmittedHostIDs []stri
 
 func startRequest(envID string, request GroupRequest, snapshot Snapshot) nodeagent.StartRequest {
 	return nodeagent.StartRequest{EnvID: envID, SnapshotDigest: snapshot.Digest, StatePath: snapshot.StatePath,
-		MemoryPath:   snapshot.MemoryPath,
-		BaseDiskPath: snapshot.BaseDiskPath, MemoryMiB: request.PerVM.MemoryMiB, VCPUs: request.VCPUs,
-		WorldTime: request.WorldTime, ObservationKinds: request.ObservationKinds}
+		MemoryPath: snapshot.MemoryPath, BaseDiskPath: snapshot.BaseDiskPath, MemoryMiB: request.PerVM.MemoryMiB,
+		VCPUs: request.VCPUs, WorldTime: request.WorldTime, ObservationKinds: request.ObservationKinds}
 }
 
 // Heartbeat keeps a lease alive.
