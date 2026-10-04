@@ -12,6 +12,7 @@ import httpx
 from rlworld.preflight.preflight import ExperimentPreflight
 from rlworld.services.admin import AuditRecord, DataPolicy
 from rlworld.services.alerts import Alert
+from rlworld.analysis.fidelity import CloneFidelity
 from rlworld.services.authoring_models import AuthoringSession, Recording, RecordingStart
 from rlworld.services.takeover import Demonstration, TakeoverSession
 from rlworld.services.catalogs import CatalogEntry
@@ -200,6 +201,10 @@ class ExperimentClient:
 
     def compare_runs(self, run_ids: list[str]) -> Comparison:
         return Comparison.model_validate(self.request("GET", "/v1/compare/runs", params={"run_ids": ",".join(run_ids)}))
+
+    def clone_fidelity(self, app: str, clone_run_id: str, real_run_id: str) -> CloneFidelity:
+        params = {"app": app, "clone_run_id": clone_run_id, "real_run_id": real_run_id}
+        return CloneFidelity.model_validate(self.request("GET", "/v1/compare/fidelity", params=params))
 
     def list_review_items(self, queue: str | None = None, status: str | None = None, run_id: str | None = None,
                           episode_id: str | None = None) -> list[ReviewItem]:

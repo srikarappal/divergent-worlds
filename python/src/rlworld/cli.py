@@ -171,6 +171,10 @@ def compare_runs(client: ExperimentClient, arguments: argparse.Namespace) -> Any
     return client.compare_runs(arguments.run_ids)
 
 
+def clone_fidelity(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.clone_fidelity(arguments.app, arguments.clone_run_id, arguments.real_run_id)
+
+
 def list_review_items(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
     return client.list_review_items(queue=arguments.queue, status=arguments.status, run_id=arguments.run_id,
                                     episode_id=arguments.episode_id)
@@ -284,7 +288,7 @@ HANDLERS: dict[str, OperationHandler] = {
                     cohort, get_provenance, get_step_prompt, review_episode, start_takeover, end_takeover,
                     start_authoring, get_authoring, begin_recording, end_recording, run_authoring_gates,
                     submit_authoring, analyze_failures, get_failures,
-                    run_report, compare_policy_versions, compare_runs, list_review_items, list_catalog,
+                    run_report, compare_policy_versions, compare_runs, clone_fidelity, list_review_items, list_catalog,
                     list_endpoints, register_endpoint, test_endpoint, set_endpoint_key, auth_config, me,
                     list_experiments, file_review_item, update_review_item, calibration, export_run, list_roles,
                     set_roles, list_data_policies, set_data_policy, audit_log, pool_status, sweep_retention,
@@ -405,6 +409,10 @@ def build_parser() -> argparse.ArgumentParser:
     add_operation(compare_commands, "runs", compare_runs, "runs side by side").add_argument("run_ids", nargs="+")
     add_operation(compare_commands, "versions", compare_policy_versions, "policy versions in one run").add_argument(
         "run_id")
+    fidelity_parser = add_operation(compare_commands, "fidelity", clone_fidelity,
+                                    "success on an app clone against the real app")
+    for argument_name in ("app", "clone_run_id", "real_run_id"):
+        fidelity_parser.add_argument(argument_name)
 
     reviews = groups.add_parser("review", help="review queues")
     review_commands = reviews.add_subparsers(dest="command", required=True)
