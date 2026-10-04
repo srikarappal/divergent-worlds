@@ -23,10 +23,13 @@ from rlworld.services.experimentd_main import (
     serve,
 )
 from rlworld.specs import dump_spec_document, load_spec_document, parse_spec_document, spec_digest
+from rlworld.tasks.osworld import TEMPLATE_NAME, ImportedSuite, SuiteAssets, SuiteTask, TaskReads, save_suite
+from rlworld.tasks.osworld_evaluation import Evaluation, Getter, MetricCall
 
 EXAMPLES = Path(__file__).resolve().parents[3] / "examples"
 LAPTOP = EXAMPLES / "experimentd" / "laptop.yaml"
 REFERENCE_SPEC = EXAMPLES / "specs" / "reconcile_invoices_linux.yaml"
+OSWORLD_SPEC = EXAMPLES / "specs" / "suite_osworld_eval.yaml"
 SECRETS = {"RLWORLD_RUN_TOKEN_SECRET": "run token secret", "RLWORLD_JUDGE_SECRET": "judge secret"}
 SNAPSHOT_STORE_FLEET_DIGEST = "sha256:" + "5e" * 32
 WORLD_SNAPSHOT_DIGEST = "sha256:" + "3c" * 32
@@ -178,6 +181,51 @@ def test_a_snapshot_store_turns_on_pins_prefetch_world_snapshots_and_gate_reruns
     injected = [call[2] for call in fleet.calls_named("inject")]
     assert injected and all(len(payload["world"]["emails"]) < 10 for payload in injected)
     assert experimentd.gate_reruns.poll() == []
+
+
+def notes_suite(root):
+    """One imported OSWorld style task: a notes file set up on the desktop, compared with a fetched gold file."""
+    assets = SuiteAssets(root)
+    notes, gold = assets.store(b"draft notes\n"), assets.store(b"final notes\n")
+    metric = MetricCall(func="compare_text_file", result=Getter(kind="vm_file", paths=("Desktop/notes.txt",)),
+                        expected=Getter(kind="cloud_file", assets=(gold,)))
+    task = SuiteTask(id="w1", domain="libreoffice_writer", instruction="Tidy the notes.",
+                     setup=({"kind": "file", "path": "Desktop/notes.txt", "asset": notes},),
+                     reads=TaskReads(files=("Desktop/notes.txt",)), evaluation=Evaluation(metrics=(metric,)))
+    save_suite(root, ImportedSuite(tasks=(task,)))
+
+
+def test_an_imported_osworld_suite_runs_as_an_eval_run(tmp_path):
+    config_path = tmp_path / "config" / "experimentd.yaml"
+    config_path.parent.mkdir()
+    notes_suite(config_path.parent / "osworld_suite")
+    payload = load_experimentd_config(LAPTOP).model_dump(mode="json")
+    image = load_spec_document(OSWORLD_SPEC.read_text()).image
+    payload["static_snapshots"][spec_digest(image)] = {"digest": "sha256:" + "8b" * 32,
+                                                       "base_disk_path": "rlworld-dev/noble_osworld_calc_v1:8b"}
+    payload.update({"state_dir": str(tmp_path / "state"), "object_store_dir": str(tmp_path / "objects"),
+                    "endpoints_file": str(LAPTOP.parent / "endpoints.yaml"), "osworld_suite": "osworld_suite"})
+    config_path.write_text(yaml.safe_dump(payload))
+    config = load_experimentd_config(config_path)
+    assert config.osworld_suite == config_path.parent / "osworld_suite"
+    fleet = FakeFleet()
+    experimentd = build_experimentd(config, SECRETS, fleet=fleet, transport=ScriptedTransport(),
+                                    launch_runner=RecordingLaunches())
+    assert TEMPLATE_NAME in experimentd.workers.registry.templates
+    client = experimentd.app.test_client()
+    verifiers = client.get("/v1/catalogs/verifiers").get_json()["entries"]
+    assert "verifiers.public.osworld" in {entry["name"] for entry in verifiers}
+    digest = client.post("/v1/specs", data=OSWORLD_SPEC.read_text(), content_type="application/yaml").get_json()[
+        "digest"]
+    run_id = client.post(f"/v1/specs/{digest}/launch", json={"budget_usd": 10.0}).get_json()["run_ids"][0]
+    assert experimentd.executor.wait(run_id, timeout_seconds=120)
+    assert client.get(f"/v1/runs/{run_id}").get_json()["state"] == "completed"
+    episodes = client.get(f"/v1/runs/{run_id}/episodes", query_string={"status": "finished"}).get_json()["episodes"]
+    assert len(episodes) == 1 and episodes[0]["reward"]["termination"] == "failure"
+    injected = [call[2] for call in fleet.calls_named("inject")]
+    assert injected[0]["setup"] == [{"kind": "file", "path": "Desktop/notes.txt",
+                                     "base64": "ZHJhZnQgbm90ZXMK"}]
+    assert injected[0]["reads"] == {"before": [], "files": ["Desktop/notes.txt"], "commands": []}
 
 
 def test_sign_in_vault_and_alert_channels_follow_the_config(tmp_path):

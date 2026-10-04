@@ -1,0 +1,40 @@
+spec_version: 1
+
+experiment:                                # OSWorld as a public suite: import it with rlworld-import-osworld, then name
+  name: osworld_eval                       # the suite directory as osworld_suite in the experimentd config
+  hypothesis: the policy's success rate on OSWorld's calc tasks matches its published score within a few points
+  budget_usd: 200
+
+image:                                     # build with user: user, since OSWorld's setup commands name /home/user; the
+  id: noble_osworld_calc_v1                # image needs the apps of the domains imported plus xdg-open, wmctrl and
+  os: linux                                # python with pyautogui
+  base: ubuntu_noble@sha256:9b2f4c6e8a0d1f3b5c7e9a1d3f5b7c9e1a3c5e7f9b1d3f5a7c9e1b3d5f7a9c1e
+  pool: {vmm: firecracker, cpu_model: fleet_baseline}
+  apps: {libreoffice: "4:24.2.7-0ubuntu0.24.04.1"}
+  display: {width: 1920, height: 1080, dpi: 96, theme: light, locale: en_US}
+  hardening: [no_auto_update, no_first_run, no_animations, no_telemetry]
+
+world:                                     # OSWorld tasks bring their own files through setup steps
+  generator: worlds.mid_market_company
+  seed: 1
+  materialize: []
+  clock: {fixed: "2026-03-14T09:00:00"}
+
+task:
+  generator: tasks.public.osworld
+  allowed_actions: [computer, control]
+  observation: [screenshot, accessibility_tree]
+  max_steps: 15
+  verifiers:
+    exact: [verifiers.public.osworld]
+  oracle: oracles.public.osworld
+  split: eval
+
+run:                                       # one batch covers the whole suite; a larger count stops at the suite's size
+  type: eval
+  policy: {endpoint: "http://localhost:8000/v1", model: my_policy, action_format: text_actions}
+  group_size: 1
+  tasks_per_batch: 47
+  batches: 1
+  max_concurrent_envs: 16
+  priority: eval

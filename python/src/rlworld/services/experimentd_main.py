@@ -7,7 +7,8 @@ or from Vault, never from the file. experimentd wires the spec, run and catalog
 stores, review, admin, alerts, takeovers and task authoring onto one app; plays
 eval and data runs, dry runs and the strong agent with platform hosted rollout
 workers; launches RL trainers; pins and prefetches each run's snapshot; and
-reruns task gates when an image's snapshot changes.
+reruns task gates when an image's snapshot changes. An imported OSWorld suite,
+when the config names one, registers beside the built in task templates.
 """
 
 import argparse
@@ -70,6 +71,7 @@ from rlworld.services.trainer_launch import (
 )
 from rlworld.services.trajectory_views import TrajectoryViews
 from rlworld.specs.models import EndpointSpec
+from rlworld.tasks.osworld import OSWorldSuite
 from rlworld.tasks.registry import (
     FleetSnapshots,
     FleetWorlds,
@@ -84,7 +86,8 @@ LOGGER = logging.getLogger(__name__)
 GATEWAY_TIMEOUT_SECONDS = 600.0
 # Deciding how a new world loads on a base snapshot restores and measures envs, which takes minutes.
 FLEET_TIMEOUT_SECONDS = 900.0
-CONFIG_PATH_FIELDS = ("state_dir", "object_store_dir", "endpoints_file", "rubrics_dir", "trainer_templates_file")
+CONFIG_PATH_FIELDS = ("state_dir", "object_store_dir", "endpoints_file", "rubrics_dir", "trainer_templates_file",
+                      "osworld_suite")
 
 
 class ConfigError(ValueError):
@@ -187,6 +190,7 @@ class ExperimentdConfig(StrictModel):
     endpoints_file: Path | None = None
     rubrics_dir: Path | None = None
     trainer_templates_file: Path | None = None
+    osworld_suite: Path | None = None
     approval_threshold_usd: float | None = None
     pools: dict[str, PoolShapeConfig] = Field(min_length=1)
     snapshot_store: bool = True
@@ -350,6 +354,8 @@ def build_experimentd(config: ExperimentdConfig, environment: Mapping[str, str],
                            meter=meter, screenshot_policy=policies)
     verifier_registry = VerifierRegistry()
     task_registry = default_task_registry(verifier_registry)
+    if config.osworld_suite:
+        task_registry.register(OSWorldSuite(config.osworld_suite))
     rubric_library = RubricLibrary(config.rubrics_dir) if config.rubrics_dir else None
     fleet = fleet or FleetClient(config.fleet_url, timeout_seconds=FLEET_TIMEOUT_SECONDS)
     shapes = pool_shapes(config)

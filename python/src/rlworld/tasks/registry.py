@@ -10,7 +10,9 @@ world task setup materializes, the start state that materialization extracts
 to, the ground truth that stays outside the VM and the snapshot of the run's
 image. When fleetd gave the run's world a world snapshot, because it loads
 slowly or differently each time, instances restore from it and inject only
-what their task changes.
+what their task changes. A task suite, such as an imported public benchmark,
+hands out its fixed tasks in order and runs only as eval, since training must
+not overlap public benchmarks.
 """
 
 import tempfile
@@ -33,6 +35,7 @@ from rlworld.tasks.finance import ReconcileInvoices
 from rlworld.tasks.generators import (
     GeneratedTask,
     TaskGenerationError,
+    TaskSuite,
     TaskTemplate,
     generated_task_digest,
     task_identifier,
@@ -152,6 +155,10 @@ class TaskRegistry:
             problems.append(f"oracle {task.oracle} is not {task.generator}'s, which is {template.oracle_name}")
         if document.world.generator not in template.world_generators:
             problems.append(f"{task.generator} does not generate over {document.world.generator} worlds")
+        if isinstance(template, TaskSuite) and (document.run.type != "eval" or task.split != "eval"):
+            problems.append(f"{task.generator} is a public suite and runs only as eval on the eval split")
+        if isinstance(template, TaskSuite) and template.size == 0:
+            problems.append(f"{task.generator} has no tasks")
         for tier, names in (("exact", task.verifiers.exact), ("semantic", task.verifiers.semantic)):
             try:
                 self.verifier_registry.resolve(names, tier)
@@ -174,10 +181,15 @@ def start_state(world: World, apps: tuple[str, ...]) -> dict[str, Any]:
 
 
 def setup_payload(task: GeneratedTask, apps: tuple[str, ...]) -> dict[str, Any]:
-    """What task setup injects after restore: the task's world into its apps, then the windows it opens."""
+    """What task setup injects after restore: the task's world into its apps, the windows it opens, its setup
+    steps and the read plan its verifiers need."""
     payload: dict[str, Any] = {"world": task.world.model_dump(mode="json"), "apps": list(apps)}
     if task.open_windows:
         payload["open_windows"] = list(task.open_windows)
+    if task.setup:
+        payload["setup"] = list(task.setup)
+    if task.reads is not None:
+        payload["reads"] = task.reads
     return payload
 
 
@@ -197,7 +209,8 @@ class RegistryTaskProvider:
             raise TaskGenerationError("; ".join(problems))
         self.document = document
         self.template = registry.template(document.task.generator)
-        self.max_tasks_per_difficulty = max_tasks_per_difficulty
+        self.suite = isinstance(self.template, TaskSuite)
+        self.max_tasks_per_difficulty = self.template.size if self.suite else max_tasks_per_difficulty
         self.world = build_world(document.world)
         self.world_digest = world_digest(self.world)
         self.apps = tuple(document.world.materialize)
@@ -214,12 +227,13 @@ class RegistryTaskProvider:
         self.instance(next(iter(self.tasks.values())).candidate)
 
     def add_tasks(self, difficulty: DifficultySpec, count: int) -> None:
-        """New seeds continue where the difficulty's earlier tasks stopped, so ids never repeat or shift."""
+        """New seeds continue where the difficulty's earlier tasks stopped, so ids never repeat or shift; a suite's
+        seeds are its task indexes."""
         key = difficulty_key(difficulty)
         start = self.tasks_by_difficulty.get(key, 0)
         stop = min(start + count, self.max_tasks_per_difficulty)
         for index in range(start, stop):
-            seed = task_seed(self.document.world.seed, self.template.name, difficulty, index)
+            seed = index if self.suite else task_seed(self.document.world.seed, self.template.name, difficulty, index)
             task_id = task_identifier(self.template, difficulty, self.world_digest, seed)
             self.tasks.setdefault(task_id, RegisteredTask(CandidateTask(task_id, self.template.name, difficulty),
                                                           seed))
