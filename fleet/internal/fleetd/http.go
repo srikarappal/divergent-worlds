@@ -136,6 +136,7 @@ type route struct {
 func (api *httpAPI) routes() []route {
 	return []route{
 		{"GET /healthz", api.health},
+		{"GET /metrics", api.metrics},
 		{"POST /v1/leases", api.leaseGroup},
 		{"GET /v1/leases", api.listLeases},
 		{"POST /v1/leases/{leaseID}/heartbeat", api.heartbeat},
@@ -175,6 +176,11 @@ func NewHandler(service *Service) http.Handler {
 
 func (api *httpAPI) health(writer http.ResponseWriter, _ *http.Request) {
 	writeJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// metrics answers Prometheus scrapes of the platform health signals fleetd owns.
+func (api *httpAPI) metrics(writer http.ResponseWriter, request *http.Request) {
+	api.service.Metrics().ServeHTTP(writer, request)
 }
 
 func (api *httpAPI) leaseGroup(writer http.ResponseWriter, request *http.Request) {

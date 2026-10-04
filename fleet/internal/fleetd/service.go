@@ -111,12 +111,14 @@ type Service struct {
 	snapshots     *SnapshotSettings
 	prefetches    sync.WaitGroup
 	warm          *warmPool
+	metrics       *fleetMetrics
 }
 
 // NewService wires lease endings to env teardown and capacity release.
 func NewService(leases *lease.Manager, placement *scheduler.Scheduler, nodes map[string]Node, checkpointDir string) *Service {
 	service := &Service{leases: leases, scheduler: placement, nodes: nodes, bindings: map[string]*binding{},
 		takeovers: map[string]*takeoverSession{}, checkpointDir: checkpointDir, now: time.Now}
+	service.metrics = newFleetMetrics(service)
 	leases.OnRelease(service.onLeaseEnded)
 	return service
 }
@@ -173,6 +175,7 @@ func (service *Service) nodeFor(bound *binding) (Node, error) {
 
 // LeaseGroup places, admits and starts a group of envs, all or nothing.
 func (service *Service) LeaseGroup(ctx context.Context, request GroupRequest) ([]LeaseInfo, error) {
+	started := service.now()
 	assignments, err := service.scheduler.Place(scheduler.Request{SnapshotDigest: request.Snapshot.Digest,
 		Pool: request.Pool, PerVM: request.PerVM, Count: request.GroupSize, HostScopedLicenses: request.HostScopedLicenses})
 	if err != nil {
@@ -184,7 +187,11 @@ func (service *Service) LeaseGroup(ctx context.Context, request GroupRequest) ([
 			hostIDs = append(hostIDs, assignment.HostID)
 		}
 	}
-	return service.admitAndStart(ctx, request, hostIDs)
+	infos, err := service.admitAndStart(ctx, request, hostIDs)
+	if err == nil {
+		service.metrics.leaseSeconds.Observe(service.now().Sub(started).Seconds(), request.Pool)
+	}
+	return infos, err
 }
 
 func (service *Service) admitAndStart(ctx context.Context, request GroupRequest, hostIDs []string) ([]LeaseInfo, error) {
@@ -211,6 +218,7 @@ func (service *Service) admitAndStart(ctx context.Context, request GroupRequest,
 		service.mu.Unlock()
 		started, err := node.Start(ctx, startRequest(envID, request, request.Snapshot))
 		if err != nil {
+			service.metrics.restoreFailures.Inc(request.Pool)
 			service.abandon(admitted, nil, request.PerVM)
 			return nil, err
 		}
@@ -282,6 +290,7 @@ func (service *Service) Reset(ctx context.Context, leaseID string) (nodeagent.St
 	bound.envID, bound.frozen = envID, false
 	service.mu.Unlock()
 	if _, err := node.Start(ctx, startRequest(envID, bound.request, bound.snapshot)); err != nil {
+		service.metrics.restoreFailures.Inc(bound.request.Pool)
 		return nodeagent.StepResult{}, err
 	}
 	return node.Observe(ctx, envID)
@@ -303,7 +312,13 @@ func (service *Service) Step(ctx context.Context, leaseID string, action json.Ra
 	if err != nil {
 		return nodeagent.StepResult{}, err
 	}
-	return node.Step(ctx, bound.envID, action)
+	result, err := node.Step(ctx, bound.envID, action)
+	if err != nil {
+		service.metrics.stepFailures.Inc(bound.request.Pool)
+		return result, err
+	}
+	service.metrics.observeStep(bound.request.Pool, result)
+	return result, nil
 }
 
 // Fork checkpoints the lease's env and leases count clones on the same host.
@@ -337,6 +352,7 @@ func (service *Service) Fork(ctx context.Context, leaseID string, count int) ([]
 	}
 	forks, err := node.Fork(ctx, bound.envID, count, service.checkpointDir)
 	if err != nil {
+		service.metrics.restoreFailures.Add(float64(count), bound.request.Pool)
 		service.abandon(admitted, nil, bound.request.PerVM)
 		return nil, err
 	}
