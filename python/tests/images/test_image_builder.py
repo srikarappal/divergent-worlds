@@ -2,9 +2,11 @@ import hashlib
 import json
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 import httpx
 import pytest
+import yaml
 from support.image_fakes import (
     LOCK,
     RecordingFetcher,
@@ -25,7 +27,7 @@ from rlworld.images import (
     build_plan,
     load_image_spec,
 )
-from rlworld.images.builder import main
+from rlworld.images.builder import build_snapshot, main
 from rlworld.specs.digest import spec_digest
 
 BUILT_AT = datetime(2026, 10, 3, 12, 0, tzinfo=timezone.utc)
@@ -187,3 +189,63 @@ def test_cli_reports_failures_without_a_traceback(tmp_path, capsys):
                       "--work-dir", str(tmp_path / "work")])
     assert exit_code == 1
     assert "image build failed:" in capsys.readouterr().err
+
+
+class SnapshottingFleet:
+    """fleetd's build route: it snapshots whatever image the build directory holds."""
+
+    def __init__(self, image_digest=None):
+        self.image_digest = image_digest
+        self.builds = []
+
+    def build_snapshot(self, build_dir, memory_mib, vcpus):
+        self.builds.append((build_dir, memory_mib, vcpus))
+        manifest = json.loads((Path(build_dir) / "manifest.json").read_text())
+        return {"digest": "sha256:" + "5e" * 32, "image": manifest["image"]["id"],
+                "image_digest": self.image_digest or manifest["image_digest"], "compatibility": {"pool": "linux"},
+                "memory_mib": memory_mib, "vcpus": vcpus, "files": {}}
+
+
+def built_vm(tmp_path):
+    work = tmp_path / "work"
+    runner = RecordingRunner(creates={"mke2fs": {"rootfs.ext4": b"ext4 image"}})
+    manifest = ImageBuilder(runner, RecordingFetcher(KERNEL), clock=fixed_clock).build(
+        linux_image(), linux_inputs(tmp_path), LOCK_WITH_REAL_KERNEL, work)
+    return work, manifest
+
+
+def test_a_vm_build_is_snapshotted_by_fleetd(tmp_path):
+    work, manifest = built_vm(tmp_path)
+    fleet = SnapshottingFleet()
+    summary = build_snapshot(fleet, work, manifest, 2048, 2)
+    assert fleet.builds == [(str(work.resolve()), 2048, 2)]
+    assert summary == {"digest": "sha256:" + "5e" * 32, "image": "noble_browsers_v1",
+                       "image_digest": spec_digest(linux_image()), "pool": "linux", "memory_mib": 2048, "vcpus": 2}
+    with pytest.raises(BuildError, match="not " + manifest["image_digest"]):
+        build_snapshot(SnapshottingFleet(image_digest="sha256:other"), work, manifest, 2048, 2)
+    with pytest.raises(BuildError, match="only vm builds are snapshotted"):
+        build_snapshot(fleet, work, {**manifest, "target": "dev"}, 2048, 2)
+
+
+def test_the_cli_builds_then_snapshots_in_one_step(tmp_path, capsys):
+    inputs = linux_inputs(tmp_path)
+    spec = tmp_path / "image.yaml"
+    spec.write_text(yaml.safe_dump({"image": linux_image().model_dump(mode="json")}))
+    config = tmp_path / "build.yaml"
+    config.write_text(yaml.safe_dump(inputs.model_dump(mode="json")))
+    lock = tmp_path / "lock.yaml"
+    lock.write_text(yaml.safe_dump(LOCK_WITH_REAL_KERNEL.model_dump(mode="json")))
+    work = tmp_path / "work"
+    arguments = [str(spec), "--config", str(config), "--lock", str(lock), "--work-dir", str(work)]
+    builder = ImageBuilder(RecordingRunner(creates={"mke2fs": {"rootfs.ext4": b"ext4 image"}}),
+                           RecordingFetcher(KERNEL), clock=fixed_clock)
+    fleet = SnapshottingFleet()
+    assert main([*arguments, "--snapshot", "--memory-mib", "4096", "--vcpus", "4"], builder=builder, fleet=fleet) == 0
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["snapshot"]["memory_mib"] == 4096 and set(printed["outputs"]) == {"rootfs", "kernel"}
+    assert fleet.builds == [(str(work.resolve()), 4096, 4)]
+    for flags in (["--snapshot"], ["--snapshot", "--target", "dev", "--memory-mib", "1", "--vcpus", "1"]):
+        with pytest.raises(SystemExit) as refused:
+            main([*arguments, *flags], builder=builder, fleet=fleet)
+        assert refused.value.code == 2
+    assert "--snapshot needs the vm target" in capsys.readouterr().err

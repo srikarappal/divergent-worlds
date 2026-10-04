@@ -6,7 +6,9 @@ lock, runs the commands in order and stops at the first failure. manifest.json
 then records the image spec and its digest, every pinned artifact and input,
 the trusted CAs and the sha256 of every output, which is what the snapshot
 builder and later reproductions start from. The vm target builds VM disks; the
-dev target builds Linux container images for the Docker dev backend.
+dev target builds Linux container images for the Docker dev backend. With
+--snapshot the build continues on fleetd's host, which boots it to its readiness
+probe and publishes the base snapshot (DESIGN.md section 3, lifecycle step 1).
 """
 
 import argparse
@@ -37,12 +39,15 @@ from rlworld.images.config import (
 )
 from rlworld.images.linux import linux_build_plan, linux_dev_build_plan
 from rlworld.images.windows import windows_build_plan
+from rlworld.sdk.client import FleetClient, FleetError
 from rlworld.specs.digest import spec_digest
 from rlworld.specs.document import format_validation_errors
 from rlworld.specs.models import ImageSpec
 
 CHUNK_BYTES = 1 << 20
 MANIFEST_NAME = "manifest.json"
+DEFAULT_FLEET_URL = "http://localhost:8700"
+SNAPSHOT_TIMEOUT_SECONDS = 1800.0
 BuildTarget = Literal["vm", "dev"]
 
 
@@ -52,6 +57,10 @@ class CommandRunner(Protocol):
 
 class Fetcher(Protocol):
     def fetch(self, artifact: Artifact, destination: Path) -> None: ...
+
+
+class SnapshotBuilder(Protocol):
+    def build_snapshot(self, build_dir: str, memory_mib: int, vcpus: int) -> dict[str, Any]: ...
 
 
 class SubprocessRunner:
@@ -157,6 +166,19 @@ class ImageBuilder:
         return manifest
 
 
+def build_snapshot(fleet: SnapshotBuilder, work_directory: Path, manifest: Mapping[str, Any], memory_mib: int,
+                   vcpus: int) -> dict[str, Any]:
+    """fleetd boots a vm build on its host and publishes the base snapshot; the summary names it for the build."""
+    if manifest["target"] != "vm":
+        raise BuildError([f"only vm builds are snapshotted, {manifest['image']['id']} is a {manifest['target']} build"])
+    snapshot = fleet.build_snapshot(str(work_directory.resolve()), memory_mib, vcpus)
+    if snapshot["image_digest"] != manifest["image_digest"]:
+        raise BuildError([f"fleetd snapshotted image {snapshot['image_digest']}, not {manifest['image_digest']}"])
+    return {"digest": snapshot["digest"], "image": snapshot["image"], "image_digest": snapshot["image_digest"],
+            "pool": snapshot["compatibility"]["pool"], "memory_mib": snapshot["memory_mib"],
+            "vcpus": snapshot["vcpus"]}
+
+
 def load_image_spec(spec_path: Path) -> ImageSpec:
     """The image layer of a spec document, or a file holding only that layer."""
     raw_spec = yaml.safe_load(spec_path.read_text())
@@ -177,22 +199,36 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--work-dir", type=Path, required=True, help="where the build writes its files and outputs")
     parser.add_argument("--target", choices=("vm", "dev"), default="vm",
                         help="vm disks for the pools, or a container image for the Docker dev backend")
+    parser.add_argument("--snapshot", action="store_true",
+                        help="then have fleetd on this host boot the build and publish its base snapshot")
+    parser.add_argument("--fleetd-url", default=os.environ.get("RLWORLD_FLEET_URL", DEFAULT_FLEET_URL))
+    parser.add_argument("--memory-mib", type=int, default=None, help="memory of the pool's leases")
+    parser.add_argument("--vcpus", type=int, default=None, help="vCPUs of the pool's leases")
     return parser
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    arguments = build_parser().parse_args(argv)
+def main(argv: Sequence[str] | None = None, builder: ImageBuilder | None = None,
+         fleet: SnapshotBuilder | None = None) -> int:
+    parser = build_parser()
+    arguments = parser.parse_args(argv)
+    if arguments.snapshot and (arguments.target != "vm" or not arguments.memory_mib or not arguments.vcpus):
+        parser.error("--snapshot needs the vm target with --memory-mib and --vcpus")
     try:
         image = load_image_spec(arguments.spec)
         config = load_build_config(arguments.config)
         lock = load_artifact_lock(arguments.lock)
         arguments.work_dir.mkdir(parents=True, exist_ok=True)
-        manifest = ImageBuilder(SubprocessRunner(), HttpFetcher()).build(image, config, lock, arguments.work_dir,
-                                                                         arguments.target)
-    except (BuildError, ValidationError, OSError, httpx.HTTPError) as error:
+        manifest = (builder or ImageBuilder(SubprocessRunner(), HttpFetcher())).build(
+            image, config, lock, arguments.work_dir, arguments.target)
+        summary: Any = manifest["outputs"]
+        if arguments.snapshot:
+            snapshotter = fleet or FleetClient(arguments.fleetd_url, timeout_seconds=SNAPSHOT_TIMEOUT_SECONDS)
+            summary = {"outputs": manifest["outputs"], "snapshot": build_snapshot(
+                snapshotter, arguments.work_dir, manifest, arguments.memory_mib, arguments.vcpus)}
+    except (BuildError, ValidationError, OSError, httpx.HTTPError, FleetError) as error:
         print(f"image build failed: {error}", file=sys.stderr)
         return 1
-    print(json.dumps(manifest["outputs"], indent=2, sort_keys=True))
+    print(json.dumps(summary, indent=2, sort_keys=True))
     return 0
 
 
