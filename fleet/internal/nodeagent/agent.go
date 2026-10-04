@@ -22,6 +22,7 @@ import (
 
 	"rlworld/fleet/internal/clock"
 	"rlworld/fleet/internal/netplan"
+	"rlworld/fleet/internal/snapshot"
 	"rlworld/fleet/internal/vmm"
 )
 
@@ -30,6 +31,8 @@ var (
 	ErrUnknownEnv = errors.New("unknown env")
 	// ErrNoCloneSlots means every clone network slot is taken.
 	ErrNoCloneSlots = errors.New("no free clone network slots on this host")
+	// ErrNoSnapshotStore means a lease named a snapshot by digest on a host without a snapshot store.
+	ErrNoSnapshotStore = errors.New("this host has no snapshot store")
 )
 
 // GuestChannel reaches the guest agent (vsock on Linux, the in session helper on Windows); the VM must be running.
@@ -58,17 +61,23 @@ type Config struct {
 	SettleStable time.Duration
 	SettleCap    time.Duration
 	SettlePoll   time.Duration
+	// Snapshots pulls the snapshots leases name by digest; without it leases name snapshot files.
+	Snapshots *snapshot.Cache
+	// LazyMemory restores before a snapshot's memory is local when the driver serves it page by page.
+	LazyMemory bool
 }
 
 // StartRequest restores one env from a snapshot.
 type StartRequest struct {
-	EnvID        string
-	StatePath    string
-	MemoryPath   string
-	BaseDiskPath string
-	MemoryMiB    int
-	VCPUs        int
-	Resume       bool
+	EnvID string
+	// SnapshotDigest names a snapshot in the store; the agent pulls it unless the files below are given.
+	SnapshotDigest string
+	StatePath      string
+	MemoryPath     string
+	BaseDiskPath   string
+	MemoryMiB      int
+	VCPUs          int
+	Resume         bool
 	// WorldTime is the world's fixed clock; zero means the host clock.
 	WorldTime time.Time
 	// GuestElapsed is how long the guest has already run, for forks of a running env.
@@ -101,6 +110,7 @@ type env struct {
 	elapsed      time.Duration
 	resumedAt    time.Time
 	needsEntropy bool
+	lazyMemory   *snapshot.LazyMemory
 }
 
 // Agent manages every env on one host.
@@ -188,8 +198,22 @@ func (agent *Agent) runAll(ctx context.Context, commands [][]string) error {
 	return nil
 }
 
-// Start wires the network, makes the overlay and restores; any failure undoes what was done.
+// Start pulls the snapshot when it is not on this host yet, wires the network, makes the overlay and restores;
+// any failure undoes what was done.
 func (agent *Agent) Start(ctx context.Context, request StartRequest) (EnvInfo, error) {
+	request, lazyMemory, err := agent.resolveSnapshot(ctx, request)
+	if err != nil {
+		return EnvInfo{}, err
+	}
+	info, err := agent.start(ctx, request, lazyMemory)
+	if err != nil && lazyMemory != nil {
+		lazyMemory.Close()
+	}
+	return info, err
+}
+
+func (agent *Agent) start(ctx context.Context, request StartRequest, lazyMemory *snapshot.LazyMemory) (EnvInfo,
+	error) {
 	index, err := agent.allocateIndex()
 	if err != nil {
 		return EnvInfo{}, err
@@ -210,11 +234,15 @@ func (agent *Agent) Start(ctx context.Context, request StartRequest) (EnvInfo, e
 		agent.freeIndex(index)
 		return EnvInfo{}, fmt.Errorf("prepare env %s: %w", request.EnvID, err)
 	}
-	restored, err := agent.driver.Restore(ctx, vmm.RestoreSpec{
+	restoreSpec := vmm.RestoreSpec{
 		VMID: request.EnvID, StatePath: request.StatePath, MemoryPath: request.MemoryPath,
 		DiskOverlayPath: diskPath, MemoryMiB: request.MemoryMiB, VCPUs: request.VCPUs,
 		Namespace: network.Namespace, Resume: request.Resume,
-	})
+	}
+	if lazyMemory != nil {
+		restoreSpec.LazyMemory = lazyMemory
+	}
+	restored, err := agent.driver.Restore(ctx, restoreSpec)
 	if err != nil {
 		agent.cleanup(ctx, network, overlayPath)
 		agent.freeIndex(index)
@@ -222,7 +250,7 @@ func (agent *Agent) Start(ctx context.Context, request StartRequest) (EnvInfo, e
 	}
 	agent.mu.Lock()
 	agent.envs[request.EnvID] = &env{request: request, network: network, overlayPath: overlayPath, state: restored.State,
-		elapsed: request.GuestElapsed, needsEntropy: true}
+		elapsed: request.GuestElapsed, needsEntropy: true, lazyMemory: lazyMemory}
 	agent.mu.Unlock()
 	return EnvInfo{EnvID: request.EnvID, State: restored.State, Namespace: network.Namespace,
 		CloneAddress: cloneAddress(network)}, nil
@@ -380,6 +408,9 @@ func (agent *Agent) Destroy(ctx context.Context, envID string) error {
 	}
 	destroyErr := agent.driver.Destroy(ctx, envID)
 	agent.cleanup(ctx, target.network, target.overlayPath)
+	if target.lazyMemory != nil {
+		destroyErr = errors.Join(destroyErr, target.lazyMemory.Close())
+	}
 	agent.mu.Lock()
 	delete(agent.envs, envID)
 	delete(agent.usedIndexes, target.network.Index)
