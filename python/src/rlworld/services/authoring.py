@@ -8,26 +8,31 @@ and the final state the verifiers grade. Running the gates replays the oracle
 in fresh envs (the latest recorded oracle, or the template's scripted oracle
 when none was recorded), adds alternative solutions and near misses, asks a
 strong agent when one is configured, then runs every gate. Submitting files
-the gate report for human review.
+the gate report for human review. With a gate report store, each report and
+the recipe behind it become the task's gates for preflight and for reruns when
+its image is bumped.
 """
 
 import itertools
 import threading
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol
 
 from rlworld.actions.demonstrations import InputEvent, demonstration_actions
-from rlworld.actions.models import ActionModel, action_payload, parse_action
+from rlworld.actions.models import action_payload, parse_action
 from rlworld.rewards.pipeline import JudgeTier
 from rlworld.rewards.records import EpisodeOutcome
 from rlworld.rollout.episode import TaskInstance
 from rlworld.rollout.groups import EnvShape
-from rlworld.sdk.client import FleetError, LeaseGroupRequest, LeaseInfo, StepResult
+from rlworld.sdk.client import FleetError
 from rlworld.services.authoring_models import AuthoringSession, GateOutcome, Recording, RecordingKind, RecordingStart
 from rlworld.services.experiments import ExperimentService, UnknownRecordError
+from rlworld.services.gate_reports import GateRecipe, GateRecord, GateReports
+from rlworld.services.replays import FreshEnvs, ReplayFleet
 from rlworld.services.review import ReviewService
+from rlworld.specs.digest import spec_digest
 from rlworld.specs.document import SpecDocument
 from rlworld.tasks.curriculum import CandidateTask
 from rlworld.tasks.gates import GateConfig, GateInputs, GateReport, SolutionAttempt, TaskGateRunner
@@ -43,17 +48,7 @@ class AuthoringError(ValueError):
     """A step the session cannot take now: a spec the registry cannot serve, no dev env or a second submission."""
 
 
-class AuthoringFleet(Protocol):
-    def lease_group(self, request: LeaseGroupRequest) -> list[LeaseInfo]: ...
-
-    def inject(self, lease_id: str, payload: dict[str, Any]) -> None: ...
-
-    def step(self, lease_id: str, action: ActionModel) -> StepResult: ...
-
-    def finish(self, lease_id: str, apps: list[str]) -> dict[str, Any]: ...
-
-    def close(self, lease_id: str) -> None: ...
-
+class AuthoringFleet(ReplayFleet, Protocol):
     def start_takeover(self, lease_id: str) -> dict[str, Any]: ...
 
     def end_takeover(self, lease_id: str) -> dict[str, Any]: ...
@@ -74,7 +69,8 @@ class Draft:
     provider: RegistryTaskProvider
     candidate: CandidateTask
     instance: TaskInstance
-    shape: EnvShape
+    envs: FreshEnvs
+    task_index: int
     attempts: dict[str, SolutionAttempt] = field(default_factory=dict)
 
 
@@ -83,23 +79,21 @@ def gate_outcomes(report: GateReport) -> list[GateOutcome]:
                         attempts=[asdict(attempt) for attempt in result.attempts]) for result in report.results]
 
 
-def playable(actions: Sequence[ActionModel]) -> tuple[list[ActionModel], EpisodeOutcome]:
-    """The env actions to replay up to the first ending action with how that ending reads as an outcome."""
-    steps: list[ActionModel] = []
-    for action in actions:
-        if action.ends_episode:
-            return steps, EpisodeOutcome(steps_taken=len(steps), final_action=action.name,
-                                         answer_text=getattr(action, "text", None))
-        if action.modality != "control":
-            steps.append(action)
-    return steps, EpisodeOutcome(steps_taken=len(steps), final_action="done")
+def gate_recipe(draft: Draft, recorded: list[Recording]) -> GateRecipe:
+    """The solutions a session's gates replayed, kept so an image bump can replay them again."""
+    oracles = [recording.actions for recording in recorded if recording.kind == "oracle"]
+    return GateRecipe(spec_digest=draft.session.spec_digest, task_index=draft.task_index,
+                      oracle=oracles[-1] if oracles else None,
+                      alternatives=[recording.actions for recording in recorded if recording.kind == "alternative"],
+                      near_misses=[recording.actions for recording in recorded if recording.kind == "near_miss"])
 
 
 class AuthoringService:
     def __init__(self, experiment_service: ExperimentService, registry: TaskRegistry, snapshots: SnapshotResolver,
                  fleet: AuthoringFleet, review_service: ReviewService, shapes: Mapping[str, EnvShape],
                  judge: JudgeTier | None = None, solvability: SolvabilityProbe | None = None,
-                 gate_config: GateConfig | None = None, clock: Callable[[], float] = time.time) -> None:
+                 gate_config: GateConfig | None = None, gate_reports: GateReports | None = None,
+                 clock: Callable[[], float] = time.time) -> None:
         self.experiment_service = experiment_service
         self.registry = registry
         self.snapshots = snapshots
@@ -109,6 +103,7 @@ class AuthoringService:
         self.judge = judge
         self.solvability = solvability
         self.gate_config = gate_config or GateConfig()
+        self.gate_reports = gate_reports
         self.clock = clock
         self.drafts: dict[str, Draft] = {}
         self.gate_runs: dict[str, threading.Thread] = {}
@@ -136,8 +131,11 @@ class AuthoringService:
                                    task_id=instance.task_id, template=instance.template,
                                    instruction=instance.instruction, hidden_intent=instance.hidden_intent,
                                    created_at=self.clock())
+        envs = FreshEnvs(fleet=self.fleet, shape=self.shapes[vmm], document=document, instance=instance,
+                         run_id=session_id, tenant=tenant, priority=AUTHORING_PRIORITY, endpoint=AUTHORING_ENDPOINT,
+                         ttl_seconds=AUTHORING_LEASE_TTL_SECONDS)
         with self.lock:
-            self.drafts[session_id] = Draft(session, document, provider, candidate, instance, self.shapes[vmm])
+            self.drafts[session_id] = Draft(session, document, provider, candidate, instance, envs, task_index)
         return session.model_copy(deep=True)
 
     def draft(self, session_id: str) -> Draft:
@@ -151,43 +149,18 @@ class AuthoringService:
         with self.lock:
             return draft.session.model_copy(deep=True)
 
-    def lease(self, draft: Draft) -> LeaseInfo:
-        """A fresh dev env at the task's start state, leased long enough for an author to work in it."""
-        clock = draft.document.world.clock.fixed
-        request = LeaseGroupRequest(
-            run_id=draft.session.session_id, tenant=draft.session.tenant, pool=draft.shape.pool,
-            priority=AUTHORING_PRIORITY, endpoint=AUTHORING_ENDPOINT, snapshot=draft.instance.snapshot,
-            memory_mib=draft.shape.memory_mib, vcpus=draft.shape.vcpus, cpu_millicores=draft.shape.cpu_millicores,
-            cost_center=AUTHORING_ENDPOINT, ttl_seconds=AUTHORING_LEASE_TTL_SECONDS,
-            host_scoped_licenses=draft.shape.host_scoped_licenses,
-            world_time=clock.isoformat() if clock is not None else None,
-            observation_kinds=tuple(draft.instance.task.observation))
-        lease = self.fleet.lease_group(request)[0]
-        try:
-            self.fleet.inject(lease.lease_id, draft.instance.setup_payload)
-        except Exception:
-            self.close_quietly(lease.lease_id)
-            raise
-        return lease
-
-    def close_quietly(self, lease_id: str) -> None:
-        try:
-            self.fleet.close(lease_id)
-        except FleetError:
-            return
-
     def begin_recording(self, session_id: str, kind: RecordingKind, actor: str) -> RecordingStart:
         draft = self.draft(session_id)
         if draft.session.review_item_id is not None:
             raise AuthoringError(f"{session_id} was already submitted for review")
         try:
-            lease = self.lease(draft)
+            lease = draft.envs.lease()
         except FleetError as error:
             raise AuthoringError(f"no dev env: {error}") from error
         try:
             takeover = self.fleet.start_takeover(lease.lease_id)
         except FleetError as error:
-            self.close_quietly(lease.lease_id)
+            draft.envs.close_quietly(lease.lease_id)
             raise AuthoringError(f"the dev env cannot be handed over: {error}") from error
         with self.lock:
             recording = Recording(recording_id=f"recording_{next(self.recording_numbers):06d}", kind=kind,
@@ -209,13 +182,13 @@ class AuthoringService:
         try:
             record = self.fleet.end_takeover(recording.lease_id)
             actions = demonstration_actions([InputEvent.model_validate(event) for event in record.get("events") or []])
-            final_state = self.fleet.finish(recording.lease_id, list(draft.document.world.materialize))
+            final_state = draft.envs.final_state(recording.lease_id)
         except (FleetError, ValueError) as error:
             with self.lock:
                 recording.status, recording.error = "failed", str(error)
                 return recording.model_copy()
         finally:
-            self.close_quietly(recording.lease_id)
+            draft.envs.close_quietly(recording.lease_id)
         attempt = SolutionAttempt(f"{recording.kind}_{recording_id}", final_state,
                                   EpisodeOutcome(steps_taken=len(actions), final_action="done"))
         with self.lock:
@@ -225,38 +198,24 @@ class AuthoringService:
             draft.attempts[recording_id] = attempt
             return recording.model_copy()
 
-    def replay(self, draft: Draft, actions: Sequence[ActionModel], name: str) -> SolutionAttempt:
-        """Plays a solution in a fresh env; a failing env becomes an env error the gates report."""
-        steps, outcome = playable(actions)
-        try:
-            lease = self.lease(draft)
-        except FleetError as error:
-            return SolutionAttempt(name, {}, outcome.model_copy(update={"env_error": f"lease failed: {error}"}))
-        try:
-            for action in steps:
-                self.fleet.step(lease.lease_id, action)
-            final_state = self.fleet.finish(lease.lease_id, list(draft.document.world.materialize))
-        except FleetError as error:
-            return SolutionAttempt(name, {}, outcome.model_copy(update={"env_error": f"replay failed: {error}"}))
-        finally:
-            self.close_quietly(lease.lease_id)
-        return SolutionAttempt(name, final_state, outcome)
-
-    def gate_inputs(self, draft: Draft) -> GateInputs:
-        """The latest recorded oracle replayed, or the scripted one; the scripted one also counts as an alternative."""
+    def recorded(self, draft: Draft) -> tuple[list[Recording], dict[str, SolutionAttempt]]:
         with self.lock:
             recorded = [recording.model_copy() for recording in draft.session.recordings
                         if recording.status == "recorded"]
-            attempts = dict(draft.attempts)
+            return recorded, dict(draft.attempts)
+
+    def gate_inputs(self, draft: Draft) -> GateInputs:
+        """The latest recorded oracle replayed, or the scripted one; the scripted one also counts as an alternative."""
+        recorded, attempts = self.recorded(draft)
         oracles = [recording for recording in recorded if recording.kind == "oracle"]
         scripted = draft.provider.oracle(draft.candidate)
         alternatives = [attempts[recording.recording_id] for recording in recorded if recording.kind == "alternative"]
         if oracles:
             oracle_actions = [parse_action(payload) for payload in oracles[-1].actions]
-            alternatives.append(self.replay(draft, scripted, "scripted_oracle"))
+            alternatives.append(draft.envs.replay(scripted, "scripted_oracle"))
         else:
             oracle_actions = scripted
-        oracle_runs = tuple(self.replay(draft, oracle_actions, f"oracle_run_{index}")
+        oracle_runs = tuple(draft.envs.replay(oracle_actions, f"oracle_run_{index}")
                             for index in range(self.gate_config.rerun_count))
         near_misses = tuple(attempts[recording.recording_id] for recording in recorded if recording.kind == "near_miss")
         agent_attempts = (tuple(self.solvability.attempts(draft.instance, self.gate_config.solvability_tries))
@@ -277,7 +236,19 @@ class AuthoringService:
         with self.lock:
             draft.session.gate_status = "passed" if report.passed else "failed"
             draft.session.gate_results, draft.session.gate_error = gate_outcomes(report), ""
+        self.record_report(draft, report)
         return self.session(session_id)
+
+    def record_report(self, draft: Draft, report: GateReport) -> None:
+        """The report becomes the task's gates for preflight; its recipe reruns them when the image is bumped."""
+        if self.gate_reports is None:
+            return
+        document = draft.document
+        self.gate_reports.record(GateRecord(
+            task_spec_digest=spec_digest(document.task), template=draft.instance.template,
+            task_id=draft.instance.task_id, image=document.image.id, image_digest=spec_digest(document.image),
+            pool=draft.envs.shape.pool, snapshot=draft.instance.snapshot.digest, report=report,
+            recipe=gate_recipe(draft, self.recorded(draft)[0]), ran_at=self.clock(), source="authoring"))
 
     def start_gates(self, session_id: str) -> AuthoringSession:
         """Gates take minutes of env time, so they run on their own thread while the session reads running."""
