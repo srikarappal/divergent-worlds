@@ -9,11 +9,19 @@ own thread, one request at a time; requests from all connections run one after
 another because the screen and input are shared. For operator takeover the same
 gates lead to the VNC server on the display, which listens only on a root only
 Unix socket: vsock port 5901 from the host, or a VNC greeting with the token.
+
+The Windows in session helper serves its virtio serial port instead, whose host
+end only the host reaches. The port outlives the host's connections: an empty
+read means no host is connected right now, so the helper reads again shortly;
+a port that fails is opened again.
 """
 
 import hmac
+import io
 import socket
 import threading
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, BinaryIO, Protocol
 
@@ -25,6 +33,8 @@ DEFAULT_VNC_PORT = 5901
 DEFAULT_VNC_SOCKET = Path("/run/rlworld/vnc.sock")
 MAX_GREETING_BYTES = 512
 RELAY_CHUNK_BYTES = 65_536
+SERIAL_IDLE_SECONDS = 0.01
+SERIAL_RETRY_SECONDS = 1.0
 
 
 class RequestHandler(Protocol):
@@ -171,3 +181,33 @@ class TokenServer:
         while True:
             connection, _ = listener.accept()
             threading.Thread(target=self.serve, args=(connection,), daemon=True).start()
+
+
+class SerialPortServer:
+    """Serves the host over a virtio serial port, one request at a time, until stopped."""
+
+    def __init__(self, handler: RequestHandler, port_path: str, opener: Callable[..., BinaryIO] = open,
+                 sleep: Callable[[float], None] = time.sleep) -> None:
+        self.handler = handler
+        self.port_path = port_path
+        self.opener = opener
+        self.sleep = sleep
+        self.lock = threading.Lock()
+        self.stopped = threading.Event()
+
+    def stop(self) -> None:
+        self.stopped.set()
+
+    def serve_port(self) -> None:
+        with self.opener(self.port_path, "r+b", buffering=0) as port:
+            stream = io.BufferedRWPair(port, port)
+            while not self.stopped.is_set():
+                serve_stream(stream, self.handler, self.lock)
+                self.sleep(SERIAL_IDLE_SECONDS)
+
+    def serve_forever(self) -> None:
+        while not self.stopped.is_set():
+            try:
+                self.serve_port()
+            except OSError:
+                self.sleep(SERIAL_RETRY_SECONDS)

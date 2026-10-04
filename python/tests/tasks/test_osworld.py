@@ -431,8 +431,9 @@ def test_an_imported_task_plays_through_the_guest_and_the_reward_pipeline(import
     assert (record.total, record.termination) == (1.0, "success")
     assert [check.name for check in record.checks] == ["osworld_compare_text_file"]
     assert record.side_effect_violations == ()
-    assert [call[0] for call in shell.calls] == ["launch", "probe", "probe"]
-    assert shell.calls[0][1].startswith("xdg-open ") and shell.calls[2][1] == shlex.join(SAVE_COMMAND)
+    assert [call[0] for call in shell.calls] == ["open", "probe", "probe"]
+    assert shell.calls[0][1] == (agent.home / "Desktop" / "notes.txt").resolve()
+    assert shell.calls[2][1] == shlex.join(SAVE_COMMAND)
     untouched, _, _ = play(root)
     assert (untouched.total, untouched.termination) == (0.0, "failure")
     gave_up, _, _ = play(root, edit=GOLD, final_action="give_up")

@@ -2,6 +2,7 @@ import base64
 import hashlib
 import os
 import shlex
+from pathlib import Path
 
 import pytest
 from support.guest_fakes import FakeClock, ScriptedShell, WindowsAppear, build_agent
@@ -12,7 +13,7 @@ from rlworld.guest import GuestFailure
 from rlworld.guest import agent as agent_module
 from rlworld.guest.agent import read_regular_file, window_titled
 from rlworld.guest.protocol import READ_STEP_KINDS, TASK_READS_KEY
-from rlworld.guest.system import user_command_argv, user_probe_argv
+from rlworld.guest.system import UserShell, user_command_argv, user_probe_argv
 from rlworld.worlds.generator import generate_mid_market_company
 
 
@@ -50,8 +51,7 @@ def test_opening_a_file_waits_for_its_window(tmp_path):
     agent = build_agent(tmp_path, shell=shell, accessibility=accessibility, clock=clock)
     agent.handle("inject", {"setup": [{"kind": "file", "path": "Desktop/report.xlsx", "text": "cells"},
                                       {"kind": "open", "path": "Desktop/report.xlsx"}]})
-    target = (agent.home / "Desktop" / "report.xlsx").resolve()
-    assert shell.calls == [("launch", f"xdg-open {shlex.quote(str(target))}")]
+    assert shell.calls == [("open", (agent.home / "Desktop" / "report.xlsx").resolve())]
     assert accessibility.polls == 4
     assert clock.sleeps == [agent_module.WINDOW_POLL_SECONDS] * 3
 
@@ -208,3 +208,21 @@ def test_probes_run_outside_the_login_shell():
     assert user_probe_argv("agent", "which spotify") == [
         "runuser", "-u", "agent", "--", "bash", "--noprofile", "--norc", "-c", "which spotify"]
     assert user_command_argv("agent", "ls")[-2:] == ["-lc", "ls"]
+
+
+class LaunchRecordingShell(UserShell):
+    """The desktop user's shell with its launches recorded instead of started."""
+
+    def __init__(self):
+        super().__init__("agent", "/home/agent")
+        self.launched = []
+
+    def launch(self, command):
+        self.launched.append(command)
+
+
+def test_the_linux_shell_opens_files_in_the_desktops_default_app():
+    shell = LaunchRecordingShell()
+    report = "/home/agent/Q3 report's.xlsx"
+    shell.open_file(Path(report))
+    assert shell.launched == [f"xdg-open {shlex.quote(report)}"]

@@ -60,6 +60,9 @@ class ScriptedShell:
     def launch(self, command):
         self.calls.append(("launch", command))
 
+    def open_file(self, path):
+        self.calls.append(("open", path))
+
 
 class WindowsAppear:
     """No windows for the first polls, then a frame with the given title."""
@@ -91,7 +94,8 @@ class FakeClock:
         self.now += seconds
 
 
-def build_agent(tmp_path, shell=None, accessibility=None, clock=None, owner=None, world_inside_home=False):
+def build_agent(tmp_path, shell=None, accessibility=None, clock=None, owner=None, world_inside_home=False,
+                native=None, integrations=None):
     home = tmp_path / "home"
     home.mkdir(parents=True, exist_ok=True)
     clock = clock or FakeClock()
@@ -100,4 +104,4 @@ def build_agent(tmp_path, shell=None, accessibility=None, clock=None, owner=None
         browser=NoBrowser(), shell=shell or ScriptedShell(), hygiene=QuietHygiene(), home=home,
         world_root=home / "world" if world_inside_home else tmp_path / "world", license_root=tmp_path / "licenses",
         secrets_path=tmp_path / "run" / "episode.env", launchers={"Calc": "libreoffice --calc"}, viewport=VIEWPORT,
-        owner=owner, sleep=clock.sleep, monotonic=clock.monotonic)
+        owner=owner, sleep=clock.sleep, monotonic=clock.monotonic, native=native, integrations=integrations)

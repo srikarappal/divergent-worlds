@@ -15,11 +15,17 @@ dependencies = [
 
 [project.optional-dependencies]
 guest = ["websocket-client>=1.8"]
+windows = [
+    "comtypes>=1.4; sys_platform == 'win32'",
+    "pywin32>=306; sys_platform == 'win32'",
+    "websocket-client>=1.8",
+]
 
 [project.scripts]
 rlworld = "rlworld.cli:main"
 rlworld-export-schema = "rlworld.specs.schema:main"
 rlworld-guest-agent = "rlworld.guest.main:main"
+rlworld-windows-helper = "rlworld.guest.windows_main:main"
 rlworld-build-image = "rlworld.images.builder:main"
 rlworld-experimentd = "rlworld.services.experimentd_main:main"
 rlworld-import-osworld = "rlworld.tasks.osworld:main"
