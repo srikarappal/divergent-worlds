@@ -400,3 +400,63 @@ func TestProbeWindowsMatchTopLevelWindowTitles(t *testing.T) {
 		t.Fatal("UIA windows count too")
 	}
 }
+
+// memoryInStateDriver is a driver whose snapshots keep memory in the state file, as a QEMU clone's do.
+type memoryInStateDriver struct {
+	*fake.Driver
+}
+
+func (driver memoryInStateDriver) Snapshot(ctx context.Context, vmID string, kind vmm.SnapshotKind, statePath,
+	memoryPath string) (vmm.SnapshotRef, error) {
+	written, err := driver.Driver.Snapshot(ctx, vmID, kind, statePath, memoryPath)
+	written.MemoryPath = ""
+	return written, err
+}
+
+func TestARestoredEnvIsCapturedWithItsDisk(t *testing.T) {
+	ctx := context.Background()
+	driver := fake.New()
+	driver.WritesSnapshots = true
+	agent, commands := newSnapshotAgent(t, driver, nil, false, &scriptedGuest{hashes: []string{"a"}})
+	request := startRequest("env_1")
+	request.Resume = true
+	if _, err := agent.Start(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	outputDir := filepath.Join(t.TempDir(), ".world-env_1")
+	captured, err := agent.CaptureSnapshot(ctx, "env_1", outputDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state, _ := os.ReadFile(captured.StatePath); string(state) != "full state of env_1" {
+		t.Fatalf("captured state: %q", state)
+	}
+	overlay := agent.envs["env_1"].overlayPath
+	if !containsFragment(commands.commands, "cp --reflink=auto "+overlay+" "+captured.DiskPath) {
+		t.Fatalf("the disk captured with the memory is the env's overlay: %v", commands.commands)
+	}
+	if agent.envs["env_1"].state != vmm.Paused || captured.VMMVersion != "fake-1" {
+		t.Fatalf("a captured env is paused: %v %+v", agent.envs["env_1"].state, captured)
+	}
+	if _, err := agent.CaptureSnapshot(ctx, "missing", outputDir); !errors.Is(err, ErrUnknownEnv) {
+		t.Fatalf("unknown env: %v", err)
+	}
+	inState, _ := newSnapshotAgent(t, memoryInStateDriver{fake.New()}, nil, false,
+		&scriptedGuest{hashes: []string{"a"}})
+	if _, err := inState.Start(ctx, startRequest("env_2")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := inState.CaptureSnapshot(ctx, "env_2", outputDir); err == nil ||
+		!strings.Contains(err.Error(), "memory into its state") {
+		t.Fatalf("a snapshot without its own memory file: %v", err)
+	}
+	docker := fake.New()
+	docker.DriverName = "docker"
+	containers, _ := newSnapshotAgent(t, docker, nil, false, &scriptedGuest{hashes: []string{"a"}})
+	if _, err := containers.Start(ctx, startRequest("env_3")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := containers.CaptureSnapshot(ctx, "env_3", outputDir); err == nil {
+		t.Fatal("containers keep no snapshot files")
+	}
+}

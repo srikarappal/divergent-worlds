@@ -207,3 +207,39 @@ func hasWindow(observation json.RawMessage, window string) bool {
 	}
 	return false
 }
+
+// CaptureSnapshot writes a full snapshot of a restored env with a copy of the disk captured with that memory, as a
+// world snapshot takes after its world is materialized. Only VMMs whose snapshots keep memory in its own file can
+// be captured; a QEMU clone's private RAM goes into its state, so a new template would have to boot.
+func (agent *Agent) CaptureSnapshot(ctx context.Context, envID, outputDir string) (BuildResult, error) {
+	captured, err := agent.lookup(envID)
+	if err != nil {
+		return BuildResult{}, err
+	}
+	if isolatesItself(agent.driver.Name()) {
+		return BuildResult{}, fmt.Errorf("the %s driver keeps no snapshot files to capture", agent.driver.Name())
+	}
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return BuildResult{}, err
+	}
+	result := BuildResult{StatePath: filepath.Join(outputDir, snapshot.StateFile),
+		MemoryPath: filepath.Join(outputDir, snapshot.MemoryFile), DiskPath: filepath.Join(outputDir, snapshot.DiskFile)}
+	written, err := agent.driver.Snapshot(ctx, envID, vmm.Full, result.StatePath, result.MemoryPath)
+	if err != nil {
+		return BuildResult{}, fmt.Errorf("snapshot %s: %w", envID, err)
+	}
+	agent.setState(envID, vmm.Paused)
+	if written.MemoryPath == "" {
+		return BuildResult{}, fmt.Errorf("the %s driver wrote %s's memory into its state", agent.driver.Name(), envID)
+	}
+	if err := agent.commands.Run(ctx, []string{"cp", "--reflink=auto", captured.overlayPath,
+		result.DiskPath}); err != nil {
+		return BuildResult{}, fmt.Errorf("copy the disk of %s: %w", envID, err)
+	}
+	if versioner, reportsVersion := agent.driver.(vmm.Versioner); reportsVersion {
+		if result.VMMVersion, err = versioner.VMMVersion(ctx, envID); err != nil {
+			return BuildResult{}, err
+		}
+	}
+	return result, nil
+}
