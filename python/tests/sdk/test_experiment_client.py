@@ -20,7 +20,7 @@ OPERATIONS_PATH = Path(__file__).resolve().parents[3] / "schemas" / "api_operati
 OPERATIONS = json.loads(OPERATIONS_PATH.read_text())["operations"]
 PLACEHOLDER_PATTERN = re.compile(r"\{(\w+)\}")
 SAMPLE_VALUES = {"status": "running", "size": "thumbnail", "action": "flag", "item_status": "resolved",
-                 "source": "gates", "kind": "sft"}
+                 "source": "gates", "kind": "sft", "recording_kind": "oracle"}
 ENDPOINT_YAML = """name: byo_judge
 base_url: https://judge.customer.example/v1
 allowed_models: [judge_v1]

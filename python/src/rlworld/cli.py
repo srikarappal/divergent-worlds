@@ -127,6 +127,30 @@ def end_takeover(client: ExperimentClient, arguments: argparse.Namespace) -> Any
     return client.end_takeover(arguments.run_id, arguments.episode_id)
 
 
+def start_authoring(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.start_authoring(arguments.spec_digest, task_index=arguments.task_index)
+
+
+def get_authoring(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.get_authoring(arguments.session_id)
+
+
+def begin_recording(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.begin_recording(arguments.session_id, kind=arguments.kind)
+
+
+def end_recording(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.end_recording(arguments.session_id, arguments.recording_id)
+
+
+def run_authoring_gates(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.run_authoring_gates(arguments.session_id)
+
+
+def submit_authoring(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
+    return client.submit_authoring(arguments.session_id)
+
+
 def analyze_failures(client: ExperimentClient, arguments: argparse.Namespace) -> Any:
     return client.analyze_failures(arguments.run_id)
 
@@ -258,7 +282,8 @@ HANDLERS: dict[str, OperationHandler] = {
     for handler in (save_spec, get_spec, preflight, dry_run, launch, get_experiment, approve_experiment, list_runs,
                     get_run, get_run_spec, control_run, run_events, list_episodes, get_episode, live_wall, get_frame,
                     cohort, get_provenance, get_step_prompt, review_episode, start_takeover, end_takeover,
-                    analyze_failures, get_failures,
+                    start_authoring, get_authoring, begin_recording, end_recording, run_authoring_gates,
+                    submit_authoring, analyze_failures, get_failures,
                     run_report, compare_policy_versions, compare_runs, list_review_items, list_catalog,
                     list_endpoints, register_endpoint, test_endpoint, set_endpoint_key, auth_config, me,
                     list_experiments, file_review_item, update_review_item, calibration, export_run, list_roles,
@@ -352,6 +377,23 @@ def build_parser() -> argparse.ArgumentParser:
         takeover_parser = add_operation(episode_commands, command_name, handler, help_text)
         takeover_parser.add_argument("run_id")
         takeover_parser.add_argument("episode_id")
+
+    authoring = groups.add_parser("authoring", help="author a task: record solutions, run every gate, submit")
+    authoring_commands = authoring.add_subparsers(dest="command", required=True)
+    authoring_start = add_operation(authoring_commands, "start", start_authoring, "start from a saved spec")
+    authoring_start.add_argument("spec_digest")
+    authoring_start.add_argument("--task-index", type=int, default=0)
+    add_operation(authoring_commands, "get", get_authoring, "read a session").add_argument("session_id")
+    record_parser = add_operation(authoring_commands, "record", begin_recording, "drive a fresh dev env through noVNC")
+    record_parser.add_argument("session_id")
+    record_parser.add_argument("--kind", choices=("oracle", "alternative", "near_miss"), default="oracle")
+    stop_parser = add_operation(authoring_commands, "stop", end_recording, "keep the recording, give the env back")
+    stop_parser.add_argument("session_id")
+    stop_parser.add_argument("recording_id")
+    add_operation(authoring_commands, "gates", run_authoring_gates, "run every gate in fresh envs").add_argument(
+        "session_id")
+    add_operation(authoring_commands, "submit", submit_authoring, "submit for human review").add_argument(
+        "session_id")
 
     failures = groups.add_parser("failures", help="label and cluster failures")
     failure_commands = failures.add_subparsers(dest="command", required=True)

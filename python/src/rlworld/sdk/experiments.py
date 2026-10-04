@@ -12,6 +12,7 @@ import httpx
 from rlworld.preflight.preflight import ExperimentPreflight
 from rlworld.services.admin import AuditRecord, DataPolicy
 from rlworld.services.alerts import Alert
+from rlworld.services.authoring_models import AuthoringSession, Recording, RecordingStart
 from rlworld.services.takeover import Demonstration, TakeoverSession
 from rlworld.services.catalogs import CatalogEntry
 from rlworld.services.experiments import DryRun, ExperimentRecord, RunEvent, RunRecord
@@ -162,6 +163,28 @@ class ExperimentClient:
     def end_takeover(self, run_id: str, episode_id: str) -> Demonstration:
         return Demonstration.model_validate(
             self.request("POST", f"/v1/runs/{run_id}/episodes/{episode_id}/takeover/end"))
+
+    def start_authoring(self, spec_digest: str, task_index: int = 0) -> AuthoringSession:
+        body = {"spec_digest": spec_digest, "task_index": task_index}
+        return AuthoringSession.model_validate(self.request("POST", "/v1/authoring", body))
+
+    def get_authoring(self, session_id: str) -> AuthoringSession:
+        return AuthoringSession.model_validate(self.request("GET", f"/v1/authoring/{session_id}"))
+
+    def begin_recording(self, session_id: str, kind: str = "oracle") -> RecordingStart:
+        """The takeover session id in the result is a one time credential for the noVNC relay."""
+        return RecordingStart.model_validate(
+            self.request("POST", f"/v1/authoring/{session_id}/recordings", {"kind": kind}))
+
+    def end_recording(self, session_id: str, recording_id: str) -> Recording:
+        return Recording.model_validate(
+            self.request("POST", f"/v1/authoring/{session_id}/recordings/{recording_id}/end"))
+
+    def run_authoring_gates(self, session_id: str) -> AuthoringSession:
+        return AuthoringSession.model_validate(self.request("POST", f"/v1/authoring/{session_id}/gates"))
+
+    def submit_authoring(self, session_id: str) -> AuthoringSession:
+        return AuthoringSession.model_validate(self.request("POST", f"/v1/authoring/{session_id}/submit"))
 
     def analyze_failures(self, run_id: str) -> FailureAnalysisView:
         return FailureAnalysisView.model_validate(self.request("POST", f"/v1/runs/{run_id}/failures/analyze"))
