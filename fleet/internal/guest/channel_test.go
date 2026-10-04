@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -70,7 +71,12 @@ func (fake *fakeVsock) answer(connection net.Conn) {
 	fake.requests = append(fake.requests, request)
 	reply := fake.replies[request["method"].(string)]
 	fake.mu.Unlock()
-	connection.Write([]byte(strings.ReplaceAll(reply, "ID", "1") + "\n"))
+	connection.Write([]byte(withID(reply, request) + "\n"))
+}
+
+// withID fills a reply template's ID with the request's id.
+func withID(reply string, request map[string]any) string {
+	return strings.ReplaceAll(reply, "ID", strconv.FormatInt(int64(request["id"].(float64)), 10))
 }
 
 func (fake *fakeVsock) close() {
@@ -245,9 +251,13 @@ func (fake *fakeContainerAgent) answer(connection net.Conn) {
 		return
 	}
 	connection.Write([]byte("OK\n"))
-	if _, err := reader.ReadBytes('\n'); err == nil {
-		connection.Write([]byte(`{"id": 1, "result": "hash"}` + "\n"))
+	line, err := reader.ReadBytes('\n')
+	if err != nil {
+		return
 	}
+	var request map[string]any
+	json.Unmarshal(line, &request)
+	connection.Write([]byte(withID(`{"id": ID, "result": "hash"}`, request) + "\n"))
 }
 
 func TestTokenDialerProvesItselfToContainerAgents(t *testing.T) {
@@ -321,4 +331,64 @@ func TestVNCRelaysOpenOverVsockAndTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 	readVNC(t, connection, reader)
+}
+
+// staleStream plays a stream that outlives connections: it still holds a reply to a call that gave up waiting.
+type staleStream struct {
+	directory string
+	listener  net.Listener
+}
+
+func (stream *staleStream) socketPath(string) string {
+	return filepath.Join(stream.directory, "s.sock")
+}
+
+func (stream *staleStream) close() {
+	stream.listener.Close()
+	os.RemoveAll(stream.directory)
+}
+
+func (stream *staleStream) answer() {
+	connection, err := stream.listener.Accept()
+	if err != nil {
+		return
+	}
+	defer connection.Close()
+	line, err := bufio.NewReader(connection).ReadBytes('\n')
+	if err != nil {
+		return
+	}
+	var request map[string]any
+	json.Unmarshal(line, &request)
+	stale := int64(request["id"].(float64)) - 1
+	connection.Write([]byte(`{"id": ` + strconv.FormatInt(stale, 10) + `, "result": {"apps": "stale"}}` + "\n"))
+	connection.Write([]byte(withID(`{"id": ID, "result": {"apps": "fresh"}}`, request) + "\n"))
+}
+
+func TestRepliesToEarlierCallsAreSkipped(t *testing.T) {
+	directory, err := os.MkdirTemp("/tmp", "stale")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream := &staleStream{directory: directory}
+	if stream.listener, err = net.Listen("unix", stream.socketPath("")); err != nil {
+		os.RemoveAll(directory)
+		t.Fatal(err)
+	}
+	t.Cleanup(stream.close)
+	go stream.answer()
+	channel := NewChannel(UnixDialer{SocketPath: stream.socketPath}, nil, NewFilesystemFrames(t.TempDir()),
+		2*time.Second)
+	state, err := channel.Extract(context.Background(), "vm_1", []string{"excel"})
+	if err != nil || string(state) != `{"apps": "fresh"}` {
+		t.Fatalf("extract: %s %v", state, err)
+	}
+}
+
+func TestRequestIDsStartAtRandom(t *testing.T) {
+	first := NewChannel(nil, nil, nil, time.Second).requestIDs.Load()
+	second := NewChannel(nil, nil, nil, time.Second).requestIDs.Load()
+	if first == second || first < 0 || first >= firstRequestIDs {
+		t.Fatalf("first request ids %d and %d", first, second)
+	}
 }

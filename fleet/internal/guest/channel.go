@@ -1,13 +1,19 @@
-// Package guest reaches the Linux guest agent (DESIGN.md sections 6.1 and 6.3).
+// Package guest reaches what answers inside a guest (DESIGN.md sections 6.1 and 6.3): the Linux guest agent, or the
+// in session helper of a Windows guest whose screen, input and clock stay at the hypervisor.
 //
 // Each call dials the guest, finishes a one line handshake, sends one JSON
-// request line and reads one response line. VMs are reached over Firecracker's
-// hybrid vsock: the host socket is asked to connect to the agent's port.
-// Development containers have no vsock, so their agent listens on TCP and only
-// answers a client presenting the container's token, which the policy's shell
-// cannot read. Screenshots come back as bytes; the channel stores them as content
-// addressed blobs and hands the node agent an observation that references them.
-// A second dialer reaches the guest's VNC relay for operator takeover.
+// request line and reads response lines until the one carrying its id; a
+// stream that outlives connections, such as a virtio serial port, may still hold
+// the reply to a call that gave up waiting. Request ids start at a random value
+// so replies from before a restart never match. VMs are reached over
+// Firecracker's hybrid vsock: the host socket is asked to connect to the agent's
+// port. Development containers have no vsock, so their agent listens on TCP and
+// only answers a client presenting the container's token, which the policy's
+// shell cannot read. Windows helpers listen on a virtio serial port whose host
+// end only the host reaches, so they need no handshake. Screenshots come back as
+// bytes; the channel stores them as content addressed blobs and hands the node
+// agent an observation that references them. A second dialer reaches the
+// guest's VNC relay for operator takeover.
 package guest
 
 import (
@@ -16,11 +22,15 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math/rand/v2"
 	"net"
 	"strings"
 	"sync/atomic"
 	"time"
 )
+
+// firstRequestIDs bounds the random first request id, so ids stay exact as JSON numbers.
+const firstRequestIDs = 1 << 52
 
 // SocketPath names the host side vsock socket of one VM.
 type SocketPath func(vmID string) string
@@ -147,7 +157,9 @@ type Channel struct {
 
 // NewChannel returns a channel; calls without a context deadline give up after timeout.
 func NewChannel(dialer, vncDialer Dialer, frames FrameStore, timeout time.Duration) *Channel {
-	return &Channel{dialer: dialer, vncDialer: vncDialer, frames: frames, timeout: timeout}
+	channel := &Channel{dialer: dialer, vncDialer: vncDialer, frames: frames, timeout: timeout}
+	channel.requestIDs.Store(rand.Int64N(firstRequestIDs))
+	return channel
 }
 
 // DialVNC opens the guest's VNC relay for a takeover; the connection has no deadline because teleop is open ended.
@@ -173,25 +185,31 @@ func (channel *Channel) call(ctx context.Context, vmID, method string, params an
 		return nil, err
 	}
 	defer connection.Close()
-	encoded, err := json.Marshal(request{ID: channel.requestIDs.Add(1), Method: method, Params: params})
+	requestID := channel.requestIDs.Add(1)
+	encoded, err := json.Marshal(request{ID: requestID, Method: method, Params: params})
 	if err != nil {
 		return nil, err
 	}
 	if _, err := connection.Write(append(encoded, '\n')); err != nil {
 		return nil, err
 	}
-	line, err := reader.ReadBytes('\n')
-	if err != nil {
-		return nil, fmt.Errorf("read %s reply from %s: %w", method, vmID, err)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			return nil, fmt.Errorf("read %s reply from %s: %w", method, vmID, err)
+		}
+		var reply response
+		if err := json.Unmarshal(line, &reply); err != nil {
+			return nil, fmt.Errorf("decode %s reply from %s: %w", method, vmID, err)
+		}
+		if reply.ID != requestID {
+			continue
+		}
+		if reply.Error != nil {
+			return nil, reply.Error
+		}
+		return reply.Result, nil
 	}
-	var reply response
-	if err := json.Unmarshal(line, &reply); err != nil {
-		return nil, fmt.Errorf("decode %s reply from %s: %w", method, vmID, err)
-	}
-	if reply.Error != nil {
-		return nil, reply.Error
-	}
-	return reply.Result, nil
 }
 
 // Prepare runs clone hygiene before a turn: the world clock always, fresh entropy once after a restore.
