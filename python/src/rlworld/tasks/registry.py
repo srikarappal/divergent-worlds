@@ -12,8 +12,11 @@ image. When fleetd gave the run's world a world snapshot, because it loads
 slowly or differently each time, instances restore from it and inject only
 what their task changes. A task suite, such as an imported public benchmark,
 hands out its fixed tasks in order and runs only as eval, since training must
-not overlap public benchmarks. Instances also carry the scripted events of
-their world that land in the run's apps and the colleagues who answer in chat.
+not overlap public benchmarks. For the same reason a training run's provider
+screens every task it generates and never registers one its screen blocks,
+such as a near duplicate of a public benchmark task. Instances also carry the
+scripted events of their world that land in the run's apps and the colleagues
+who answer in chat.
 """
 
 import tempfile
@@ -91,6 +94,10 @@ class FleetSnapshots:
 class WorldIndex(Protocol):
     def prepare_world(self, base_digest: str, world_digest: str, payload: dict[str, Any], apps: list[str], pool: str,
                       memory_mib: int, cpu_millicores: int, vcpus: int) -> dict[str, Any]: ...
+
+
+class TaskScreen(Protocol):
+    def blocked(self, task: GeneratedTask) -> str | None: ...
 
 
 class WorldPreparer(Protocol):
@@ -226,7 +233,8 @@ class RegistryTaskProvider:
     """One run's view of the registry; safe to call from the worker's group threads."""
 
     def __init__(self, registry: TaskRegistry, document: SpecDocument, snapshots: SnapshotResolver,
-                 max_tasks_per_difficulty: int = 256, worlds: WorldPreparer | None = None) -> None:
+                 max_tasks_per_difficulty: int = 256, worlds: WorldPreparer | None = None,
+                 screen: TaskScreen | None = None) -> None:
         problems = registry.problems(document)
         if problems:
             raise TaskGenerationError("; ".join(problems))
@@ -245,22 +253,45 @@ class RegistryTaskProvider:
         self.tasks_by_difficulty: dict[str, int] = {}
         self.instances: dict[str, TaskInstance] = {}
         self.generated: dict[str, GeneratedTask] = {}
+        self.screen = screen if document.task.split == "train" else None
+        self.blocked: dict[str, str] = {}
         run = document.run
         self.add_tasks(document.task.difficulty, run.tasks_per_batch * (1 if run.type == "rl" else run.batches))
+        if not self.tasks:
+            reasons = "; ".join(sorted(set(self.blocked.values()))[:3])
+            raise TaskGenerationError(f"every task this run would train on is blocked: {reasons}")
         self.instance(next(iter(self.tasks.values())).candidate)
 
     def add_tasks(self, difficulty: DifficultySpec, count: int) -> None:
         """New seeds continue where the difficulty's earlier tasks stopped, so ids never repeat or shift; a suite's
-        seeds are its task indexes."""
+        seeds are its task indexes. A blocked task is skipped and the next seed takes its place."""
         key = difficulty_key(difficulty)
-        start = self.tasks_by_difficulty.get(key, 0)
-        stop = min(start + count, self.max_tasks_per_difficulty)
-        for index in range(start, stop):
+        index = self.tasks_by_difficulty.get(key, 0)
+        added = 0
+        while added < count and index < self.max_tasks_per_difficulty:
             seed = index if self.suite else task_seed(self.document.world.seed, self.template.name, difficulty, index)
             task_id = task_identifier(self.template, difficulty, self.world_digest, seed)
+            index += 1
+            if self.screened_out(task_id, difficulty, seed):
+                continue
             self.tasks.setdefault(task_id, RegisteredTask(CandidateTask(task_id, self.template.name, difficulty),
                                                           seed))
-        self.tasks_by_difficulty[key] = max(start, stop)
+            added += 1
+        self.tasks_by_difficulty[key] = index
+
+    def screened_out(self, task_id: str, difficulty: DifficultySpec, seed: int) -> bool:
+        """Training tasks are generated as they are added so the screen sees their instruction."""
+        if self.screen is None:
+            return False
+        if task_id in self.blocked:
+            return True
+        generated = self.generated.get(task_id) or self.template.generate(self.world, difficulty, seed)
+        reason = self.screen.blocked(generated)
+        if reason is not None:
+            self.blocked[task_id] = reason
+            return True
+        self.generated[task_id] = generated
+        return False
 
     def candidates(self) -> list[CandidateTask]:
         with self.lock:

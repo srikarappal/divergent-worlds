@@ -8,7 +8,9 @@ stores, review, admin, alerts, takeovers and task authoring onto one app; plays
 eval and data runs, dry runs and the strong agent with platform hosted rollout
 workers; launches RL trainers; pins and prefetches each run's snapshot; and
 reruns task gates when an image's snapshot changes. An imported OSWorld suite,
-when the config names one, registers beside the built in task templates.
+when the config names one, registers beside the built in task templates. The
+splits section holds out apps, sites, templates and world seeds for eval and
+names the public benchmarks training tasks must not overlap.
 """
 
 import argparse
@@ -72,6 +74,13 @@ from rlworld.services.trainer_launch import (
 from rlworld.services.trajectory_views import TrajectoryViews
 from rlworld.specs.models import EndpointSpec
 from rlworld.tasks.osworld import OSWorldSuite
+from rlworld.tasks.splits import (
+    DEFAULT_OVERLAP_THRESHOLD,
+    BenchmarkScreen,
+    HoldoutPolicy,
+    OverlapIndex,
+    load_benchmark,
+)
 from rlworld.tasks.registry import (
     FleetSnapshots,
     FleetWorlds,
@@ -180,6 +189,14 @@ class EntitlementsConfig(StrictModel):
     signing_key_env: str = "RLWORLD_SESSION_SIGNING_KEY"
 
 
+class SplitsConfig(StrictModel):
+    """What eval holds out and the public benchmark task lists training is screened against, by benchmark name."""
+
+    holdout: HoldoutPolicy = Field(default_factory=HoldoutPolicy)
+    public_benchmarks: dict[str, Path] = Field(default_factory=dict)
+    overlap_threshold: float = Field(default=DEFAULT_OVERLAP_THRESHOLD, gt=0.0, le=1.0)
+
+
 class ExperimentdConfig(StrictModel):
     host: str = "127.0.0.1"
     port: int = Field(default=8080, ge=0, le=65_535)
@@ -205,6 +222,7 @@ class ExperimentdConfig(StrictModel):
     gate_judge: ModelConfig | None = None
     failure_labeler: ModelConfig | None = None
     entitlements: EntitlementsConfig | None = None
+    splits: SplitsConfig = Field(default_factory=SplitsConfig)
     gate_rerun_interval_seconds: PositiveFloat = 300.0
     retention_interval_hours: PositiveFloat = 24.0
 
@@ -215,7 +233,16 @@ def load_experimentd_config(config_path: Path) -> ExperimentdConfig:
     for field_name in CONFIG_PATH_FIELDS:
         if raw_config.get(field_name):
             raw_config[field_name] = str(config_path.parent / raw_config[field_name])
+    benchmarks = (raw_config.get("splits") or {}).get("public_benchmarks") or {}
+    for name, benchmark_path in benchmarks.items():
+        benchmarks[name] = str(config_path.parent / benchmark_path)
     return ExperimentdConfig.model_validate(raw_config)
+
+
+def benchmark_screen(splits: SplitsConfig) -> BenchmarkScreen | None:
+    """Training tasks are screened against every public benchmark the config names."""
+    tasks = [task for name, path in sorted(splits.public_benchmarks.items()) for task in load_benchmark(name, path)]
+    return BenchmarkScreen(OverlapIndex(tasks, splits.overlap_threshold)) if tasks else None
 
 
 def required_secret(environment: Mapping[str, str], variable_name: str) -> str:
@@ -370,11 +397,12 @@ def build_experimentd(config: ExperimentdConfig, environment: Mapping[str, str],
                                         if endpoint.provider_kind == "frontier")})
     preflight_context = PreflightContext(verifier_registry=verifier_registry, rubric_library=rubric_library,
                                          gate_reports=gate_reports, seat_pools=seat_pools, endpoint_probe=probe,
-                                         frontier_endpoints=frontier)
+                                         frontier_endpoints=frontier, holdout=config.splits.holdout)
     simulator = (SimulatorEndpoint(config.user_simulator.endpoint, config.user_simulator.model)
                  if config.user_simulator else None)
     workers = PlatformWorkers(fleet, gateway, trajectory_store, task_registry, snapshots, shapes, default_tenant,
-                              judge_secret, rubric_library, simulator, broker, meter, worlds=worlds)
+                              judge_secret, rubric_library, simulator, broker, meter, worlds=worlds,
+                              screen=benchmark_screen(config.splits))
     executor = PlatformRunExecutor(workers)
     launcher = TrainerLauncher(trainer_templates(config), launch_runner or SubprocessCommandRunner(),
                                config.state_dir / "launches")

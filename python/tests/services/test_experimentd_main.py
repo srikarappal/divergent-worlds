@@ -30,6 +30,7 @@ EXAMPLES = Path(__file__).resolve().parents[3] / "examples"
 LAPTOP = EXAMPLES / "experimentd" / "laptop.yaml"
 REFERENCE_SPEC = EXAMPLES / "specs" / "reconcile_invoices_linux.yaml"
 OSWORLD_SPEC = EXAMPLES / "specs" / "suite_osworld_eval.yaml"
+SWEEP_SPEC = EXAMPLES / "specs" / "recon_difficulty_sweep.yaml"
 SECRETS = {"RLWORLD_RUN_TOKEN_SECRET": "run token secret", "RLWORLD_JUDGE_SECRET": "judge secret"}
 SNAPSHOT_STORE_FLEET_DIGEST = "sha256:" + "5e" * 32
 WORLD_SNAPSHOT_DIGEST = "sha256:" + "3c" * 32
@@ -181,6 +182,33 @@ def test_a_snapshot_store_turns_on_pins_prefetch_world_snapshots_and_gate_reruns
     injected = [call[2] for call in fleet.calls_named("inject")]
     assert injected and all(len(payload["world"]["emails"]) < 10 for payload in injected)
     assert experimentd.gate_reruns.poll() == []
+
+
+def test_splits_hold_out_eval_items_and_screen_training_against_public_benchmarks(tmp_path):
+    config_path = tmp_path / "config" / "experimentd.yaml"
+    config_path.parent.mkdir()
+    (config_path.parent / "webarena.json").write_text(
+        '[{"task_id": 7, "intent": "What is the top-1 best selling product in 2022"}]')
+    payload = load_experimentd_config(LAPTOP).model_dump(mode="json")
+    payload.update({"state_dir": str(tmp_path / "state"), "object_store_dir": str(tmp_path / "objects"),
+                    "endpoints_file": str(LAPTOP.parent / "endpoints.yaml"),
+                    "splits": {"holdout": {"templates": ["tasks.finance.reconcile_invoices"]},
+                               "public_benchmarks": {"webarena": "webarena.json"}, "overlap_threshold": 0.6}})
+    config_path.write_text(yaml.safe_dump(payload))
+    config = load_experimentd_config(config_path)
+    assert config.splits.public_benchmarks == {"webarena": config_path.parent / "webarena.json"}
+    experimentd = build_experimentd(config, SECRETS, fleet=FakeFleet(), transport=ScriptedTransport(),
+                                    launch_runner=RecordingLaunches())
+    screen = experimentd.workers.screen
+    assert screen.index.threshold == 0.6 and [task.task_id for task in screen.index.tasks] == ["7"]
+    client = experimentd.app.test_client()
+    digest = client.post("/v1/specs", data=SWEEP_SPEC.read_text(), content_type="application/yaml").get_json()[
+        "digest"]
+    points = client.post(f"/v1/specs/{digest}/preflight").get_json()["points"].values()
+    assert all("holdout_overlap" in [issue["code"] for issue in point["issues"]] for point in points)
+    plain = build_experimentd(laptop_config(tmp_path / "plain"), SECRETS, fleet=FakeFleet(),
+                              transport=ScriptedTransport())
+    assert plain.workers.screen is None
 
 
 def notes_suite(root):

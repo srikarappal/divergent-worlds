@@ -144,13 +144,27 @@ def test_a_worker_draws_its_tasks_from_the_registry(example_payload):
     document = parse_spec_document(payload)
     snapshots = StaticSnapshots({spec_digest(document.image): SnapshotSource("sha256:s", "", "", "")})
     meter = UsageMeter()
+    screen = NothingBlocked()
     workers = PlatformWorkers(FakeFleet(), ScriptedGateway(), TrajectoryStore(InMemoryObjectStore()),
                               default_task_registry(), snapshots, {document.image.pool.vmm: SHAPE}, tenant_of,
-                              b"judge nonce secret", meter=meter, control="the experiment service")
+                              b"judge nonce secret", meter=meter, control="the experiment service", screen=screen)
     worker = workers("run_3", document)
     assert isinstance(worker.task_provider, RegistryTaskProvider) and worker.control == "the experiment service"
     assert worker.meter is meter and worker.run_id == "run_3"
     assert worker.task_provider.instance(worker.task_provider.candidates()[0]).snapshot.digest == "sha256:s"
+    assert document.task.split == "train" and worker.task_provider.screen is screen
+    assert screen.screened == len(worker.task_provider.candidates())
+
+
+class NothingBlocked:
+    """A training screen that counts what it saw and blocks nothing."""
+
+    def __init__(self):
+        self.screened = 0
+
+    def blocked(self, task):
+        self.screened += 1
+        return None
 
 
 def test_the_strong_agent_plays_each_try_in_a_fresh_env(example_payload):

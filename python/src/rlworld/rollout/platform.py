@@ -7,6 +7,7 @@ gateway in the run's action format, a reward service with the run's judge when
 the task has a rubric, the user simulator when the task asks for one, the
 same simulator stack for colleagues who answer in chat and entitlements for
 the image's licenses. It leases envs of the pool that serves the run's image.
+Training runs screen their tasks, so none nearly duplicates a public benchmark.
 """
 
 import itertools
@@ -31,7 +32,7 @@ from rlworld.services.reward_service import RewardService
 from rlworld.specs.document import SpecDocument
 from rlworld.specs.models import EndpointSpec
 from rlworld.tasks.gates import SolutionAttempt
-from rlworld.tasks.registry import RegistryTaskProvider, SnapshotResolver, TaskRegistry, WorldPreparer
+from rlworld.tasks.registry import RegistryTaskProvider, SnapshotResolver, TaskRegistry, TaskScreen, WorldPreparer
 from rlworld.trajectories.records import EpisodeRecord
 from rlworld.trajectories.trajectory_store import TrajectoryStore
 
@@ -71,7 +72,7 @@ class PlatformWorkers:
                  tenants: Callable[[str], str], judge_secret: bytes, rubric_library: RubricLibrary | None = None,
                  user_simulator: SimulatorEndpoint | None = None, entitlements: EntitlementSource | None = None,
                  meter: UsageMeter | None = None, control: RunControl | None = None,
-                 worlds: WorldPreparer | None = None) -> None:
+                 worlds: WorldPreparer | None = None, screen: TaskScreen | None = None) -> None:
         self.fleet = fleet
         self.gateway = gateway
         self.trajectory_store = trajectory_store
@@ -86,6 +87,7 @@ class PlatformWorkers:
         self.meter = meter
         self.control = control
         self.worlds = worlds
+        self.screen = screen
 
     def judge(self, run_id: str, document: SpecDocument) -> JudgeTier | None:
         """The run's judge grades tasks with a rubric; the rest are graded by verifiers alone."""
@@ -116,7 +118,8 @@ class PlatformWorkers:
         return GroupRunner(self.fleet, episodes, lease, self.entitlements)
 
     def __call__(self, run_id: str, document: SpecDocument) -> RolloutWorker:
-        provider = RegistryTaskProvider(self.registry, document, self.snapshots, worlds=self.worlds)
+        provider = RegistryTaskProvider(self.registry, document, self.snapshots, worlds=self.worlds,
+                                        screen=self.screen)
         return RolloutWorker(run_id, document, self.group_runner(run_id, document), provider, control=self.control,
                              meter=self.meter)
 
