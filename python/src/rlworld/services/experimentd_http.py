@@ -38,6 +38,7 @@ from rlworld.services.experiments import (
     LaunchBlockedError,
     UnknownRecordError,
 )
+from rlworld.services.metrics import METRICS_CONTENT_TYPE, MetricsRegistry
 from rlworld.services.retention import RetentionSweeper
 from rlworld.services.takeover import TakeoverError, TakeoverService
 from rlworld.services.review import (
@@ -66,8 +67,9 @@ RETENTION_KEY = "rlworld_retention"
 ALERTS_KEY = "rlworld_alerts"
 TAKEOVER_KEY = "rlworld_takeover"
 AUTHORING_KEY = "rlworld_authoring"
+METRICS_KEY = "rlworld_metrics"
 ALERT_FILTERS = ("run_id", "experiment_id", "status")
-PUBLIC_RULES = frozenset({"/healthz", "/v1/auth/config"})
+PUBLIC_RULES = frozenset({"/healthz", "/metrics", "/v1/auth/config"})
 FRAME_RULE = "/v1/frames/<frame_digest>"
 RUN_TOKEN_RULES = frozenset({"/v1/runs/<run_id>/spend", "/v1/runs/<run_id>/metrics", "/v1/runs/<run_id>/finish",
                              "/v1/run_tokens/verify"})
@@ -251,6 +253,12 @@ def forbidden(error: ForbiddenError):
 
 def health():
     return jsonify({"status": "ok"})
+
+
+def prometheus_metrics():
+    """Prometheus scrapes the platform health signals experimentd owns."""
+    registry: MetricsRegistry = configured(METRICS_KEY, "metrics")
+    return Response(registry.render(), content_type=METRICS_CONTENT_TYPE)
 
 
 def save_spec():
@@ -648,6 +656,7 @@ def verify_token():
 
 ROUTES = (
     ("GET", "/healthz", health),
+    ("GET", "/metrics", prometheus_metrics),
     ("GET", "/v1/auth/config", auth_config),
     ("GET", "/v1/me", me),
     ("POST", "/v1/specs", save_spec),
@@ -741,7 +750,8 @@ def create_app(experiment_service: ExperimentService, poll_seconds: float = 1.0,
                retention_sweeper: RetentionSweeper | None = None,
                alert_monitor: AlertMonitor | None = None,
                takeover_service: TakeoverService | None = None,
-               authoring_service: AuthoringService | None = None) -> Flask:
+               authoring_service: AuthoringService | None = None,
+               metrics_registry: MetricsRegistry | None = None) -> Flask:
     app = Flask("experimentd")
     app.extensions[SERVICE_KEY] = experiment_service
     app.extensions[POLL_KEY] = (poll_seconds, sleep)
@@ -757,6 +767,7 @@ def create_app(experiment_service: ExperimentService, poll_seconds: float = 1.0,
     app.extensions[ALERTS_KEY] = alert_monitor
     app.extensions[TAKEOVER_KEY] = takeover_service
     app.extensions[AUTHORING_KEY] = authoring_service
+    app.extensions[METRICS_KEY] = metrics_registry
     app.before_request(authenticate)
     app.after_request(record_audit)
     for method, rule, view_function in ROUTES:

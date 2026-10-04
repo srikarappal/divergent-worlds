@@ -10,7 +10,8 @@ workers; launches RL trainers; pins and prefetches each run's snapshot; and
 reruns task gates when an image's snapshot changes. An imported OSWorld suite,
 when the config names one, registers beside the built in task templates. The
 splits section holds out apps, sites, templates and world seeds for eval and
-names the public benchmarks training tasks must not overlap.
+names the public benchmarks training tasks must not overlap. /metrics serves
+the platform health signals experimentd owns to Prometheus.
 """
 
 import argparse
@@ -60,6 +61,7 @@ from rlworld.services.experimentd_http import create_app
 from rlworld.services.experiments import ExperimentService
 from rlworld.services.gate_reports import GateReports
 from rlworld.services.gate_reruns import GateReruns
+from rlworld.services.metrics import PlatformMetrics
 from rlworld.services.retention import RetentionSweeper
 from rlworld.services.review import ReviewService
 from rlworld.services.run_snapshots import RunSnapshots
@@ -283,6 +285,7 @@ class Experimentd:
     gate_reports: GateReports
     gate_reruns: GateReruns | None
     retention_sweeper: RetentionSweeper
+    metrics: PlatformMetrics
     jobs: tuple[BackgroundJob, ...]
 
 
@@ -373,7 +376,8 @@ def build_experimentd(config: ExperimentdConfig, environment: Mapping[str, str],
     views = TrajectoryViews(trajectory_store)
     registry = load_endpoint_registry(config.endpoints_file) if config.endpoints_file else EndpointRegistry([])
     vault = secret_vault(config, environment, http_client)
-    meter = UsageMeter()
+    metrics = PlatformMetrics()
+    meter = UsageMeter(listeners=(metrics,))
     policies = DataPolicyStore()
     transport = transport or OpenAICompatibleTransport(httpx.Client(timeout=GATEWAY_TIMEOUT_SECONDS),
                                                        BlobImageResolver(object_store))
@@ -402,7 +406,7 @@ def build_experimentd(config: ExperimentdConfig, environment: Mapping[str, str],
                  if config.user_simulator else None)
     workers = PlatformWorkers(fleet, gateway, trajectory_store, task_registry, snapshots, shapes, default_tenant,
                               judge_secret, rubric_library, simulator, broker, meter, worlds=worlds,
-                              screen=benchmark_screen(config.splits))
+                              screen=benchmark_screen(config.splits), metrics=metrics)
     executor = PlatformRunExecutor(workers)
     launcher = TrainerLauncher(trainer_templates(config), launch_runner or SubprocessCommandRunner(),
                                config.state_dir / "launches")
@@ -413,10 +417,11 @@ def build_experimentd(config: ExperimentdConfig, environment: Mapping[str, str],
     # The workers and the policy store serve the experiment service they are built for, so it is set on them now.
     workers.control, workers.tenants = experiment_service, experiment_service.tenant_of_run
     policies.tenant_of_run = experiment_service.tenant_of_run
+    metrics.entitlements, metrics.runs = broker, experiment_service
     catalogs = CatalogService(experiment_service.documents, verifier_registry, rubric_library, registry)
     labeler = (LlmFailureLabeler(GatewayJudgeClient(gateway, config.failure_labeler.endpoint),
                                  config.failure_labeler.model, judge_secret) if config.failure_labeler else None)
-    review = ReviewService(views, labeler)
+    review = ReviewService(views, labeler, metrics=metrics)
     retention = RetentionSweeper(views, policies)
     alerts = AlertMonitor(experiment_service, views, review, alert_channels(config, environment, http_client),
                           console_url=config.alerts.console_url)
@@ -432,7 +437,8 @@ def build_experimentd(config: ExperimentdConfig, environment: Mapping[str, str],
                      review_service=review, auth=platform_auth(config, environment, http_client),
                      audit_log_store=PlatformAuditLog(), data_policy_store=policies, pool_status_source=broker,
                      retention_sweeper=retention, alert_monitor=alerts,
-                     takeover_service=TakeoverService(fleet, trajectory_store), authoring_service=authoring)
+                     takeover_service=TakeoverService(fleet, trajectory_store), authoring_service=authoring,
+                     metrics_registry=metrics.registry)
     jobs = [BackgroundJob("alerts", alerts.check, config.alerts.interval_seconds),
             BackgroundJob("retention", retention.sweep, config.retention_interval_hours * 3600)]
     if reruns is not None:
@@ -440,7 +446,7 @@ def build_experimentd(config: ExperimentdConfig, environment: Mapping[str, str],
     return Experimentd(app=app, experiment_service=experiment_service, executor=executor, workers=workers,
                        gateway=gateway, meter=meter, trajectory_store=trajectory_store, review_service=review,
                        alert_monitor=alerts, authoring_service=authoring, gate_reports=gate_reports,
-                       gate_reruns=reruns, retention_sweeper=retention, jobs=tuple(jobs))
+                       gate_reruns=reruns, retention_sweeper=retention, metrics=metrics, jobs=tuple(jobs))
 
 
 def judge_tier(config: ExperimentdConfig, gateway: ModelGateway, rubric_library: RubricLibrary | None,

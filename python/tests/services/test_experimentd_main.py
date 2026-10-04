@@ -1,15 +1,23 @@
 import threading
-from pathlib import Path
 
 import httpx
 import pytest
 import yaml
 from pydantic import ValidationError
+from support.experimentd_fakes import (
+    EXAMPLES,
+    LAPTOP,
+    REFERENCE_SPEC,
+    SECRETS,
+    RecordingLaunches,
+    ScriptedTransport,
+    laptop_config,
+    small_reference_spec,
+)
 from support.rollout_fakes import FakeFleet
 from werkzeug.serving import make_server
 
 from rlworld.gateway.config import load_endpoint_registry
-from rlworld.gateway.openai_compatible import parse_response
 from rlworld.gateway.secrets import DevelopmentVault, VaultSecretStore
 from rlworld.images.linux import dev_image_tag
 from rlworld.services.experimentd_main import (
@@ -22,42 +30,14 @@ from rlworld.services.experimentd_main import (
     run_job,
     serve,
 )
-from rlworld.specs import dump_spec_document, load_spec_document, parse_spec_document, spec_digest
+from rlworld.specs import load_spec_document, spec_digest
 from rlworld.tasks.osworld import TEMPLATE_NAME, ImportedSuite, SuiteAssets, SuiteTask, TaskReads, save_suite
 from rlworld.tasks.osworld_evaluation import Evaluation, Getter, MetricCall
 
-EXAMPLES = Path(__file__).resolve().parents[3] / "examples"
-LAPTOP = EXAMPLES / "experimentd" / "laptop.yaml"
-REFERENCE_SPEC = EXAMPLES / "specs" / "reconcile_invoices_linux.yaml"
 OSWORLD_SPEC = EXAMPLES / "specs" / "suite_osworld_eval.yaml"
 SWEEP_SPEC = EXAMPLES / "specs" / "recon_difficulty_sweep.yaml"
-SECRETS = {"RLWORLD_RUN_TOKEN_SECRET": "run token secret", "RLWORLD_JUDGE_SECRET": "judge secret"}
 SNAPSHOT_STORE_FLEET_DIGEST = "sha256:" + "5e" * 32
 WORLD_SNAPSHOT_DIGEST = "sha256:" + "3c" * 32
-
-
-class ScriptedTransport:
-    """An OpenAI compatible endpoint that always finishes at once and answers probes."""
-
-    def __init__(self):
-        self.requests = []
-        self.lock = threading.Lock()
-
-    def send(self, endpoint, api_key, request):
-        with self.lock:
-            self.requests.append((endpoint.name, request))
-        return parse_response({"choices": [{"message": {"content": "Action: finished()"}, "finish_reason": "stop"}],
-                               "usage": {"prompt_tokens": 50, "completion_tokens": 3}, "model": request.model},
-                              request.model)
-
-
-class RecordingLaunches:
-    def __init__(self):
-        self.submitted = []
-
-    def run(self, argv, working_directory):
-        self.submitted.append(argv)
-        return "job submitted"
 
 
 class SnapshotStoreFleet(FakeFleet):
@@ -84,20 +64,6 @@ class SnapshotStoreFleet(FakeFleet):
     def prepare_world(self, base_digest, world_digest, payload, apps, pool, memory_mib, cpu_millicores, vcpus):
         """This world loads slowly, so fleetd snapshotted it."""
         return {"base": base_digest, "world": world_digest, "snapshot": WORLD_SNAPSHOT_DIGEST}
-
-
-def laptop_config(tmp_path, **changes):
-    """The laptop example with its stores under tmp_path and any changes validated like the file would be."""
-    config = load_experimentd_config(LAPTOP)
-    return ExperimentdConfig.model_validate({**config.model_dump(), "state_dir": tmp_path / "state",
-                                             "object_store_dir": tmp_path / "objects", **changes})
-
-
-def small_reference_spec():
-    payload = yaml.safe_load(REFERENCE_SPEC.read_text())
-    payload["world"]["size"] = {"employees": 6, "customers": 6, "invoices_per_customer": 3, "emails_per_person": 2}
-    payload["run"]["tasks_per_batch"] = 2
-    return dump_spec_document(parse_spec_document(payload))
 
 
 def test_the_laptop_example_pairs_with_the_dev_backend_and_the_reference_spec():
@@ -162,6 +128,42 @@ def test_experimentd_plays_an_eval_run_from_spec_to_episodes(tmp_path):
     assert {job.name for job in experimentd.jobs} == {"alerts", "retention"}
     catalog = client.get("/v1/catalogs/task_templates").get_json()
     assert catalog["kind"] == "task_templates"
+
+
+def scraped(client):
+    response = client.get("/metrics")
+    assert response.status_code == 200 and response.content_type.startswith("text/plain; version=0.0.4")
+    samples = {}
+    for line in response.get_data(as_text=True).splitlines():
+        if line and not line.startswith("#"):
+            key, _, value = line.rpartition(" ")
+            samples[key] = float(value)
+    return samples
+
+
+def test_metrics_follow_an_eval_run(tmp_path):
+    experimentd = build_experimentd(laptop_config(tmp_path), SECRETS, fleet=FakeFleet(), transport=ScriptedTransport(),
+                                    launch_runner=RecordingLaunches())
+    client = experimentd.app.test_client()
+    digest = client.post("/v1/specs", data=small_reference_spec(), content_type="application/yaml").get_json()[
+        "digest"]
+    run_id = client.post(f"/v1/specs/{digest}/launch", json={"budget_usd": 10.0}).get_json()["run_ids"][0]
+    assert experimentd.executor.wait(run_id, timeout_seconds=120)
+    samples = scraped(client)
+    assert samples['rlworld_episodes_total{image="noble_calc_v1",termination="failure"}'] == 2
+    assert samples['rlworld_app_episodes_total{app="mail",termination="failure"}'] == 2
+    assert samples['rlworld_gateway_calls_total{endpoint="local_policy",purpose="policy",outcome="ok"}'] >= 2
+    assert samples['rlworld_gateway_call_seconds_count{endpoint="local_policy",purpose="policy"}'] >= 2
+
+
+def test_metrics_need_no_sign_in(tmp_path):
+    config = laptop_config(tmp_path, oidc={"issuer": "https://sso.example.com/realms/platform",
+                                           "audience": "rlworld", "client_id": "console"})
+    experimentd = build_experimentd(config, {**SECRETS, "RLWORLD_FRAME_GRANT_SECRET": "grants"}, fleet=FakeFleet(),
+                                    transport=ScriptedTransport())
+    client = experimentd.app.test_client()
+    assert client.get("/v1/runs").status_code == 401
+    assert "rlworld_seats_in_use" in client.get("/metrics").get_data(as_text=True)
 
 
 def test_a_snapshot_store_turns_on_pins_prefetch_world_snapshots_and_gate_reruns(tmp_path):
