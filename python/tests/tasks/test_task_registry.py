@@ -14,7 +14,7 @@ from support.experiment_fakes import eval_payload
 from rlworld.actions.models import DoneAction, ExecAction
 from rlworld.rewards.records import EpisodeOutcome
 from rlworld.rewards.verifiers import VerifierContext
-from rlworld.sdk.client import SnapshotSource
+from rlworld.sdk.client import SnapshotNotFoundError, SnapshotSource
 from rlworld.specs import load_spec_document, parse_spec_document, spec_digest
 from rlworld.specs.models import DifficultySpec
 from rlworld.tasks import GateInputs, PassRateTracker, SolutionAttempt, TaskGateRunner
@@ -22,6 +22,7 @@ from rlworld.tasks.curriculum import difficulty_key
 from rlworld.tasks.finance import SUMMARY_VERIFIER, ReconcileInvoices, oracle_script
 from rlworld.tasks.generators import TaskGenerationError
 from rlworld.tasks.registry import (
+    FleetSnapshots,
     RegistryTaskProvider,
     StaticSnapshots,
     UnknownSnapshotError,
@@ -249,3 +250,32 @@ def test_the_linux_example_runs_the_reference_task():
     instance = provider.instance(provider.candidates()[0])
     assert len(provider.candidates()) == 4 and instance.ground_truth["summary_states_totals"]
     assert "Calc" not in instance.setup_payload.get("open_windows", [])
+
+
+class SnapshotIndexStub:
+    """fleetd's snapshot index: the current snapshot per image digest and pool."""
+
+    def __init__(self, currents):
+        self.currents = currents
+        self.asked = []
+
+    def current_snapshot(self, image_digest, pool):
+        self.asked.append((image_digest, pool))
+        if (image_digest, pool) not in self.currents:
+            raise SnapshotNotFoundError(404, "unknown_snapshot", "no current snapshot")
+        return {"image_digest": image_digest, "pool": pool, "snapshot": self.currents[(image_digest, pool)]}
+
+
+def test_fleet_snapshots_name_the_current_snapshot_for_hosts_to_pull(example_payload):
+    document = parse_spec_document(reconcile_payload(example_payload))
+    vmm = document.image.pool.vmm
+    index = SnapshotIndexStub({(spec_digest(document.image), "windows"): "sha256:current"})
+    resolver = FleetSnapshots(index, {vmm: "windows"})
+    source = resolver.snapshot(document.image)
+    assert source == SnapshotSource(digest="sha256:current", state_path="", memory_path="", base_disk_path="")
+    provider = RegistryTaskProvider(default_task_registry(), document, resolver)
+    assert provider.instance(provider.candidates()[0]).snapshot == source
+    with pytest.raises(UnknownSnapshotError, match=f"no pool runs {vmm} images"):
+        FleetSnapshots(index, {}).snapshot(document.image)
+    with pytest.raises(UnknownSnapshotError, match=f"no snapshot of image {document.image.id} on linux yet"):
+        FleetSnapshots(index, {vmm: "linux"}).snapshot(document.image)

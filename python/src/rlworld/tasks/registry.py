@@ -21,7 +21,7 @@ from typing import Any, Protocol
 from rlworld.actions.models import ActionModel
 from rlworld.rewards.verifiers import UnknownVerifierError, VerifierRegistry
 from rlworld.rollout.episode import TaskInstance
-from rlworld.sdk.client import SnapshotSource
+from rlworld.sdk.client import SnapshotNotFoundError, SnapshotSource
 from rlworld.specs.digest import spec_digest
 from rlworld.specs.document import SpecDocument
 from rlworld.specs.models import DifficultySpec, ImageSpec
@@ -50,6 +50,31 @@ class UnknownSnapshotError(KeyError):
 
 class SnapshotResolver(Protocol):
     def snapshot(self, image: ImageSpec) -> SnapshotSource: ...
+
+
+class SnapshotIndex(Protocol):
+    def current_snapshot(self, image_digest: str, pool: str) -> dict[str, Any]: ...
+
+
+class FleetSnapshots:
+    """The snapshot new leases of an image use on its pool, from the fleet's snapshot store (DESIGN.md 6.2).
+
+    Leases name it by digest alone; the host pulls its files.
+    """
+
+    def __init__(self, fleet: SnapshotIndex, pools: Mapping[str, str]) -> None:
+        self.fleet = fleet
+        self.pools = dict(pools)
+
+    def snapshot(self, image: ImageSpec) -> SnapshotSource:
+        pool = self.pools.get(image.pool.vmm)
+        if pool is None:
+            raise UnknownSnapshotError(f"no pool runs {image.pool.vmm} images")
+        try:
+            current = self.fleet.current_snapshot(spec_digest(image), pool)
+        except SnapshotNotFoundError as error:
+            raise UnknownSnapshotError(f"no snapshot of image {image.id} on {pool} yet") from error
+        return SnapshotSource(digest=current["snapshot"], state_path="", memory_path="", base_disk_path="")
 
 
 class StaticSnapshots:
