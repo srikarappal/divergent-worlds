@@ -26,7 +26,7 @@ from rlworld.judge.rubric import RubricLibrary
 from rlworld.rewards.records import Provenance, RewardPolicy, RewardRecord
 from rlworld.rollout.groups import EnvShape
 from rlworld.rollout.platform import PlatformSolvabilityProbe, PlatformWorkers, SimulatorEndpoint, episode_outcome
-from rlworld.rollout.user_simulator import GatewayUserSimulator
+from rlworld.rollout.user_simulator import GatewayNpcSimulator, GatewayUserSimulator
 from rlworld.sdk.client import SnapshotSource
 from rlworld.specs import parse_spec_document, spec_digest
 from rlworld.tasks.registry import RegistryTaskProvider, StaticSnapshots, TaskRegistry, default_task_registry
@@ -94,6 +94,7 @@ def test_platform_workers_play_with_the_runs_policy_on_its_images_pool(example_p
     assert (sent.endpoint, sent.model, sent.run_id, sent.purpose) == (document.run.policy.endpoint,
                                                                      document.run.policy.model, "run_1", "policy")
     assert runner.episode_runner.user_simulator is None and runner.episode_runner.finisher.judge is None
+    assert runner.episode_runner.npc_simulator is None
 
 
 def test_licensed_images_hold_seats_from_the_broker_while_they_play(example_payload):
@@ -122,6 +123,12 @@ def test_a_rubric_task_gets_the_runs_judge_and_a_simulated_user_when_configured(
     simulator = workers.group_runner("run_9", document).episode_runner.user_simulator
     assert isinstance(simulator, GatewayUserSimulator)
     assert (simulator.endpoint, simulator.model, simulator.run_id) == ("frontier", "persona_model_2026_06", "run_9")
+    colleagues = workers.group_runner("run_9", document).episode_runner.npc_simulator
+    assert isinstance(colleagues, GatewayNpcSimulator)
+    assert (colleagues.endpoint, colleagues.model, colleagues.run_id) == ("frontier", "persona_model_2026_06", "run_9")
+    no_user = document.model_copy(update={"task": document.task.model_copy(update={"user_simulator": None})})
+    runner = workers.group_runner("run_9", no_user).episode_runner
+    assert runner.user_simulator is None and isinstance(runner.npc_simulator, GatewayNpcSimulator)
     unjudged = document.model_copy(update={"run": document.run.model_copy(update={"judge": None})})
     assert workers.judge("run_9", unjudged) is None
     assert platform_workers(document, FakeFleet(), ScriptedGateway()).judge("run_9", document) is None

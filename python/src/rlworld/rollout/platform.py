@@ -4,9 +4,9 @@ experimentd plays eval and data runs, dry runs and the solvability gate's
 strong agent itself; RL runs import the same workers inside their trainer jobs.
 Each worker takes its tasks from the registry, its policy client from the
 gateway in the run's action format, a reward service with the run's judge when
-the task has a rubric, the user simulator when the task asks for one and
-entitlements for the image's licenses. It leases envs of the pool that serves
-the run's image.
+the task has a rubric, the user simulator when the task asks for one, the
+same simulator stack for colleagues who answer in chat and entitlements for
+the image's licenses. It leases envs of the pool that serves the run's image.
 """
 
 import itertools
@@ -25,7 +25,7 @@ from rlworld.rewards.records import EpisodeOutcome
 from rlworld.rollout.episode import EntitlementSource, EpisodeRunner, EpisodeSettings, TaskInstance
 from rlworld.rollout.groups import EnvShape, GroupRunner, LeaseSettings
 from rlworld.rollout.policy import PolicyClient
-from rlworld.rollout.user_simulator import GatewayUserSimulator
+from rlworld.rollout.user_simulator import GatewayNpcSimulator, GatewayUserSimulator
 from rlworld.rollout.worker import RolloutWorker, RunControl
 from rlworld.services.reward_service import RewardService
 from rlworld.specs.document import SpecDocument
@@ -99,14 +99,17 @@ class PlatformWorkers:
         geometry = adapter.model_geometry(document.image.display.width, document.image.display.height)
         policy = PolicyClient(self.gateway, document.run.policy, adapter, geometry, run_id, document.run.type)
         finisher = RewardService(self.fleet, self.registry.verifier_registry, judge=self.judge(run_id, document))
-        simulator = None
+        simulator = colleagues = None
+        if self.user_simulator is not None:
+            colleagues = GatewayNpcSimulator(self.gateway, self.user_simulator.endpoint, self.user_simulator.model,
+                                             run_id)
         if document.task.user_simulator is not None and self.user_simulator is not None:
             simulator = GatewayUserSimulator(self.gateway, self.user_simulator.endpoint, self.user_simulator.model,
                                              run_id)
         settings = EpisodeSettings(run_id, document.run.type, document.image.os, tuple(document.world.materialize),
                                    document.run.history)
         episodes = EpisodeRunner(self.fleet, policy, finisher, self.trajectory_store, settings, simulator,
-                                 self.entitlements)
+                                 self.entitlements, npc_simulator=colleagues)
         lease = LeaseSettings(run_id=run_id, tenant=self.tenants(run_id), cost_center=document.experiment.name,
                               policy_endpoint=document.run.policy.endpoint,
                               shape=self.shapes[document.image.pool.vmm], licenses=tuple(document.image.licenses))

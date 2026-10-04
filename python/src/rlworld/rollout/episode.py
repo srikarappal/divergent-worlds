@@ -5,9 +5,11 @@ actions through the run's adapter and plays them: the env acts, waits for the
 screen to settle, pauses the VM and observes, while ask_user goes to the user
 simulator instead. A terminal action or the step budget ends the episode and
 the finisher freezes input, extracts and scores state and records the
-trajectory before the lease closes. Unparseable or disallowed actions are agent
-errors and count; failures of the env, the policy endpoint or the user
-simulator are env errors, which are excluded from training.
+trajectory before the lease closes. Before each turn the task's scripted
+world events and colleagues' chat replies land in its apps and the env is
+observed again. Unparseable or disallowed actions are agent errors and count;
+failures of the env, the policy endpoint or the user and colleague simulators
+are env errors, which are excluded from training.
 """
 
 import threading
@@ -35,7 +37,8 @@ from rlworld.rewards.pipeline import env_error_record
 from rlworld.rewards.records import EpisodeOutcome, RewardRecord
 from rlworld.rollout.policy import PolicyClient, assistant_reply
 from rlworld.rollout.prompts import PastTurn, PromptBuilder
-from rlworld.rollout.user_simulator import UserSimulator
+from rlworld.rollout.user_simulator import NpcSimulator, UserSimulator
+from rlworld.rollout.world_events import MissingSimulatorError, NonPlayer, ScheduledDelivery, WorldScript
 from rlworld.sdk.client import FleetError, LeaseGroupRequest, LeaseInfo, SnapshotSource, StepResult, TakenOverError
 from rlworld.services.reward_service import EpisodeContext
 from rlworld.specs.models import TaskSpec
@@ -102,6 +105,8 @@ class TaskInstance:
     hidden_intent: str = ""
     personas: tuple[str, ...] = ()
     secrets: tuple[str, ...] = ()
+    world_events: tuple[ScheduledDelivery, ...] = ()
+    npcs: tuple[NonPlayer, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -228,6 +233,7 @@ class EpisodeRunner:
         clock: Callable[[], float] = time.monotonic,
         takeover_poll_seconds: float = 5.0,
         sleep: Callable[[float], None] = time.sleep,
+        npc_simulator: NpcSimulator | None = None,
     ) -> None:
         self.fleet = fleet
         self.policy = policy
@@ -240,6 +246,7 @@ class EpisodeRunner:
         self.clock = clock
         self.takeover_poll_seconds = takeover_poll_seconds
         self.sleep = sleep
+        self.npc_simulator = npc_simulator
         self.step_timings = StepTimingTotals()
 
     def episode_record(self, plan: EpisodePlan, lease_id: str | None = None) -> EpisodeRecord:
@@ -293,14 +300,18 @@ class EpisodeRunner:
                              self.heartbeat_seconds, self.clock)
         builder = PromptBuilder(self.settings.os_family, instance.instruction, self.policy.geometry,
                                 self.policy.tool_definitions(instance.task.allowed_actions), self.settings.history)
+        script = WorldScript(instance.world_events, instance.npcs, self.npc_simulator)
         past_turns: list[PastTurn] = []
         last_turn: TurnResult | None = None
         final_observation: Observation | None = None
         env_error = None
         try:
             observation = self.act(lease.lease_id, WaitAction(duration_ms=0)).observation
+            script.observe(observation)
             while len(past_turns) < instance.task.max_steps:
-                last_turn = self.play_turn(plan, lease.lease_id, keeper, writer, builder, past_turns, observation)
+                observation, delivered = self.deliver_world(lease.lease_id, script, len(past_turns), observation)
+                last_turn = self.play_turn(plan, lease.lease_id, keeper, writer, builder, past_turns, observation,
+                                           script, delivered)
                 writer.write_step(last_turn.step)
                 self.step_timings.add(last_turn.step.timings)
                 final_observation = last_turn.next_observation or last_turn.step.observation
@@ -332,9 +343,31 @@ class EpisodeRunner:
             instruction=instance.instruction,
             screenshots=(screenshot.uri,) if screenshot else (),
             run_type=self.settings.run_type,
+            world_paths=tuple(script.delivered_paths),
         )
         self.finisher.finish_episode(context, outcome, writer)
         return writer.episode
+
+    def deliver_world(self, lease_id: str, script: WorldScript, turn_index: int,
+                      observation: Observation) -> tuple[Observation, tuple[str, ...]]:
+        """Events due at this turn and colleagues' replies land in the apps; the agent then sees the env anew."""
+        try:
+            deliveries = script.due(turn_index)
+        except (MissingSimulatorError, GatewayError) as error:
+            raise EnvironmentFailure(f"colleague simulator failed: {describe(error)}") from error
+        if not deliveries:
+            return observation, ()
+        payload = {"deliveries": [{"app": delivery.app, "record": delivery.record} for delivery in deliveries]}
+        try:
+            self.fleet.inject(lease_id, payload)
+        except TakenOverError as error:
+            raise TakenOver(str(error)) from error
+        except FLEET_FAILURES as error:
+            raise EnvironmentFailure(f"delivering world events failed: {describe(error)}") from error
+        script.record_delivered(deliveries)
+        observed = self.act(lease_id, WaitAction(duration_ms=0)).observation
+        script.observe(observed)
+        return observed, tuple(delivery.label for delivery in deliveries)
 
     def play_turn(
         self,
@@ -345,6 +378,8 @@ class EpisodeRunner:
         builder: PromptBuilder,
         past_turns: list[PastTurn],
         observation: Observation,
+        script: WorldScript,
+        delivered: tuple[str, ...] = (),
     ) -> TurnResult:
         turn_index = len(past_turns)
         observation = observation.model_copy(update={"step_index": turn_index})
@@ -353,7 +388,7 @@ class EpisodeRunner:
         try:
             response = self.policy.complete(messages, builder.tools, plan.sample_index)
         except GatewayError as error:
-            return TurnResult(StepRecord(step_index=turn_index, observation=observation),
+            return TurnResult(StepRecord(step_index=turn_index, observation=observation, vm_events=delivered),
                               env_error=f"policy call failed: {describe(error)}")
         turn = model_turn(response, writer.put_prompt(messages))
         try:
@@ -361,9 +396,9 @@ class EpisodeRunner:
             ensure_actions_allowed(actions, plan.instance.task.allowed_actions)
         except (ActionParseError, ActionNotAllowedError) as error:
             step = StepRecord(step_index=turn_index, observation=observation, model_turn=turn, parse_error=str(error),
-                              timings=StepTimings(model_seconds=response.latency_seconds))
+                              timings=StepTimings(model_seconds=response.latency_seconds), vm_events=delivered)
             return TurnResult(step, agent_error=str(error))
-        return self.play_actions(plan, lease_id, actions, observation, turn, response)
+        return self.play_actions(plan, lease_id, actions, observation, turn, response, script, delivered)
 
     def play_actions(
         self,
@@ -373,10 +408,12 @@ class EpisodeRunner:
         observation: Observation,
         turn: ModelTurn,
         response: ChatResponse,
+        script: WorldScript,
+        delivered: tuple[str, ...] = (),
     ) -> TurnResult:
         played: list[dict[str, Any]] = []
         user_replies: list[str] = []
-        vm_events: list[str] = []
+        vm_events = list(delivered)
         next_observation = observation
         env_seconds = settle_seconds = 0.0
         final_action = answer_text = env_error = None
@@ -390,6 +427,7 @@ class EpisodeRunner:
                     user_replies.append(self.ask_user(plan.instance, action.question))
                     continue
                 result = self.act(lease_id, action)
+                script.observe(result.observation)
                 env_seconds += result.env_seconds
                 settle_seconds += result.settle_seconds
                 if result.settle_capped:

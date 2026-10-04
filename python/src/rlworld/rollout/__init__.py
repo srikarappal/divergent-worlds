@@ -28,7 +28,7 @@ from rlworld.rollout.trainers import (
     verl_agent_loop_outputs,
     within_staleness,
 )
-from rlworld.rollout.user_simulator import GatewayUserSimulator, UserSimulator
+from rlworld.rollout.user_simulator import GatewayNpcSimulator, GatewayUserSimulator, NpcSimulator, UserSimulator
 from rlworld.rollout.worker import (
     ConcurrencyGate,
     PlatformRunExecutor,
@@ -37,6 +37,7 @@ from rlworld.rollout.worker import (
     RunControl,
     TaskProvider,
 )
+from rlworld.rollout.world_events import NonPlayer, ScheduledDelivery, WorldScript
 
 __all__ = [
     "ConcurrencyGate",
@@ -46,11 +47,14 @@ __all__ = [
     "EpisodeRunner",
     "EpisodeSettings",
     "ExperimentdClient",
+    "GatewayNpcSimulator",
     "GatewayUserSimulator",
     "GroupResult",
     "GroupRunner",
     "GroupSetupError",
     "LeaseSettings",
+    "NonPlayer",
+    "NpcSimulator",
     "PastTurn",
     "PlatformRunExecutor",
     "PolicyClient",
@@ -61,10 +65,12 @@ __all__ = [
     "RunControl",
     "RunControlError",
     "RunStoppedError",
+    "ScheduledDelivery",
     "TaskInstance",
     "TaskProvider",
     "TurnSample",
     "UserSimulator",
+    "WorldScript",
     "adapter_output",
     "areal_rows",
     "assistant_reply",
