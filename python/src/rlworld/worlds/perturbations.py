@@ -3,7 +3,8 @@
 Distractors add irrelevant records without touching anything a task depends
 on. Corrupted inputs damage rows of the invoice export the way real exports
 get damaged and the log says exactly what changed so task generators can
-build ground truth around it.
+build ground truth around it. A scripted event becomes the record its app
+receives when the event's step comes: an email or a colleague's chat message.
 """
 
 import csv
@@ -11,8 +12,9 @@ import io
 import random
 from dataclasses import dataclass
 from datetime import timedelta
+from typing import Any
 
-from rlworld.worlds.model import Document, MailMessage, World, WorldEvent
+from rlworld.worlds.model import ChatMessage, Document, MailMessage, World, WorldEvent
 
 INVOICE_EXPORT_PATH = "invoices.csv"
 DISTRACTOR_SUBJECTS = (
@@ -102,3 +104,15 @@ def event_message(event: WorldEvent, world: World) -> MailMessage:
         body=event.payload["body"],
         sent_at=world.base_time,
     )
+
+
+def event_chat_message(event: WorldEvent, world: World) -> ChatMessage:
+    """The chat message a chat_reply event posts, stamped at the world's base time."""
+    return ChatMessage(id=f"chat_{event.id}", channel=event.payload["channel"], sender_id=event.payload["sender_id"],
+                       text=event.payload["text"], sent_at=world.base_time)
+
+
+def event_record(event: WorldEvent, world: World) -> dict[str, Any]:
+    """What the event's app receives, as JSON."""
+    message = event_message(event, world) if event.kind == "email_arrives" else event_chat_message(event, world)
+    return message.model_dump(mode="json")

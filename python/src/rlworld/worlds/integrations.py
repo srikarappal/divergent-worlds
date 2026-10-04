@@ -2,30 +2,35 @@
 
 Every app ships three operations: materialize writes world state into the app,
 extract reads normalized state back for verifiers and diffs, reset empties it.
-The reference integrations below target a local directory (Maildir style mail
-and plain files); in a VM the same contract runs through the guest agent or a
-sidecar such as an IMAP server. Spreadsheets are read the way section 6.9 asks
-for Excel: the values the app last computed, through openpyxl.
+Apps that take world events mid task also deliver one record (an email that
+arrives or a colleague's chat reply) and name the state path it lands on. The
+reference integrations below target a local directory (Maildir style mail, one
+JSON file per chat message and plain files); in a VM the same contract runs
+through the guest agent or a sidecar such as an IMAP server. Spreadsheets are
+read the way section 6.9 asks for Excel: the values the app last computed,
+through openpyxl.
 """
 
 import csv
 import hashlib
 import io
+import json
 import shutil
 import zipfile
 from collections.abc import Mapping, Sequence
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timezone
 from email import policy
 from email.message import EmailMessage
 from email.parser import BytesParser
 from email.utils import format_datetime, parsedate_to_datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 import openpyxl
 from openpyxl.utils.exceptions import InvalidFileException
+from pydantic import BaseModel, ValidationError
 
-from rlworld.worlds.model import MailMessage, World
+from rlworld.worlds.model import ChatMessage, MailMessage, World
 
 MAIL_FOLDERS = ("inbox", "sent", "drafts")
 MAX_EXTRACTED_TEXT_BYTES = 64 * 1024
@@ -46,6 +51,17 @@ class AppIntegration(Protocol):
     def extract(self, target: Path) -> dict[str, Any]: ...
 
     def reset(self, target: Path) -> None: ...
+
+
+@runtime_checkable
+class DeliveringIntegration(AppIntegration, Protocol):
+    """An app a record can land in mid task; record_model validates what arrives."""
+
+    record_model: type[BaseModel]
+
+    def deliver(self, record: Any, target: Path) -> None: ...
+
+    def delivered_path(self, record: Any) -> str: ...
 
 
 def write_message(message: MailMessage, folder_directory: Path) -> None:
@@ -78,6 +94,7 @@ class MailIntegration:
     """Maildir style tree: mail/<address>/<folder>/<message id>.eml; extract reads the agent persona's mailbox."""
 
     app_name = "mail"
+    record_model = MailMessage
 
     def mail_root(self, target: Path) -> Path:
         return target / "mail"
@@ -98,6 +115,9 @@ class MailIntegration:
         """A scripted world event: the message lands in each recipient's inbox mid task."""
         for recipient in message.recipients:
             write_message(message, self.mail_root(target) / recipient / "inbox")
+
+    def delivered_path(self, message: MailMessage) -> str:
+        return f"{self.app_name}/inbox/{message.id}"
 
     def extract(self, target: Path) -> dict[str, Any]:
         mail_root = self.mail_root(target)
@@ -182,9 +202,85 @@ class FilesIntegration:
         shutil.rmtree(self.files_root(target), ignore_errors=True)
 
 
+def direct_channel(person_id: str) -> str:
+    """The channel holding the agent's direct messages with one colleague."""
+    return f"dm_{person_id}"
+
+
+def utc_time(moment: datetime) -> datetime:
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=timezone.utc)
+
+
+class ChatIntegration:
+    """One JSON file per message under chat/<channel>/; owner.txt names the agent persona.
+
+    The folder names the channel and the file name the message, whatever the file says; a file that is not a
+    message is skipped, so a malformed post the policy wrote counts as no post.
+    """
+
+    app_name = "chat"
+    record_model = ChatMessage
+
+    def chat_root(self, target: Path) -> Path:
+        return target / "chat"
+
+    def write(self, message: ChatMessage, target: Path) -> None:
+        channel_directory = self.chat_root(target) / message.channel
+        channel_directory.mkdir(parents=True, exist_ok=True)
+        (channel_directory / f"{message.id}.json").write_text(message.model_dump_json())
+
+    def materialize(self, world: World, target: Path) -> None:
+        chat_root = self.chat_root(target)
+        chat_root.mkdir(parents=True, exist_ok=True)
+        (chat_root / "owner.txt").write_text(world.agent_persona_id)
+        for message in world.chat_messages:
+            self.write(message, target)
+
+    def deliver(self, message: ChatMessage, target: Path) -> None:
+        self.write(message, target)
+
+    def delivered_path(self, message: ChatMessage) -> str:
+        return f"{self.app_name}/{message.channel}/{message.id}"
+
+    def messages(self, target: Path) -> list[ChatMessage]:
+        messages = []
+        for message_path in self.chat_root(target).glob("*/*.json"):
+            try:
+                record = json.loads(message_path.read_text())
+                messages.append(ChatMessage.model_validate({**record, "id": message_path.stem,
+                                                            "channel": message_path.parent.name}))
+            except (OSError, ValueError, TypeError, ValidationError):
+                continue
+        return sorted(messages, key=chat_order)
+
+    def owner_posts(self, target: Path) -> list[ChatMessage]:
+        """The agent persona's own messages, which colleagues may answer."""
+        owner_path = self.chat_root(target) / "owner.txt"
+        if not owner_path.is_file():
+            return []
+        owner = owner_path.read_text().strip()
+        return [message for message in self.messages(target) if message.sender_id == owner]
+
+    def extract(self, target: Path) -> dict[str, Any]:
+        channels: dict[str, list[dict[str, Any]]] = {}
+        for message in self.messages(target):
+            channels.setdefault(message.channel, []).append(
+                {"id": message.id, "sender_id": message.sender_id, "text": message.text,
+                 "sent_at": utc_time(message.sent_at).isoformat()})
+        return channels
+
+    def reset(self, target: Path) -> None:
+        shutil.rmtree(self.chat_root(target), ignore_errors=True)
+
+
+def chat_order(message: ChatMessage) -> tuple[datetime, str]:
+    return utc_time(message.sent_at), message.id
+
+
 DEFAULT_INTEGRATIONS: dict[str, AppIntegration] = {
     MailIntegration.app_name: MailIntegration(),
     FilesIntegration.app_name: FilesIntegration(),
+    ChatIntegration.app_name: ChatIntegration(),
 }
 
 
@@ -214,3 +310,24 @@ def reset_world(app_names: Sequence[str], target: Path,
                 integrations: Mapping[str, AppIntegration] | None = None) -> None:
     for integration in resolve_integrations(app_names, integrations or DEFAULT_INTEGRATIONS):
         integration.reset(target)
+
+
+def delivering_integration(app_name: str, integrations: Mapping[str, AppIntegration] | None) -> DeliveringIntegration:
+    integration = resolve_integrations([app_name], integrations or DEFAULT_INTEGRATIONS)[0]
+    if not isinstance(integration, DeliveringIntegration):
+        raise UnsupportedAppError(f"{app_name} takes no records mid task")
+    return integration
+
+
+def deliver_record(app_name: str, record: Mapping[str, Any], target: Path,
+                   integrations: Mapping[str, AppIntegration] | None = None) -> None:
+    """A world event or a colleague's reply landing in a running app."""
+    integration = delivering_integration(app_name, integrations)
+    integration.deliver(integration.record_model.model_validate(record), target)
+
+
+def delivered_path(app_name: str, record: Mapping[str, Any],
+                   integrations: Mapping[str, AppIntegration] | None = None) -> str:
+    """The state path a delivered record shows up at, which the world changed and the agent did not."""
+    integration = delivering_integration(app_name, integrations)
+    return integration.delivered_path(integration.record_model.model_validate(record))

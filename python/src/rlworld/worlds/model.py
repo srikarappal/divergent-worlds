@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, NonNegativeInt, model_validat
 from rlworld.specs.digest import content_digest
 
 SYNTHETIC_DOMAIN_SUFFIX = ".example"
+EVENT_APPS = {"email_arrives": "mail", "chat_reply": "chat"}
 
 
 class FrozenModel(BaseModel):
@@ -68,7 +69,7 @@ class MailMessage(FrozenModel):
 
 class ChatMessage(FrozenModel):
     id: str
-    channel: str
+    channel: str = Field(pattern=r"^[A-Za-z0-9_][A-Za-z0-9_-]*$")
     sender_id: str
     text: str
     sent_at: datetime
@@ -160,9 +161,26 @@ def coherence_problems(world: World) -> list[str]:
             problems.append(f"email {message.id} uses unknown addresses {unknown_addresses}")
     problems.extend(f"chat message {chat.id} has unknown sender {chat.sender_id}"
                     for chat in world.chat_messages if chat.sender_id not in person_ids)
+    problems.extend(event_problems(world.events, person_ids, known_addresses))
     synthetic_domains = [world.domain, *(customer.domain for customer in world.customers)]
     problems.extend(f"domain {domain} is not synthetic"
                     for domain in synthetic_domains if not domain.endswith(SYNTHETIC_DOMAIN_SUFFIX))
+    return problems
+
+
+def event_problems(events: tuple[WorldEvent, ...], person_ids: set[str], known_addresses: set[str]) -> list[str]:
+    """Scripted events name people and addresses of the world like every other record."""
+    problems = []
+    for event in events:
+        if event.app != EVENT_APPS[event.kind]:
+            problems.append(f"event {event.id} is a {event.kind} event, which lands in {EVENT_APPS[event.kind]}")
+        if event.kind == "email_arrives":
+            addresses = [event.payload.get("sender"), *event.payload.get("recipients", [])]
+            unknown = [address for address in addresses if address not in known_addresses]
+            if unknown:
+                problems.append(f"event {event.id} uses unknown addresses {unknown}")
+        elif event.payload.get("sender_id") not in person_ids:
+            problems.append(f"event {event.id} has unknown sender {event.payload.get('sender_id')}")
     return problems
 
 

@@ -9,20 +9,32 @@ from rlworld.worlds.generator import (
 from rlworld.worlds.integrations import (
     DEFAULT_INTEGRATIONS,
     AppIntegration,
+    ChatIntegration,
     FilesIntegration,
     MailIntegration,
     UnsupportedAppError,
+    deliver_record,
+    delivered_path,
+    direct_channel,
     extract_world_state,
     materialize_world,
     reset_world,
 )
 from rlworld.worlds.model import World, world_digest
-from rlworld.worlds.perturbations import PerturbationLog, apply_perturbations, event_message, events_due
+from rlworld.worlds.perturbations import (
+    PerturbationLog,
+    apply_perturbations,
+    event_chat_message,
+    event_message,
+    event_record,
+    events_due,
+)
 
 __all__ = [
     "DEFAULT_INTEGRATIONS",
     "WORLD_GENERATORS",
     "AppIntegration",
+    "ChatIntegration",
     "FilesIntegration",
     "MailIntegration",
     "PerturbationLog",
@@ -31,7 +43,12 @@ __all__ = [
     "World",
     "apply_perturbations",
     "build_world",
+    "deliver_record",
+    "delivered_path",
+    "direct_channel",
+    "event_chat_message",
     "event_message",
+    "event_record",
     "events_due",
     "extract_world_state",
     "generate_mid_market_company",
