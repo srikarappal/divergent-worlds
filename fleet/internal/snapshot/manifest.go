@@ -60,7 +60,8 @@ func (compatibility Compatibility) Describe() string {
 	return strings.Join(parts, ", ")
 }
 
-// Manifest describes one snapshot; Digest is the sha256 of everything in it but itself and BuiltAt.
+// Manifest describes one snapshot; Digest is the sha256 of everything in it but itself and BuiltAt. A world
+// snapshot names the base snapshot it was taken on and the world materialized into it.
 type Manifest struct {
 	Digest        string          `json:"digest"`
 	Image         string          `json:"image"`
@@ -70,6 +71,8 @@ type Manifest struct {
 	MemoryMiB     int             `json:"memory_mib"`
 	VCPUs         int             `json:"vcpus"`
 	Files         map[string]File `json:"files"`
+	Base          string          `json:"base,omitempty"`
+	World         string          `json:"world,omitempty"`
 	BuiltAt       time.Time       `json:"built_at"`
 }
 
