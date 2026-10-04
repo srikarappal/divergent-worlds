@@ -1,0 +1,145 @@
+{
+  "description": "Prometheus metrics fleetd and experimentd expose on /metrics for the platform health dashboards (DESIGN.md 6.15). Each service's tests hold its registry to this list and the dashboard tests hold every panel to it.",
+  "metrics": [
+    {
+      "name": "rlworld_fleet_lease_seconds",
+      "type": "histogram",
+      "service": "fleetd",
+      "labels": ["pool"],
+      "help": "Time to place, admit and start a lease group, by pool"
+    },
+    {
+      "name": "rlworld_fleet_restore_failures_total",
+      "type": "counter",
+      "service": "fleetd",
+      "labels": ["pool"],
+      "help": "Envs whose snapshot restore or start failed, by pool"
+    },
+    {
+      "name": "rlworld_fleet_step_seconds",
+      "type": "histogram",
+      "service": "fleetd",
+      "labels": ["pool", "part"],
+      "help": "Env side step latency split into the env's act and observe time and its settle wait, by pool"
+    },
+    {
+      "name": "rlworld_fleet_step_failures_total",
+      "type": "counter",
+      "service": "fleetd",
+      "labels": ["pool"],
+      "help": "Steps that failed in the env, by pool"
+    },
+    {
+      "name": "rlworld_fleet_leases",
+      "type": "gauge",
+      "service": "fleetd",
+      "labels": ["pool"],
+      "help": "Leases held right now, by pool"
+    },
+    {
+      "name": "rlworld_episodes_total",
+      "type": "counter",
+      "service": "experimentd",
+      "labels": ["image", "termination"],
+      "help": "Scored episodes by image and termination"
+    },
+    {
+      "name": "rlworld_app_episodes_total",
+      "type": "counter",
+      "service": "experimentd",
+      "labels": ["app", "termination"],
+      "help": "Scored episodes by app of their world and termination"
+    },
+    {
+      "name": "rlworld_gateway_calls_total",
+      "type": "counter",
+      "service": "experimentd",
+      "labels": ["endpoint", "purpose", "outcome"],
+      "help": "Model gateway calls by endpoint, purpose and outcome"
+    },
+    {
+      "name": "rlworld_gateway_call_seconds",
+      "type": "histogram",
+      "service": "experimentd",
+      "labels": ["endpoint", "purpose"],
+      "help": "Latency of answered gateway calls that missed the cache; purpose policy is the model part of a step"
+    },
+    {
+      "name": "rlworld_gateway_rate_limit_hits_total",
+      "type": "counter",
+      "service": "experimentd",
+      "labels": ["endpoint"],
+      "help": "Gateway calls that waited on or were refused by an endpoint rate limit"
+    },
+    {
+      "name": "rlworld_gateway_spend_usd_total",
+      "type": "counter",
+      "service": "experimentd",
+      "labels": ["purpose"],
+      "help": "Model spend in USD by purpose; purpose judge is judge spend"
+    },
+    {
+      "name": "rlworld_seats_in_use",
+      "type": "gauge",
+      "service": "experimentd",
+      "labels": ["product"],
+      "help": "License seats leased right now, by product"
+    },
+    {
+      "name": "rlworld_seats_total",
+      "type": "gauge",
+      "service": "experimentd",
+      "labels": ["product"],
+      "help": "License seats in each pool"
+    },
+    {
+      "name": "rlworld_identities_in_use",
+      "type": "gauge",
+      "service": "experimentd",
+      "labels": ["pool"],
+      "help": "Identities leased right now, by identity pool"
+    },
+    {
+      "name": "rlworld_identities_total",
+      "type": "gauge",
+      "service": "experimentd",
+      "labels": ["pool"],
+      "help": "Identities in each identity pool"
+    },
+    {
+      "name": "rlworld_verifier_precision",
+      "type": "gauge",
+      "service": "experimentd",
+      "labels": [],
+      "help": "Verifier precision against human labels at the last calibration"
+    },
+    {
+      "name": "rlworld_verifier_recall",
+      "type": "gauge",
+      "service": "experimentd",
+      "labels": [],
+      "help": "Verifier recall against human labels at the last calibration"
+    },
+    {
+      "name": "rlworld_replay_divergence_rate",
+      "type": "histogram",
+      "service": "experimentd",
+      "labels": [],
+      "help": "Share of steps whose observation diverged when actions were rerun from the start snapshot"
+    },
+    {
+      "name": "rlworld_clone_fidelity",
+      "type": "gauge",
+      "service": "experimentd",
+      "labels": ["app"],
+      "help": "One minus the success gap between an app clone and the real app at the last measurement"
+    },
+    {
+      "name": "rlworld_run_cost_per_1000_episodes_usd",
+      "type": "gauge",
+      "service": "experimentd",
+      "labels": ["run_id"],
+      "help": "A run's spend per 1,000 scored episodes"
+    }
+  ]
+}
