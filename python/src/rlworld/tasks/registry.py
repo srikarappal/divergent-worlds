@@ -12,7 +12,8 @@ image. When fleetd gave the run's world a world snapshot, because it loads
 slowly or differently each time, instances restore from it and inject only
 what their task changes. A task suite, such as an imported public benchmark,
 hands out its fixed tasks in order and runs only as eval, since training must
-not overlap public benchmarks.
+not overlap public benchmarks. Instances also carry the scripted events of
+their world that land in the run's apps and the colleagues who answer in chat.
 """
 
 import tempfile
@@ -26,6 +27,7 @@ from rlworld.actions.models import ActionModel
 from rlworld.rewards.verifiers import UnknownVerifierError, VerifierRegistry
 from rlworld.rollout.episode import TaskInstance
 from rlworld.rollout.groups import EnvShape
+from rlworld.rollout.world_events import NonPlayer, ScheduledDelivery
 from rlworld.sdk.client import SnapshotNotFoundError, SnapshotSource
 from rlworld.specs.digest import spec_digest
 from rlworld.specs.document import SpecDocument
@@ -34,6 +36,7 @@ from rlworld.tasks.curriculum import CandidateTask, CurriculumPlanner, PassRateT
 from rlworld.tasks.finance import ReconcileInvoices
 from rlworld.tasks.generators import (
     GeneratedTask,
+    NpcSpec,
     TaskGenerationError,
     TaskSuite,
     TaskTemplate,
@@ -45,6 +48,7 @@ from rlworld.worlds.delta import world_delta
 from rlworld.worlds.generator import build_world
 from rlworld.worlds.integrations import extract_world_state, materialize_world
 from rlworld.worlds.model import World, world_digest
+from rlworld.worlds.perturbations import event_record
 
 
 class UnknownTaskTemplateError(KeyError):
@@ -193,6 +197,25 @@ def setup_payload(task: GeneratedTask, apps: tuple[str, ...]) -> dict[str, Any]:
     return payload
 
 
+def scheduled_events(world: World, apps: tuple[str, ...]) -> tuple[ScheduledDelivery, ...]:
+    """The world's scripted events that land in an app the run materializes."""
+    return tuple(ScheduledDelivery(event.trigger_step, event.app, event_record(event, world), f"world event {event.id}")
+                 for event in world.events if event.app in apps)
+
+
+def non_players(world: World, npcs: tuple[NpcSpec, ...]) -> tuple[NonPlayer, ...]:
+    """Colleagues as the simulator plays them: who they are in the world and what the task lets them know."""
+    people = {person.id: person for person in world.people if person.id != world.agent_persona_id}
+    players = []
+    for npc in npcs:
+        person = people.get(npc.person_id)
+        if person is None:
+            raise TaskGenerationError(f"colleague {npc.person_id} is nobody else in the world")
+        persona = f"{person.full_name}, {person.role} in {person.department} at {world.organization_name}"
+        players.append(NonPlayer(person.id, person.email.split("@")[0], persona, npc.knowledge))
+    return tuple(players)
+
+
 @dataclass(frozen=True)
 class RegisteredTask:
     candidate: CandidateTask
@@ -301,6 +324,8 @@ class RegistryTaskProvider:
             hidden_intent=generated.hidden_intent,
             personas=generated.personas,
             secrets=generated.secrets,
+            world_events=scheduled_events(generated.world, self.apps),
+            npcs=non_players(generated.world, generated.npcs),
         )
         with self.lock:
             return self.instances.setdefault(candidate.task_id, instance)

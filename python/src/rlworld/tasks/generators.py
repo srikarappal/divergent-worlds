@@ -5,7 +5,8 @@ instruction, the world as the task sees it with its perturbations, the ground
 truth that stays outside the VM, the hidden intent a user simulator answers
 from and the windows task setup opens. It also writes the task's scripted
 oracle in canonical actions and ships the verifiers its task specs name. The
-same template, world, difficulty and seed always give the same task.
+same template, world, difficulty and seed always give the same task. A task
+may name colleagues who answer the agent in chat with what they know.
 
 A task suite is a fixed list of tasks, such as an imported public benchmark:
 its index-th task is generated with seed index and it runs only as eval.
@@ -29,6 +30,14 @@ class TaskGenerationError(ValueError):
 
 
 @dataclass(frozen=True)
+class NpcSpec:
+    """A colleague of the world who answers the agent in chat; what they know stays on the host like ground truth."""
+
+    person_id: str
+    knowledge: str
+
+
+@dataclass(frozen=True)
 class GeneratedTask:
     """ground_truth is plain JSON and never enters the VM; the world is materialized at task setup.
 
@@ -45,6 +54,7 @@ class GeneratedTask:
     secrets: tuple[str, ...] = ()
     setup: tuple[dict[str, Any], ...] = ()
     reads: dict[str, Any] | None = None
+    npcs: tuple[NpcSpec, ...] = ()
 
 
 class TaskTemplate(Protocol):
@@ -84,7 +94,8 @@ def task_identifier(template: TaskTemplate, difficulty: DifficultySpec, base_wor
 def generated_task_digest(template: TaskTemplate, task: GeneratedTask) -> str:
     """The task version: what the agent faces, what it is graded against and which template made it.
 
-    Setup steps and a read plan count only when a task has them, so tasks without them keep their digests.
+    Setup steps, a read plan and colleagues count only when a task has them, so tasks without them keep their
+    digests.
     """
     material = {"template": template.name, "version": template.version, "instruction": task.instruction,
                 "world": world_digest(task.world), "ground_truth": task.ground_truth,
@@ -93,4 +104,6 @@ def generated_task_digest(template: TaskTemplate, task: GeneratedTask) -> str:
         material["setup"] = list(task.setup)
     if task.reads is not None:
         material["reads"] = task.reads
+    if task.npcs:
+        material["npcs"] = [{"person_id": npc.person_id, "knowledge": npc.knowledge} for npc in task.npcs]
     return content_digest(material)
