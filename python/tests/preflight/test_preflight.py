@@ -117,6 +117,15 @@ def test_seats_quota_hosts_and_identities_cap_concurrency(example_document, pref
     assert "unknown_license_pool" in run_preflight(example_document, missing_pool).codes("error")
 
 
+def test_live_internet_warns_that_rewards_drift(example_payload, preflight_context):
+    payload = set_path(eval_payload(example_payload), "task.split", "eval")
+    for mode, allowlist in (("allowlist", ["docs.vendor.example"]), ("live", [])):
+        live = set_path(set_path(payload, "world.network.internet", mode), "world.network.allowlist", allowlist)
+        assert "live_internet" in run_preflight(parse_spec_document(live), preflight_context).codes("warning")
+    replayed = set_path(payload, "world.network.internet", "replay_only")
+    assert "live_internet" not in run_preflight(parse_spec_document(replayed), preflight_context).codes("warning")
+
+
 def test_sliding_window_history_warns_about_prefix_caching(example_payload, preflight_context):
     payload = set_path(example_payload, "run.history", "sliding_window")
     report = run_preflight(parse_spec_document(payload), preflight_context)

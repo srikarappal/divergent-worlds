@@ -228,7 +228,7 @@ def warn_about_traps(
         )
     if run.type == "rl" and run.group_size < 2:
         collector.warning("group_size", "GRPO needs at least two rollouts per task to compute an advantage")
-    if document.world.network.internet == "live":
+    if document.world.network.internet in ("allowlist", "live"):
         collector.warning("live_internet", "the live web changes under the run, so rewards will drift")
     if estimate.missing_prices:
         collector.warning("missing_prices", f"no price configured for {', '.join(estimate.missing_prices)}")

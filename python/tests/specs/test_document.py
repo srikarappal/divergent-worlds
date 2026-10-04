@@ -16,9 +16,26 @@ def rejection_text(payload) -> str:
     return str(raised.value)
 
 
-def test_live_internet_is_eval_only(example_payload):
-    payload = set_path(example_payload, "world.network.internet", "live")
-    assert "live internet is eval only" in rejection_text(payload)
+def with_internet(payload, mode):
+    payload = set_path(payload, "world.network.internet", mode)
+    return set_path(payload, "world.network.allowlist", ["docs.vendor.example"]) if mode == "allowlist" else payload
+
+
+def as_eval(payload):
+    for dotted_path, value in (("task.split", "eval"), ("run.type", "eval"), ("run.trainer", None),
+                               ("run.priority", "eval")):
+        payload = set_path(payload, dotted_path, value)
+    return payload
+
+
+@pytest.mark.parametrize("mode", ["allowlist", "live"])
+def test_live_internet_is_eval_only(example_payload, mode):
+    assert "live internet is eval only" in rejection_text(with_internet(example_payload, mode))
+    assert parse_spec_document(as_eval(with_internet(example_payload, mode))).world.network.internet == mode
+
+
+def test_replayed_internet_trains(example_payload):
+    assert parse_spec_document(with_internet(example_payload, "replay_only")).task.split == "train"
 
 
 def test_judge_rubric_needs_a_judge_endpoint(example_payload):

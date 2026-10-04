@@ -38,7 +38,7 @@ class SpecDocument(SpecModel):
 
 def cross_layer_problems(document: SpecDocument) -> list[str]:
     problems = []
-    if document.world.network.internet == "live" and document.task.split == "train":
+    if document.world.network.internet in ("allowlist", "live") and document.task.split == "train":
         problems.append("world.network.internet: live internet is eval only, use replay_only or none for train tasks")
     if document.task.judge_rubric and document.run.judge is None:
         problems.append("run.judge: the task has a judge rubric but the run sets no judge endpoint")
