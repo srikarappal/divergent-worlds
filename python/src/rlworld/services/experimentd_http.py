@@ -21,6 +21,8 @@ from rlworld.sdk.client import FleetError
 from rlworld.services.admin import DataPolicy, DataPolicyStore, PlatformAuditLog
 from rlworld.services.alerts import AlertMonitor
 from rlworld.services.auth import DEVELOPMENT_PRINCIPAL, AuthError, ForbiddenError, PlatformAuth
+from rlworld.services.authoring import AuthoringError, AuthoringService
+from rlworld.services.authoring_models import AuthoringStart, RecordingRequest
 from rlworld.services.catalogs import (
     CatalogEntry,
     CatalogService,
@@ -63,6 +65,7 @@ POOLS_KEY = "rlworld_pool_status"
 RETENTION_KEY = "rlworld_retention"
 ALERTS_KEY = "rlworld_alerts"
 TAKEOVER_KEY = "rlworld_takeover"
+AUTHORING_KEY = "rlworld_authoring"
 ALERT_FILTERS = ("run_id", "experiment_id", "status")
 PUBLIC_RULES = frozenset({"/healthz", "/v1/auth/config"})
 FRAME_RULE = "/v1/frames/<frame_digest>"
@@ -81,6 +84,8 @@ AUDIT_REQUEST_FIELDS: dict[str, tuple[str, ...]] = {
     "publish_catalog_entry": ("version",),
     "set_roles": ("roles",),
     "set_data_policy": ("screenshot_endpoints", "trajectory_days", "full_frame_days", "exports"),
+    "start_authoring": ("spec_digest", "task_index"),
+    "begin_recording": ("kind",),
 }
 AUDIT_RESPONSE_FIELDS: dict[str, tuple[str, ...]] = {
     "save_spec": ("digest",),
@@ -88,6 +93,8 @@ AUDIT_RESPONSE_FIELDS: dict[str, tuple[str, ...]] = {
     "dry_run": ("run_id", "episode_id"),
     "review_episode": ("item_id", "queue"),
     "file_review_item": ("item_id",),
+    "start_authoring": ("session_id", "task_id"),
+    "submit_authoring": ("review_item_id",),
 }
 COHORT_ARGUMENTS = ("termination", "task_id", "template", "difficulty_key", "category", "policy_version", "limit")
 ITEM_FILTERS = ("queue", "status", "run_id", "episode_id")
@@ -584,6 +591,44 @@ def refused_takeover(error: TakeoverError | FleetError):
     return jsonify({"code": "takeover_refused", "problems": [str(error)]}), 409
 
 
+def authoring() -> AuthoringService:
+    return configured(AUTHORING_KEY, "task authoring")
+
+
+def start_authoring():
+    body = validated(AuthoringStart, request.get_json(silent=True) or {})
+    actor = principal()
+    session = authoring().start(body.spec_digest, actor.subject, actor.tenant, body.task_index)
+    return jsonify(session.model_dump(mode="json")), 201
+
+
+def get_authoring(session_id: str):
+    return jsonify(authoring().session(session_id).model_dump(mode="json"))
+
+
+def begin_recording(session_id: str):
+    """The response carries the relay's one time credential, so no field of it enters the audit log."""
+    body = validated(RecordingRequest, request.get_json(silent=True) or {})
+    started = authoring().begin_recording(session_id, body.kind, principal().subject)
+    return jsonify(started.model_dump(mode="json")), 201
+
+
+def end_recording(session_id: str, recording_id: str):
+    return jsonify(authoring().end_recording(session_id, recording_id).model_dump(mode="json"))
+
+
+def run_authoring_gates(session_id: str):
+    return jsonify(authoring().start_gates(session_id).model_dump(mode="json")), 202
+
+
+def submit_authoring(session_id: str):
+    return jsonify(authoring().submit(session_id, principal().subject).model_dump(mode="json"))
+
+
+def refused_authoring(error: AuthoringError):
+    return jsonify({"code": "authoring_refused", "problems": [str(error)]}), 409
+
+
 def invalid_review(error: ReviewError):
     return jsonify({"code": "invalid_request", "problems": [str(error)]}), 400
 
@@ -625,6 +670,12 @@ ROUTES = (
     ("POST", "/v1/runs/<run_id>/episodes/<episode_id>/actions", review_episode),
     ("POST", "/v1/runs/<run_id>/episodes/<episode_id>/takeover", start_takeover),
     ("POST", "/v1/runs/<run_id>/episodes/<episode_id>/takeover/end", end_takeover),
+    ("POST", "/v1/authoring", start_authoring),
+    ("GET", "/v1/authoring/<session_id>", get_authoring),
+    ("POST", "/v1/authoring/<session_id>/recordings", begin_recording),
+    ("POST", "/v1/authoring/<session_id>/recordings/<recording_id>/end", end_recording),
+    ("POST", "/v1/authoring/<session_id>/gates", run_authoring_gates),
+    ("POST", "/v1/authoring/<session_id>/submit", submit_authoring),
     ("POST", "/v1/runs/<run_id>/failures/analyze", analyze_failures),
     ("GET", "/v1/runs/<run_id>/failures", get_failures),
     ("GET", "/v1/runs/<run_id>/report", run_report),
@@ -666,6 +717,7 @@ ERROR_HANDLERS = (
     (ReviewError, invalid_review),
     (TakeoverError, refused_takeover),
     (FleetError, refused_takeover),
+    (AuthoringError, refused_authoring),
     (AuthError, unauthenticated),
     (ForbiddenError, forbidden),
 )
@@ -679,7 +731,8 @@ def create_app(experiment_service: ExperimentService, poll_seconds: float = 1.0,
                pool_status_source: PoolStatus | None = None,
                retention_sweeper: RetentionSweeper | None = None,
                alert_monitor: AlertMonitor | None = None,
-               takeover_service: TakeoverService | None = None) -> Flask:
+               takeover_service: TakeoverService | None = None,
+               authoring_service: AuthoringService | None = None) -> Flask:
     app = Flask("experimentd")
     app.extensions[SERVICE_KEY] = experiment_service
     app.extensions[POLL_KEY] = (poll_seconds, sleep)
@@ -694,6 +747,7 @@ def create_app(experiment_service: ExperimentService, poll_seconds: float = 1.0,
     app.extensions[RETENTION_KEY] = retention_sweeper
     app.extensions[ALERTS_KEY] = alert_monitor
     app.extensions[TAKEOVER_KEY] = takeover_service
+    app.extensions[AUTHORING_KEY] = authoring_service
     app.before_request(authenticate)
     app.after_request(record_audit)
     for method, rule, view_function in ROUTES:

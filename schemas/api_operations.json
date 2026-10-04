@@ -218,6 +218,56 @@
       "sdk": "client.end_takeover(\"{run_id}\", \"{episode_id}\")"
     },
     {
+      "name": "start_authoring",
+      "method": "POST",
+      "path": "/v1/authoring",
+      "body": "json",
+      "summary": "Start authoring from a saved spec: one generated task with its instruction and hidden intent",
+      "cli": "rlworld authoring start {spec_digest} --task-index {task_index}",
+      "sdk": "client.start_authoring(\"{spec_digest}\", task_index={task_index})"
+    },
+    {
+      "name": "get_authoring",
+      "method": "GET",
+      "path": "/v1/authoring/{session_id}",
+      "summary": "An authoring session: its task, recordings and gate results",
+      "cli": "rlworld authoring get {session_id}",
+      "sdk": "client.get_authoring(\"{session_id}\")"
+    },
+    {
+      "name": "begin_recording",
+      "method": "POST",
+      "path": "/v1/authoring/{session_id}/recordings",
+      "body": "json",
+      "summary": "Lease a dev env at the task's start state and drive it through noVNC to record an oracle, an alternative solution or a near miss",
+      "cli": "rlworld authoring record {session_id} --kind {recording_kind}",
+      "sdk": "client.begin_recording(\"{session_id}\", kind=\"{recording_kind}\")"
+    },
+    {
+      "name": "end_recording",
+      "method": "POST",
+      "path": "/v1/authoring/{session_id}/recordings/{recording_id}/end",
+      "summary": "Stop recording: your input is kept as canonical actions with the state you left for the gates",
+      "cli": "rlworld authoring stop {session_id} {recording_id}",
+      "sdk": "client.end_recording(\"{session_id}\", \"{recording_id}\")"
+    },
+    {
+      "name": "run_authoring_gates",
+      "method": "POST",
+      "path": "/v1/authoring/{session_id}/gates",
+      "summary": "Run every validation gate in fresh envs; the session reads running until the report is in",
+      "cli": "rlworld authoring gates {session_id}",
+      "sdk": "client.run_authoring_gates(\"{session_id}\")"
+    },
+    {
+      "name": "submit_authoring",
+      "method": "POST",
+      "path": "/v1/authoring/{session_id}/submit",
+      "summary": "Submit the task with its gate report for human review",
+      "cli": "rlworld authoring submit {session_id}",
+      "sdk": "client.submit_authoring(\"{session_id}\")"
+    },
+    {
       "name": "analyze_failures",
       "method": "POST",
       "path": "/v1/runs/{run_id}/failures/analyze",
