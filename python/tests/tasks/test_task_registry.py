@@ -201,6 +201,17 @@ def collect_instance(provider, candidate, results):
     results.append(provider.instance(candidate))
 
 
+def test_the_provider_keeps_each_generated_task_and_its_scripted_oracle(example_payload):
+    document = parse_spec_document(reconcile_payload(example_payload))
+    provider = RegistryTaskProvider(default_task_registry(), document, snapshots_for(document))
+    candidate = provider.candidates()[1]
+    generated = provider.generated_task(candidate)
+    assert provider.generated_task(candidate) is generated
+    assert provider.oracle(candidate) == ReconcileInvoices().oracle(generated)
+    assert provider.instance(candidate).instruction == generated.instruction
+    assert provider.oracle(provider.candidates()[2]) != provider.oracle(candidate)
+
+
 def test_rl_pools_grow_toward_the_curriculum_frontier(example_payload):
     document = parse_spec_document(reconcile_payload(example_payload, rl=True, user_simulator=None,
                                                      difficulty=difficulty(ambiguity="none").model_dump(mode="json")))

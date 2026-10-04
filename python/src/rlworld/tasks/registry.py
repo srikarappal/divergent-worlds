@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from rlworld.actions.models import ActionModel
 from rlworld.rewards.verifiers import UnknownVerifierError, VerifierRegistry
 from rlworld.rollout.episode import TaskInstance
 from rlworld.sdk.client import SnapshotSource
@@ -147,6 +148,7 @@ class RegistryTaskProvider:
         self.tasks: dict[str, RegisteredTask] = {}
         self.tasks_by_difficulty: dict[str, int] = {}
         self.instances: dict[str, TaskInstance] = {}
+        self.generated: dict[str, GeneratedTask] = {}
         run = document.run
         self.add_tasks(document.task.difficulty, run.tasks_per_batch * (1 if run.type == "rl" else run.batches))
         self.instance(next(iter(self.tasks.values())).candidate)
@@ -179,6 +181,20 @@ class RegistryTaskProvider:
                     continue
                 self.add_tasks(request.difficulty, request.count)
 
+    def generated_task(self, candidate: CandidateTask) -> GeneratedTask:
+        with self.lock:
+            cached = self.generated.get(candidate.task_id)
+            registered = self.tasks[candidate.task_id]
+        if cached is not None:
+            return cached
+        generated = self.template.generate(self.world, registered.candidate.difficulty, registered.seed)
+        with self.lock:
+            return self.generated.setdefault(candidate.task_id, generated)
+
+    def oracle(self, candidate: CandidateTask) -> list[ActionModel]:
+        """The template's scripted oracle for this task, the solution gates replay in a fresh env."""
+        return self.template.oracle(self.generated_task(candidate))
+
     def instance(self, candidate: CandidateTask) -> TaskInstance:
         with self.lock:
             cached = self.instances.get(candidate.task_id)
@@ -186,7 +202,7 @@ class RegistryTaskProvider:
         if cached is not None:
             return cached
         difficulty = registered.candidate.difficulty
-        generated = self.template.generate(self.world, difficulty, registered.seed)
+        generated = self.generated_task(candidate)
         instance = TaskInstance(
             task_id=candidate.task_id,
             template=self.template.name,
