@@ -6,8 +6,9 @@
 // object store directory that experimentd serves them from. With a snapshot
 // store, leases name snapshots by digest and the host pulls them to its cache;
 // fleetd builds base snapshots from image builds and sweeps unpinned snapshots
-// on a schedule (DESIGN.md 6.2). On shutdown every env on the host is destroyed
-// so no VM or container outlives its leases.
+// on a schedule (DESIGN.md 6.2). A warm pool keeps restored, paused envs of the
+// snapshots leases keep using (DESIGN.md 6.7). On shutdown every env on the host
+// is destroyed so no VM or container outlives its leases.
 package main
 
 import (
@@ -46,6 +47,7 @@ const (
 	shutdownDeadline   = 30 * time.Second
 	collectionInterval = time.Hour
 	snapshotWorkers    = 8
+	defaultWarmPeriod  = 10 * time.Second
 )
 
 type hostConfig struct {
@@ -93,6 +95,14 @@ type snapshotConfig struct {
 	GraceHours    int    `json:"grace_hours"`
 }
 
+// warmPoolConfig keeps per_snapshot restored, paused envs of every snapshot a lease used on this host within
+// idle_minutes; zero per_snapshot turns warm pools off, as Linux hosts whose restores are fast leave it.
+type warmPoolConfig struct {
+	PerSnapshot     int `json:"per_snapshot"`
+	IdleMinutes     int `json:"idle_minutes"`
+	IntervalSeconds int `json:"interval_seconds"`
+}
+
 type config struct {
 	Listen              string                     `json:"listen"`
 	Driver              string                     `json:"driver"`
@@ -109,6 +119,7 @@ type config struct {
 	Docker              dockerConfig               `json:"docker"`
 	Firecracker         firecrackerConfig          `json:"firecracker"`
 	Snapshots           snapshotConfig             `json:"snapshots"`
+	WarmPool            warmPoolConfig             `json:"warm_pool"`
 }
 
 // tools are the host side effects; tests swap in fakes.
@@ -252,6 +263,10 @@ func newFleet(loaded config, hostTools tools) (*fleet, error) {
 			return nil, err
 		}
 	}
+	if loaded.WarmPool.PerSnapshot > 0 {
+		service.EnableWarmPools(fleetd.WarmPolicy{PerSnapshot: loaded.WarmPool.PerSnapshot,
+			IdleAfter: time.Duration(max(loaded.WarmPool.IdleMinutes, 1)) * time.Minute})
+	}
 	return &fleet{handler: fleetd.NewHandler(service), leases: leases, node: node, service: service,
 		snapshots: snapshotsOn}, nil
 }
@@ -269,6 +284,30 @@ func (loaded config) snapshotSettings() (fleetd.SnapshotSettings, bool) {
 		time.Hour, Grace: time.Duration(max(loaded.Snapshots.GraceHours, 1)) * time.Hour}
 	return fleetd.SnapshotSettings{Store: snapshot.DirStore{Root: loaded.Snapshots.StoreDir}, Compatibility: binding,
 		WorkDir: loaded.Snapshots.CacheDir, Retention: retention}, true
+}
+
+// warmPeriod is how often warm pools are topped up and cooled.
+func (loaded config) warmPeriod() time.Duration {
+	if loaded.WarmPool.IntervalSeconds > 0 {
+		return time.Duration(loaded.WarmPool.IntervalSeconds) * time.Second
+	}
+	return defaultWarmPeriod
+}
+
+// maintainWarmPools keeps the warm pools in shape every interval until fleetd stops.
+func maintainWarmPools(ctx context.Context, service *fleetd.Service, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := service.MaintainWarmPools(ctx); err != nil {
+				log.Printf("warm pool upkeep: %v", err)
+			}
+		}
+	}
 }
 
 // collectSnapshots applies the retention policy every interval until fleetd stops.
@@ -321,6 +360,9 @@ func run(configPath string) error {
 	go built.leases.RunReaper(ctx, reaperInterval)
 	if built.snapshots {
 		go collectSnapshots(ctx, built.service, collectionInterval)
+	}
+	if loaded.WarmPool.PerSnapshot > 0 {
+		go maintainWarmPools(ctx, built.service, loaded.warmPeriod())
 	}
 	server := &http.Server{Addr: loaded.Listen, Handler: built.handler, ReadHeaderTimeout: 10 * time.Second}
 	serveErrors := make(chan error, 1)

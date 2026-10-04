@@ -394,3 +394,28 @@ func TestAFirecrackerHostServesItsSnapshotStore(t *testing.T) {
 	cancel()
 	collectSnapshots(ctx, built.service, time.Millisecond)
 }
+
+func TestWarmPoolsAreConfiguredPerHost(t *testing.T) {
+	payload := laptopConfig(t)
+	payload["warm_pool"] = map[string]any{"per_snapshot": 2, "idle_minutes": 45, "interval_seconds": 3}
+	loaded, err := loadConfig(writeConfig(t, payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.WarmPool.PerSnapshot != 2 || loaded.warmPeriod() != 3*time.Second {
+		t.Fatalf("warm pool config: %+v", loaded.WarmPool)
+	}
+	if (config{}).warmPeriod() != defaultWarmPeriod {
+		t.Fatal("upkeep runs every ten seconds by default")
+	}
+	built, err := newFleet(loaded, tools{commands: &refusingCommands{}, docker: &fakeDockerCLI{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := built.service.MaintainWarmPools(context.Background()); err != nil {
+		t.Fatalf("upkeep with nothing hot yet: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	maintainWarmPools(ctx, built.service, time.Millisecond)
+}

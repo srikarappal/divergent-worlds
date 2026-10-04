@@ -67,7 +67,7 @@ Added after checking DESIGN.md section by section against the tasks above.
 33. [todo] Public suites: OSWorld task import and a BrowserGym compatible interface so public suites run as eval (6.3).
 34. [todo] Scripted world events and NPCs: mid task emails and chat replies driven by the user simulator stack (6.4).
 35. [done] Snapshot builder and store: boot to the readiness probe and snapshot, content addressed chunks pulled lazily and prefetched for scheduled runs, gate reruns on image bumps, retention pins (3, 6.2).
-36. [todo] Warm pools of restored, paused VMs for hot snapshots (6.7).
+36. [done] Warm pools of restored, paused VMs for hot snapshots (6.7).
 37. [todo] Network proxies: record and replay proxy configuration and the logging, rate limited egress proxy for live internet eval (6.6).
 38. [todo] Eval integrity: clone fidelity measured against real apps and split overlap checks against public benchmarks (6.4, 6.10).
 39. [todo] Observability: Prometheus metrics from fleetd and experimentd, Grafana dashboards for platform health, chaos tests (6.15).
