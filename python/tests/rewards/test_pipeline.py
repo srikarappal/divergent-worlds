@@ -141,6 +141,25 @@ def test_volatile_paths_are_not_side_effects(task, registry):
     assert score(task, registry, final_state, volatile_patterns=["browser/history"]).termination == "success"
 
 
+def check_reads_reach_verifiers_but_not_changes(context):
+    read_text = context.final_state["reads"]["commands"]["cat out.txt"]["stdout"]
+    changed_roots = {change.path.split("/")[0] for change in context.changes}
+    return [CheckResult(name="reads", tier="exact", passed=read_text == "42" and "reads" not in changed_roots)]
+
+
+def test_task_reads_are_verifier_input_never_app_changes(task, registry):
+    final_state = final_state_with()
+    final_state["reads"] = {"files": {}, "commands": {"cat out.txt": {"stdout": "42", "stderr": "", "exit_code": 0}}}
+    record = score(task, registry, final_state)
+    assert (record.termination, record.side_effect_violations) == ("success", ())
+    reads_registry = VerifierRegistry()
+    reads_registry.register(FunctionVerifier(EXACT_VERIFIER, "1", "exact", check_reads_reach_verifiers_but_not_changes))
+    reads_registry.register(FunctionVerifier(SEMANTIC_VERIFIER, "1", "semantic", check_summary_email))
+    record = score(task, reads_registry, final_state)
+    assert record.checks[0].passed and record.termination == "success"
+    assert record.provenance.state_hash != score(task, registry, final_state_with()).provenance.state_hash
+
+
 def test_env_errors_are_excluded_from_training(task, registry):
     record = score(task, registry, final_state_with(),
                    outcome=EpisodeOutcome(steps_taken=3, env_error="restore failed"))

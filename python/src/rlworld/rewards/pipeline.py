@@ -1,13 +1,16 @@
 """Score one episode: diff, side effects, exact then semantic verifiers, then the judge, then compose.
 
 The caller (the reward service) freezes input and extracts state before this
-runs and tears the VM down only after it returns (DESIGN.md section 6.9).
+runs and tears the VM down only after it returns (DESIGN.md section 6.9). What
+a task's read plan read is verifier input, not app state, so diffs and side
+effect checks leave it out.
 """
 
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from rlworld.guest.protocol import TASK_READS_KEY
 from rlworld.rewards.diff import diff_states, side_effect_violations
 from rlworld.rewards.records import (
     CheckResult,
@@ -70,7 +73,8 @@ def evaluate_episode(
     if outcome.agent_error:
         return error_record("agent_error", outcome.agent_error, base_provenance)
 
-    changes = tuple(diff_states(initial_state, final_state))
+    app_state = {key: value for key, value in final_state.items() if key != TASK_READS_KEY}
+    changes = tuple(diff_states(initial_state, app_state))
     violations = tuple(side_effect_violations(changes, task.side_effects.allowed_changes, volatile_patterns))
     context = VerifierContext(
         task=task,
