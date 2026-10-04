@@ -100,6 +100,12 @@ class RunExecutor(Protocol):
     def dry_run(self, document: SpecDocument) -> DryRun: ...
 
 
+class RunSnapshotPreparer(Protocol):
+    """Pins a run's snapshot and prefetches it before the run starts."""
+
+    def prepare(self, run: RunRecord, document: SpecDocument) -> dict[str, Any]: ...
+
+
 class ExperimentService:
     def __init__(
         self,
@@ -112,6 +118,7 @@ class ExperimentService:
         approval_threshold_usd: float | None = None,
         token_ttl_seconds: float = 7 * 86_400,
         clock: Callable[[], float] = time.time,
+        run_snapshots: RunSnapshotPreparer | None = None,
     ) -> None:
         if not token_secret:
             raise ValueError("run tokens need a signing secret")
@@ -124,6 +131,7 @@ class ExperimentService:
         self.approval_threshold_usd = approval_threshold_usd
         self.token_ttl_seconds = token_ttl_seconds
         self.clock = clock
+        self.run_snapshots = run_snapshots
         self.specs: dict[str, tuple[str, SpecDocument]] = {}
         self.experiments: dict[str, ExperimentRecord] = {}
         self.runs: dict[str, RunRecord] = {}
@@ -208,6 +216,8 @@ class ExperimentService:
             with self.lock:
                 run.state = "running"  # before starting, so a fast worker's completion is never overwritten
             try:
+                if self.run_snapshots is not None:
+                    self.record_event(run_id, "snapshot", self.run_snapshots.prepare(run, document))
                 if run.run_type == "rl":
                     launch_context = LaunchContext(
                         run_id=run_id, tenant=run.tenant, cost_center=document.experiment.name,
