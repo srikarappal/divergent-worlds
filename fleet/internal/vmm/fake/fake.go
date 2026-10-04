@@ -4,6 +4,7 @@ package fake
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 
 	"rlworld/fleet/internal/vmm"
@@ -19,11 +20,17 @@ type Driver struct {
 	DriverName string
 	// Restores keeps every restore spec in order.
 	Restores []vmm.RestoreSpec
+	// Boots keeps every boot spec in order.
+	Boots []vmm.BootSpec
+	// Version is what VMMVersion reports.
+	Version string
+	// WritesSnapshots makes Snapshot write small state and memory files where a real VMM would.
+	WritesSnapshots bool
 }
 
 // New returns an empty fake driver named fake.
 func New() *Driver {
-	return &Driver{vms: map[string]vmm.VM{}, FailNext: map[string]error{}, DriverName: "fake"}
+	return &Driver{vms: map[string]vmm.VM{}, FailNext: map[string]error{}, DriverName: "fake", Version: "fake-1"}
 }
 
 // Name identifies the driver.
@@ -57,6 +64,29 @@ func (driver *Driver) Restore(_ context.Context, spec vmm.RestoreSpec) (vmm.VM, 
 	return restored, nil
 }
 
+// Boot creates a running VM, as a cold boot does.
+func (driver *Driver) Boot(_ context.Context, spec vmm.BootSpec) (vmm.VM, error) {
+	driver.mu.Lock()
+	defer driver.mu.Unlock()
+	if err := driver.record("boot", spec.VMID); err != nil {
+		return vmm.VM{}, err
+	}
+	driver.Boots = append(driver.Boots, spec)
+	booted := vmm.VM{ID: spec.VMID, State: vmm.Running, Driver: driver.Name()}
+	driver.vms[spec.VMID] = booted
+	return booted, nil
+}
+
+// VMMVersion reports Version for a VM that exists.
+func (driver *Driver) VMMVersion(_ context.Context, vmID string) (string, error) {
+	driver.mu.Lock()
+	defer driver.mu.Unlock()
+	if _, found := driver.vms[vmID]; !found {
+		return "", vmm.ErrUnknownVM
+	}
+	return driver.Version, driver.record("version", vmID)
+}
+
 func (driver *Driver) setState(operation, vmID string, state vmm.State) error {
 	driver.mu.Lock()
 	defer driver.mu.Unlock()
@@ -83,9 +113,17 @@ func (driver *Driver) Resume(_ context.Context, vmID string) error {
 }
 
 // Snapshot pauses the VM and returns where the checkpoint would be.
-func (driver *Driver) Snapshot(_ context.Context, vmID string, kind vmm.SnapshotKind, statePath, memoryPath string) (vmm.SnapshotRef, error) {
+func (driver *Driver) Snapshot(_ context.Context, vmID string, kind vmm.SnapshotKind, statePath,
+	memoryPath string) (vmm.SnapshotRef, error) {
 	if err := driver.setState("snapshot", vmID, vmm.Paused); err != nil {
 		return vmm.SnapshotRef{}, err
+	}
+	if driver.WritesSnapshots {
+		for path, content := range map[string]string{statePath: "state", memoryPath: "memory"} {
+			if err := os.WriteFile(path, []byte(fmt.Sprintf("%s %s of %s", kind, content, vmID)), 0o644); err != nil {
+				return vmm.SnapshotRef{}, err
+			}
+		}
 	}
 	return vmm.SnapshotRef{StatePath: statePath, MemoryPath: memoryPath, Kind: kind}, nil
 }

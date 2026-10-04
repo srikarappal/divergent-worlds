@@ -45,6 +45,44 @@ type RestoreSpec struct {
 	VCPUs           int
 	Namespace       string
 	Resume          bool
+	// LazyMemory, when set, serves guest memory page by page while the memory file is still being pulled
+	// (DESIGN.md 6.1.2, UFFD lazy loading); MemoryPath is then unused.
+	LazyMemory PageSource
+}
+
+// PageSource is a snapshot's memory file read at any offset, fetching what is not local yet.
+type PageSource interface {
+	ReadAt(buffer []byte, offset int64) (int, error)
+	Size() int64
+}
+
+// BootSpec cold boots a VM from an image's disk, as the snapshot builder does once per image and pool.
+type BootSpec struct {
+	VMID string
+	// KernelPath is the guest kernel, for VMMs that boot one directly.
+	KernelPath string
+	// DiskPath is the root disk the VM writes to; it becomes the snapshot's disk.
+	DiskPath string
+	// MemoryPath is where guest RAM lives for VMMs that keep it in a file, which becomes the snapshot's memory.
+	MemoryPath string
+	MemoryMiB  int
+	VCPUs      int
+	Namespace  string
+}
+
+// Booter cold boots VMs; the VM pools whose base snapshots the builder takes implement it.
+type Booter interface {
+	Boot(ctx context.Context, spec BootSpec) (VM, error)
+}
+
+// LazyRestorer marks drivers that honor RestoreSpec.LazyMemory.
+type LazyRestorer interface {
+	RestoresLazily() bool
+}
+
+// Versioner reports the VMM version a running VM's snapshots are bound to.
+type Versioner interface {
+	VMMVersion(ctx context.Context, vmID string) (string, error)
 }
 
 // SnapshotRef points at a written checkpoint.
