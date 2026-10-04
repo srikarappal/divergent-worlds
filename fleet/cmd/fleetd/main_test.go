@@ -334,7 +334,8 @@ func firecrackerSnapshotConfig(t *testing.T) map[string]any {
 	payload["firecracker"] = map[string]any{"jailer_path": "/usr/bin/jailer", "firecracker_path": "/usr/bin/firecracker",
 		"chroot_base_dir": t.TempDir(), "uid": 1000, "gid": 1000, "cpu_template_path": "/etc/rlworld/baseline.json"}
 	payload["snapshots"] = map[string]any{"store_dir": t.TempDir(), "cache_dir": t.TempDir(), "vmm_version": "1.12.0",
-		"cpu_model": "fleet_baseline", "lazy_memory": true, "retention_days": 30, "grace_hours": 2}
+		"cpu_model": "fleet_baseline", "lazy_memory": true, "retention_days": 30, "grace_hours": 2,
+		"slow_world_seconds": 7.5}
 	return payload
 }
 
@@ -357,7 +358,8 @@ func TestSnapshotStoresNeedAVMPoolAndItsBinding(t *testing.T) {
 	settings, enabled := loaded.snapshotSettings()
 	want := snapshot.Compatibility{Pool: "linux", VMM: "firecracker", VMMVersion: "1.12.0", CPUModel: "fleet_baseline"}
 	if !enabled || settings.Compatibility != want || settings.Retention.MinAge != 30*24*time.Hour ||
-		settings.Retention.Grace != 2*time.Hour || settings.WorkDir != loaded.Snapshots.CacheDir {
+		settings.Retention.Grace != 2*time.Hour || settings.WorkDir != loaded.Snapshots.CacheDir ||
+		settings.SlowWorld != 7500*time.Millisecond {
 		t.Fatalf("settings: %+v", settings)
 	}
 	if _, enabled := (config{}).snapshotSettings(); enabled {

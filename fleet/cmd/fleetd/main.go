@@ -93,6 +93,8 @@ type snapshotConfig struct {
 	LazyMemory    bool   `json:"lazy_memory"`
 	RetentionDays int    `json:"retention_days"`
 	GraceHours    int    `json:"grace_hours"`
+	// SlowWorldSeconds is how long a world may take to load before it gets a world snapshot; zero means 5.
+	SlowWorldSeconds float64 `json:"slow_world_seconds"`
 }
 
 // warmPoolConfig keeps per_snapshot restored, paused envs of every snapshot a lease used on this host within
@@ -283,7 +285,8 @@ func (loaded config) snapshotSettings() (fleetd.SnapshotSettings, bool) {
 	retention := snapshot.RetentionPolicy{MinAge: time.Duration(max(loaded.Snapshots.RetentionDays, 1)) * 24 *
 		time.Hour, Grace: time.Duration(max(loaded.Snapshots.GraceHours, 1)) * time.Hour}
 	return fleetd.SnapshotSettings{Store: snapshot.DirStore{Root: loaded.Snapshots.StoreDir}, Compatibility: binding,
-		WorkDir: loaded.Snapshots.CacheDir, Retention: retention}, true
+		WorkDir: loaded.Snapshots.CacheDir, Retention: retention,
+		SlowWorld: time.Duration(loaded.Snapshots.SlowWorldSeconds * float64(time.Second))}, true
 }
 
 // warmPeriod is how often warm pools are topped up and cooled.

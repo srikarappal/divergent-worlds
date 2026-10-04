@@ -155,6 +155,7 @@ func (api *httpAPI) routes() []route {
 		{"GET /v1/snapshots/current", api.currentSnapshot},
 		{"GET /v1/snapshots/{digest}", api.getSnapshot},
 		{"POST /v1/snapshots/{digest}/prefetch", api.prefetchSnapshot},
+		{"POST /v1/snapshots/{digest}/worlds", api.prepareWorld},
 		{"PUT /v1/snapshots/{digest}/pins/{holder}", api.pinSnapshot},
 		{"DELETE /v1/snapshots/{digest}/pins/{holder}", api.unpinSnapshot},
 		{"GET /v1/admission", api.admissionStatus},
@@ -387,4 +388,18 @@ func (api *httpAPI) unpinSnapshot(writer http.ResponseWriter, request *http.Requ
 		return
 	}
 	writer.WriteHeader(http.StatusNoContent)
+}
+
+// prepareWorld decides how a world reaches envs of a base snapshot; the first time it measures, for minutes.
+func (api *httpAPI) prepareWorld(writer http.ResponseWriter, request *http.Request) {
+	var body WorldPreparation
+	if !decode(writer, request, &body) {
+		return
+	}
+	decision, err := api.service.PrepareWorld(request.Context(), request.PathValue("digest"), body)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, decision)
 }

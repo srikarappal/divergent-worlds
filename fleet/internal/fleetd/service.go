@@ -45,6 +45,7 @@ type Node interface {
 	WarmEnvs() map[string]int
 	Cool(ctx context.Context, digest string, count int) (int, error)
 	BuildSnapshot(ctx context.Context, request nodeagent.BuildRequest) (nodeagent.BuildResult, error)
+	CaptureSnapshot(ctx context.Context, envID, outputDir string) (nodeagent.BuildResult, error)
 	Pause(ctx context.Context, envID string) error
 	Resume(ctx context.Context, envID string) error
 	DialVNC(ctx context.Context, envID string) (net.Conn, *bufio.Reader, error)

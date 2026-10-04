@@ -64,7 +64,13 @@ type snapshotFleet struct {
 
 func newSnapshotFleet(t *testing.T, binding snapshot.Compatibility, enabled bool) *snapshotFleet {
 	t.Helper()
-	fakeClock := clock.NewFake(time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC))
+	return buildSnapshotFleet(t, binding, enabled, probeGuest{&stubGuest{}},
+		clock.NewFake(time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)))
+}
+
+func buildSnapshotFleet(t *testing.T, binding snapshot.Compatibility, enabled bool, guest nodeagent.GuestChannel,
+	fakeClock *clock.Fake) *snapshotFleet {
+	t.Helper()
 	controller, err := admission.NewController(admission.Config{Capacity: 16})
 	if err != nil {
 		t.Fatal(err)
@@ -79,7 +85,7 @@ func newSnapshotFleet(t *testing.T, binding snapshot.Compatibility, enabled bool
 	workDir := t.TempDir()
 	cache := snapshot.NewCache(store, filepath.Join(workDir, "cache"), fakePool, 2)
 	agent := nodeagent.New(nodeagent.Config{HostID: "host_a", OverlayDir: t.TempDir(), SettlePoll: 50 * time.Millisecond,
-		Snapshots: cache}, driver, probeGuest{&stubGuest{}}, copyingCommands{}, fakeClock, fakeClock.Advance)
+		Snapshots: cache}, driver, guest, copyingCommands{}, fakeClock, fakeClock.Advance)
 	service := NewService(leases, placement, map[string]Node{"host_a": agent}, t.TempDir())
 	service.now = fakeClock.Now
 	if enabled {

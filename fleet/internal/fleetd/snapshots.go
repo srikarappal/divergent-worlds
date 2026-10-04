@@ -34,6 +34,8 @@ type SnapshotSettings struct {
 	WorkDir       string
 	Retention     snapshot.RetentionPolicy
 	ChunkSize     int64
+	// SlowWorld is how long materializing a world may take before it gets a world snapshot; zero means 5 s.
+	SlowWorld time.Duration
 }
 
 // SnapshotBuild asks for a base snapshot of an image build, at the memory and vCPUs the pool's leases use.
