@@ -1,6 +1,6 @@
-# rl-world
+# divergent
 
-rl-world manufactures, runs, scores and replays worlds for training and evaluating computer use agents. It launches
+divergent manufactures, runs, scores and replays worlds for training and evaluating computer use agents. It launches
 Linux and Windows microVMs from content addressed specs, seeds them with coherent synthetic companies (mail, files,
 chat, identities), lets any policy endpoint drive them and grades every episode with verifiers plus judge endpoints.
 
