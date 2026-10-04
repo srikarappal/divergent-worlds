@@ -8,19 +8,22 @@ then grows wherever the curriculum planner finds the learnable band or steps
 difficulty up or down. Each task's instance is generated on first use: the
 world task setup materializes, the start state that materialization extracts
 to, the ground truth that stays outside the VM and the snapshot of the run's
-image.
+image. When fleetd gave the run's world a world snapshot, because it loads
+slowly or differently each time, instances restore from it and inject only
+what their task changes.
 """
 
 import tempfile
 import threading
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol
 
 from rlworld.actions.models import ActionModel
 from rlworld.rewards.verifiers import UnknownVerifierError, VerifierRegistry
 from rlworld.rollout.episode import TaskInstance
+from rlworld.rollout.groups import EnvShape
 from rlworld.sdk.client import SnapshotNotFoundError, SnapshotSource
 from rlworld.specs.digest import spec_digest
 from rlworld.specs.document import SpecDocument
@@ -35,6 +38,7 @@ from rlworld.tasks.generators import (
     task_identifier,
     task_seed,
 )
+from rlworld.worlds.delta import world_delta
 from rlworld.worlds.generator import build_world
 from rlworld.worlds.integrations import extract_world_state, materialize_world
 from rlworld.worlds.model import World, world_digest
@@ -75,6 +79,35 @@ class FleetSnapshots:
         except SnapshotNotFoundError as error:
             raise UnknownSnapshotError(f"no snapshot of image {image.id} on {pool} yet") from error
         return SnapshotSource(digest=current["snapshot"], state_path="", memory_path="", base_disk_path="")
+
+
+class WorldIndex(Protocol):
+    def prepare_world(self, base_digest: str, world_digest: str, payload: dict[str, Any], apps: list[str], pool: str,
+                      memory_mib: int, cpu_millicores: int, vcpus: int) -> dict[str, Any]: ...
+
+
+class WorldPreparer(Protocol):
+    def prepare(self, base: SnapshotSource, world: World, apps: tuple[str, ...],
+                image: ImageSpec) -> SnapshotSource | None: ...
+
+
+class FleetWorlds:
+    """fleetd decides once per base snapshot and world whether the world gets a world snapshot (DESIGN.md 3)."""
+
+    def __init__(self, fleet: WorldIndex, shapes: Mapping[str, EnvShape]) -> None:
+        self.fleet = fleet
+        self.shapes = dict(shapes)
+
+    def prepare(self, base: SnapshotSource, world: World, apps: tuple[str, ...],
+                image: ImageSpec) -> SnapshotSource | None:
+        """The world snapshot to restore from, or None when the world loads at every restore."""
+        shape = self.shapes[image.pool.vmm]
+        decision = self.fleet.prepare_world(base.digest, world_digest(world),
+                                            {"world": world.model_dump(mode="json"), "apps": list(apps)}, list(apps),
+                                            shape.pool, shape.memory_mib, shape.cpu_millicores, shape.vcpus)
+        if not decision.get("snapshot"):
+            return None
+        return SnapshotSource(digest=decision["snapshot"], state_path="", memory_path="", base_disk_path="")
 
 
 class StaticSnapshots:
@@ -158,7 +191,7 @@ class RegistryTaskProvider:
     """One run's view of the registry; safe to call from the worker's group threads."""
 
     def __init__(self, registry: TaskRegistry, document: SpecDocument, snapshots: SnapshotResolver,
-                 max_tasks_per_difficulty: int = 256) -> None:
+                 max_tasks_per_difficulty: int = 256, worlds: WorldPreparer | None = None) -> None:
         problems = registry.problems(document)
         if problems:
             raise TaskGenerationError("; ".join(problems))
@@ -169,6 +202,8 @@ class RegistryTaskProvider:
         self.world_digest = world_digest(self.world)
         self.apps = tuple(document.world.materialize)
         self.snapshot = snapshots.snapshot(document.image)
+        self.world_snapshot = (worlds.prepare(self.snapshot, self.world, self.apps, document.image)
+                               if worlds is not None else None)
         self.lock = threading.Lock()
         self.tasks: dict[str, RegisteredTask] = {}
         self.tasks_by_difficulty: dict[str, int] = {}
@@ -220,6 +255,14 @@ class RegistryTaskProvider:
         """The template's scripted oracle for this task, the solution gates replay in a fresh env."""
         return self.template.oracle(self.generated_task(candidate))
 
+    def start_from(self, generated: GeneratedTask) -> tuple[SnapshotSource, dict[str, Any]]:
+        """The world snapshot with the task's delta when there is one and the task fits it, else the base with all."""
+        if self.world_snapshot is not None:
+            delta = world_delta(self.world, generated.world)
+            if delta is not None:
+                return self.world_snapshot, setup_payload(replace(generated, world=delta), self.apps)
+        return self.snapshot, setup_payload(generated, self.apps)
+
     def instance(self, candidate: CandidateTask) -> TaskInstance:
         with self.lock:
             cached = self.instances.get(candidate.task_id)
@@ -228,6 +271,7 @@ class RegistryTaskProvider:
             return cached
         difficulty = registered.candidate.difficulty
         generated = self.generated_task(candidate)
+        snapshot, setup = self.start_from(generated)
         instance = TaskInstance(
             task_id=candidate.task_id,
             template=self.template.name,
@@ -236,10 +280,10 @@ class RegistryTaskProvider:
             world_digest=self.world_digest,
             seed=registered.seed,
             instruction=generated.instruction,
-            snapshot=self.snapshot,
+            snapshot=snapshot,
             initial_state=start_state(generated.world, self.apps),
             ground_truth=generated.ground_truth,
-            setup_payload=setup_payload(generated, self.apps),
+            setup_payload=setup,
             hidden_intent=generated.hidden_intent,
             personas=generated.personas,
             secrets=generated.secrets,

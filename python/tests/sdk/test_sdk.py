@@ -230,6 +230,9 @@ class FakeSnapshotStore:
             return httpx.Response(200, json={"removed": [], "removed_chunks": 0, "freed_bytes": 0})
         if path.endswith("/prefetch"):
             return httpx.Response(202, json={"hosts": ["host_a"]})
+        if path.endswith("/worlds"):
+            return httpx.Response(200, json={"base": "sha256:s", "world": "sha256:w", "snapshot": None,
+                                             "deterministic": True, "materialize_seconds": [0.4, 0.5]})
         if "/pins/" in path:
             return httpx.Response(204) if request.method == "DELETE" else httpx.Response(200, json={"holder": "x"})
         return httpx.Response(200, json={"manifest": {"digest": "sha256:s"}, "pins": []})
@@ -259,3 +262,9 @@ def test_the_client_reaches_every_snapshot_route():
     with pytest.raises(SnapshotNotFoundError) as missing:
         client.current_snapshot("sha256:image", "nowhere")
     assert missing.value.code == "unknown_snapshot" and missing.value.status_code == 404
+    decision = client.prepare_world("sha256:s", "sha256:w", {"world": {}, "apps": ["mail"]}, ["mail"], "linux", 2048,
+                                    2000, 2)
+    assert decision["snapshot"] is None and store.requests[-1][:2] == ("POST", "/v1/snapshots/sha256:s/worlds")
+    assert store.requests[-1][2] == {"world": "sha256:w", "payload": {"world": {}, "apps": ["mail"]},
+                                     "apps": ["mail"], "pool": "linux", "memory_mib": 2048, "cpu_millicores": 2000,
+                                     "vcpus": 2}

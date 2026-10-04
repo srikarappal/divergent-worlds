@@ -214,6 +214,13 @@ class FleetClient:
         body = {"pool": pool, "envs": envs, "memory_mib": memory_mib, "cpu_millicores": cpu_millicores, "gpus": gpus}
         return self.request("POST", f"/v1/snapshots/{digest}/prefetch", body)["hosts"]
 
+    def prepare_world(self, base_digest: str, world_digest: str, payload: dict[str, Any], apps: list[str], pool: str,
+                      memory_mib: int, cpu_millicores: int, vcpus: int) -> dict[str, Any]:
+        """How a world reaches envs of a base snapshot; the first time, fleetd measures it in fresh envs."""
+        body = {"world": world_digest, "payload": payload, "apps": apps, "pool": pool, "memory_mib": memory_mib,
+                "cpu_millicores": cpu_millicores, "vcpus": vcpus}
+        return self.request("POST", f"/v1/snapshots/{base_digest}/worlds", body)
+
     def pin_snapshot(self, digest: str, holder: str) -> dict[str, Any]:
         return self.request("PUT", f"/v1/snapshots/{digest}/pins/{quote(holder, safe=':')}")
 

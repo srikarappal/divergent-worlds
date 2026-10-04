@@ -14,15 +14,17 @@ from support.experiment_fakes import eval_payload
 from rlworld.actions.models import DoneAction, ExecAction
 from rlworld.rewards.records import EpisodeOutcome
 from rlworld.rewards.verifiers import VerifierContext
+from rlworld.rollout.groups import EnvShape
 from rlworld.sdk.client import SnapshotNotFoundError, SnapshotSource
 from rlworld.specs import load_spec_document, parse_spec_document, spec_digest
 from rlworld.specs.models import DifficultySpec
 from rlworld.tasks import GateInputs, PassRateTracker, SolutionAttempt, TaskGateRunner
 from rlworld.tasks.curriculum import difficulty_key
 from rlworld.tasks.finance import SUMMARY_VERIFIER, ReconcileInvoices, oracle_script
-from rlworld.tasks.generators import TaskGenerationError
+from rlworld.tasks.generators import GeneratedTask, TaskGenerationError
 from rlworld.tasks.registry import (
     FleetSnapshots,
+    FleetWorlds,
     RegistryTaskProvider,
     StaticSnapshots,
     UnknownSnapshotError,
@@ -31,7 +33,7 @@ from rlworld.tasks.registry import (
 )
 from rlworld.worlds import extract_world_state, generate_mid_market_company, materialize_world
 from rlworld.worlds.integrations import USER_WORLD_FOLDER
-from rlworld.worlds.model import World
+from rlworld.worlds.model import World, world_digest
 from rlworld.worlds.perturbations import INVOICE_EXPORT_PATH
 
 WORLD_SIZE = {"employees": 6, "customers": 6, "invoices_per_customer": 3, "emails_per_person": 2}
@@ -279,3 +281,72 @@ def test_fleet_snapshots_name_the_current_snapshot_for_hosts_to_pull(example_pay
         FleetSnapshots(index, {}).snapshot(document.image)
     with pytest.raises(UnknownSnapshotError, match=f"no snapshot of image {document.image.id} on linux yet"):
         FleetSnapshots(index, {vmm: "linux"}).snapshot(document.image)
+
+
+WORLD_SNAPSHOT = SnapshotSource(digest="sha256:" + "3c" * 32, state_path="", memory_path="", base_disk_path="")
+
+
+class PreparedWorlds:
+    """A world preparer that already decided: a world snapshot, or none."""
+
+    def __init__(self, snapshot):
+        self.decided = snapshot
+        self.calls = []
+
+    def prepare(self, base, world, apps, image):
+        self.calls.append((base, world_digest(world), apps, image.id))
+        return self.decided
+
+
+class WorldIndexStub:
+    def __init__(self, decision):
+        self.decision = decision
+        self.asked = []
+
+    def prepare_world(self, base_digest, world_digest, payload, apps, pool, memory_mib, cpu_millicores, vcpus):
+        self.asked.append((base_digest, world_digest, payload, apps, pool, memory_mib, cpu_millicores, vcpus))
+        return self.decision
+
+
+def test_instances_restore_from_a_world_snapshot_and_inject_only_their_changes(example_payload):
+    document = parse_spec_document(reconcile_payload(example_payload))
+    worlds = PreparedWorlds(WORLD_SNAPSHOT)
+    provider = RegistryTaskProvider(default_task_registry(), document, snapshots_for(document), worlds=worlds)
+    plain = RegistryTaskProvider(default_task_registry(), document, snapshots_for(document))
+    assert worlds.calls == [(SNAPSHOT, provider.world_digest, APPS, document.image.id)]
+    instance, full = provider.instance(provider.candidates()[0]), plain.instance(plain.candidates()[0])
+    assert instance.snapshot == WORLD_SNAPSHOT and full.snapshot == SNAPSHOT
+    injected = World.model_validate(instance.setup_payload["world"])
+    assert len(injected.emails) == 2 and [document.path for document in injected.documents] == ["invoices.csv"]
+    assert len(World.model_validate(full.setup_payload["world"]).emails) > len(injected.emails)
+    assert (instance.initial_state, instance.task_digest, instance.ground_truth) == (
+        full.initial_state, full.task_digest, full.ground_truth)
+    undecided = RegistryTaskProvider(default_task_registry(), document, snapshots_for(document),
+                                     worlds=PreparedWorlds(None))
+    assert undecided.instance(undecided.candidates()[0]).snapshot == SNAPSHOT
+
+
+def test_a_task_that_removes_part_of_its_world_restores_from_the_base(example_payload):
+    document = parse_spec_document(reconcile_payload(example_payload))
+    provider = RegistryTaskProvider(default_task_registry(), document, snapshots_for(document),
+                                    worlds=PreparedWorlds(WORLD_SNAPSHOT))
+    generated = provider.generated_task(provider.candidates()[0])
+    trimmed = generated.world.model_copy(update={"emails": generated.world.emails[1:]})
+    snapshot, setup = provider.start_from(GeneratedTask(instruction=generated.instruction, world=trimmed,
+                                                        ground_truth=generated.ground_truth))
+    assert snapshot == SNAPSHOT and setup["world"] == trimmed.model_dump(mode="json")
+
+
+def test_fleet_worlds_ask_fleetd_with_the_runs_pool_shape(example_payload):
+    document = parse_spec_document(reconcile_payload(example_payload))
+    shape = EnvShape(pool="windows", memory_mib=6144, vcpus=2, cpu_millicores=3000)
+    index = WorldIndexStub({"snapshot": WORLD_SNAPSHOT.digest, "deterministic": True})
+    world = base_world()
+    prepared = FleetWorlds(index, {document.image.pool.vmm: shape}).prepare(SNAPSHOT, world, APPS, document.image)
+    assert prepared == WORLD_SNAPSHOT
+    base_digest, digest, payload, apps, pool, memory, cpu, vcpus = index.asked[0]
+    assert (base_digest, digest, apps, pool, memory, cpu, vcpus) == (SNAPSHOT.digest, world_digest(world),
+                                                                     list(APPS), "windows", 6144, 3000, 2)
+    assert payload == {"world": world.model_dump(mode="json"), "apps": list(APPS)}
+    fast = FleetWorlds(WorldIndexStub({"snapshot": None, "deterministic": True}), {document.image.pool.vmm: shape})
+    assert fast.prepare(SNAPSHOT, world, APPS, document.image) is None
