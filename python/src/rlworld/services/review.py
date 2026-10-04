@@ -87,7 +87,7 @@ class ReviewRequest(BaseModel):
 
 class ReviewItem(BaseModel):
     item_id: str
-    action: ReviewAction | Literal["bug_ticket", "gate_failure", "alert"]
+    action: ReviewAction | Literal["bug_ticket", "gate_failure", "alert", "task_submission"]
     queue: str
     run_id: str
     episode_ids: list[str]
@@ -100,7 +100,7 @@ class ReviewItem(BaseModel):
     created_at: float
     resolved_by: str = ""
     resolved_at: float | None = None
-    source: Literal["console", "failure_analysis", "gates", "alert"] = "console"
+    source: Literal["console", "failure_analysis", "gates", "alert", "authoring"] = "console"
 
 
 class ReviewUpdate(BaseModel):
