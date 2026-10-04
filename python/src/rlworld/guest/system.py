@@ -70,8 +70,16 @@ def user_command_argv(user: str, command: str) -> list[str]:
     return ["runuser", "-u", user, "--", "bash", "-lc", command]
 
 
+def user_probe_argv(user: str, command: str) -> list[str]:
+    """Outside a login shell, so profile and rc files the policy may have edited never run."""
+    return ["runuser", "-u", user, "--", "bash", "--noprofile", "--norc", "-c", command]
+
+
 class UserShell:
-    """The policy's shell: commands and app launches run as the desktop user."""
+    """The policy's shell: commands and app launches run as the desktop user.
+
+    Probes run task read commands as the same user but outside the login shell.
+    """
 
     def __init__(self, user: str, home: str, display: str = ":0") -> None:
         self.user = user
@@ -79,9 +87,15 @@ class UserShell:
                             "PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": "en_US.UTF-8"}
 
     def execute(self, command: str, timeout_s: int) -> TerminalOutput:
+        return self.run(user_command_argv(self.user, command), timeout_s)
+
+    def probe(self, command: str, timeout_s: int) -> TerminalOutput:
+        return self.run(user_probe_argv(self.user, command), timeout_s)
+
+    def run(self, argv: list[str], timeout_s: int) -> TerminalOutput:
         try:
-            completed = subprocess.run(user_command_argv(self.user, command), env=self.environment,
-                                       capture_output=True, text=True, timeout=timeout_s)
+            completed = subprocess.run(argv, env=self.environment, capture_output=True, text=True,
+                                       timeout=timeout_s)
         except subprocess.TimeoutExpired as error:
             stdout = error.stdout.decode() if isinstance(error.stdout, bytes) else error.stdout or ""
             return TerminalOutput(stdout=stdout, stderr=f"timed out after {timeout_s} s",

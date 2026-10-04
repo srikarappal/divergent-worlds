@@ -2,13 +2,16 @@
 
 One JSON object per line each way over a vsock stream. A request carries an id,
 a method and params; its response carries the same id and either a result or
-an error with a code and a message.
+an error with a code and a message. Task setup may hand the guest a read plan;
+extraction then returns what it read under the reads key beside the app states.
 """
 
 import json
 from typing import Any, BinaryIO
 
 MAX_MESSAGE_BYTES = 64 * 1024 * 1024
+TASK_READS_KEY = "reads"
+READ_STEP_KINDS = frozenset({"execute", "sleep"})
 
 
 class GuestFailure(Exception):

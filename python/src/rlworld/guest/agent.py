@@ -7,6 +7,14 @@ and file changes, hashes the screen for settle detection, applies clone
 hygiene after a restore (world clock and fresh RNG entropy), writes world
 state, task setup and entitlements, then extracts app state for the verifiers.
 Backends hide X11, AT-SPI, Chrome DevTools and the shell.
+
+Task setup may carry ordered steps (write a file, open it and wait for its
+window, launch or execute a command, sleep) and a read plan the host hands over
+with it: files and command outputs a task's verifiers need beyond app state,
+such as an imported public suite task's result file. The plan stays in this
+process until extraction, out of the policy's reach. Reads never follow links
+the policy may have planted and commands run outside the user's login shell,
+whose profile the policy can edit.
 """
 
 import base64
@@ -14,6 +22,8 @@ import hashlib
 import io
 import itertools
 import os
+import shlex
+import stat
 import time
 from collections.abc import Callable, Mapping
 from datetime import datetime
@@ -36,13 +46,20 @@ from rlworld.actions.models import (
     WaitAction,
     parse_action,
 )
-from rlworld.guest.protocol import GuestFailure
+from rlworld.guest.protocol import READ_STEP_KINDS, TASK_READS_KEY, GuestFailure
 from rlworld.worlds.integrations import extract_world_state, materialize_world
 from rlworld.worlds.model import World
 
 BUTTON_NUMBERS = {"left": "1", "middle": "2", "right": "3"}
 HASH_SIZE = (160, 100)
 SESSION_COOKIE_PREFIX = "session_"
+WINDOW_ROLES = frozenset({"frame", "window", "dialog"})
+OPEN_TIMEOUT_SECONDS = 60
+EXECUTE_TIMEOUT_SECONDS = 120
+READ_TIMEOUT_SECONDS = 60
+WINDOW_POLL_SECONDS = 1.0
+MAX_READ_BYTES = 32 * 1024 * 1024
+MAX_READ_CHARACTERS = 1024 * 1024
 
 
 class Screen(Protocol):
@@ -69,6 +86,8 @@ class Browser(Protocol):
 
 class Shell(Protocol):
     def execute(self, command: str, timeout_s: int) -> TerminalOutput: ...
+
+    def probe(self, command: str, timeout_s: int) -> TerminalOutput: ...
 
     def launch(self, command: str) -> None: ...
 
@@ -166,6 +185,40 @@ def truncated(text: str, limit: int) -> str:
     return text if len(text) <= limit else f"{text[:limit]}\n[truncated {len(text) - limit} characters]"
 
 
+def file_content(content: Mapping[str, Any]) -> bytes:
+    return base64.b64decode(content["base64"]) if "base64" in content else content["text"].encode("utf-8")
+
+
+def window_titled(root: AccessibilityNode | None, text: str) -> bool:
+    """Whether a frame, window or dialog's name contains text, the way the snapshot readiness probe looks."""
+    pending = [root] if root is not None else []
+    while pending:
+        node = pending.pop()
+        if node.role in WINDOW_ROLES and text in node.name:
+            return True
+        pending.extend(node.children)
+    return False
+
+
+def read_regular_file(path: Path, limit: int) -> dict[str, Any]:
+    """A regular file's bytes; a symlink, FIFO or device the policy left in its place reads as missing."""
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as error:
+        return {"missing": True, "error": error.strerror or str(error)}
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            return {"missing": True, "error": "not a regular file"}
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            data = handle.read(limit + 1)
+    finally:
+        os.close(descriptor)
+    if len(data) > limit:
+        return {"missing": True, "error": f"larger than {limit} bytes"}
+    return {"base64": base64.b64encode(data).decode("ascii"), "size": len(data),
+            "sha256": hashlib.sha256(data).hexdigest()}
+
+
 class GuestAgent:
     def __init__(
         self,
@@ -185,6 +238,7 @@ class GuestAgent:
         typing_delay_ms: int = 12,
         max_output_characters: int = 16_384,
         sleep: Callable[[float], None] = time.sleep,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self.screen = screen
         self.input_runner = input_runner
@@ -202,6 +256,8 @@ class GuestAgent:
         self.typing_delay_ms = typing_delay_ms
         self.max_output_characters = max_output_characters
         self.sleep = sleep
+        self.monotonic = monotonic
+        self.reads: dict[str, Any] | None = None
         self.pending_terminal: TerminalOutput | None = None
         self.baseline = file_snapshot(home)
         self.busy_marks = itertools.count()
@@ -279,10 +335,15 @@ class GuestAgent:
         return observation
 
     def write_owned(self, target: Path, data: bytes, mode: int) -> None:
+        """Folders it creates inside the home belong to the desktop user as well, so apps can save beside the file."""
+        home = self.home.resolve()
+        created = [parent for parent in target.parents if parent.is_relative_to(home) and not parent.exists()]
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
         target.chmod(mode)
         if self.owner is not None:
+            for directory in created:
+                os.chown(directory, *self.owner)
             os.chown(target, *self.owner)
 
     def inject(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -292,8 +353,7 @@ class GuestAgent:
             if self.owner is not None:
                 own_tree(self.world_root, self.owner)
         for relative_path, content in params.get("files", {}).items():
-            data = base64.b64decode(content["base64"]) if "base64" in content else content["text"].encode("utf-8")
-            self.write_owned(contained_path(self.home, relative_path), data, 0o644)
+            self.write_owned(contained_path(self.home, relative_path), file_content(content), 0o644)
         for product, token in params.get("license_tokens", {}).items():
             self.write_owned(self.license_root / product, token.encode("utf-8"), 0o644)
         if params.get("environment"):
@@ -305,8 +365,70 @@ class GuestAgent:
             if window not in self.launchers:
                 raise GuestFailure("bad_request", f"no launcher for window {window}")
             self.shell.launch(self.launchers[window])
+        for step in params.get("setup", []):
+            self.run_step(step)
+        if "reads" in params:
+            self.reads = params["reads"]
         self.baseline = file_snapshot(self.home)
         return {}
 
+    def run_step(self, step: dict[str, Any]) -> None:
+        """One ordered task setup step; commands run as the desktop user and their exit codes do not stop setup."""
+        kind = step.get("kind")
+        if kind == "file":
+            self.write_owned(contained_path(self.home, step["path"]), file_content(step), 0o644)
+        elif kind == "open":
+            target = contained_path(self.home, step["path"])
+            if not target.is_file():
+                raise GuestFailure("setup_failed", f"{step['path']} does not exist")
+            self.shell.launch(f"xdg-open {shlex.quote(str(target))}")
+            self.wait_for_window((target.name, target.stem), step.get("timeout_s", OPEN_TIMEOUT_SECONDS))
+        elif kind == "launch":
+            self.shell.launch(step["command"])
+        elif kind == "execute":
+            self.shell.execute(step["command"], step.get("timeout_s", EXECUTE_TIMEOUT_SECONDS))
+        elif kind == "sleep":
+            self.sleep(float(step["seconds"]))
+        else:
+            raise GuestFailure("bad_request", f"unknown setup step {kind!r}")
+
+    def wait_for_window(self, titles: tuple[str, ...], timeout_s: float) -> None:
+        """An opened file counts once a window's name holds its file name, with or without the extension."""
+        deadline = self.monotonic() + timeout_s
+        while True:
+            tree = self.accessibility.tree()
+            if any(window_titled(tree, title) for title in titles):
+                return
+            if self.monotonic() >= deadline:
+                raise GuestFailure("setup_failed", f"no window for {titles[0]} opened within {timeout_s} s")
+            self.sleep(WINDOW_POLL_SECONDS)
+
+    def read_file(self, relative_path: str) -> dict[str, Any]:
+        try:
+            target = contained_path(self.home, relative_path)
+        except GuestFailure as failure:
+            return {"missing": True, "error": str(failure)}
+        return read_regular_file(target, MAX_READ_BYTES)
+
+    def task_reads(self, plan: dict[str, Any]) -> dict[str, Any]:
+        """The read plan's steps first, such as saving the open document, then its files and command outputs."""
+        for step in plan.get("before", []):
+            if step.get("kind") not in READ_STEP_KINDS:
+                raise GuestFailure("bad_request", f"a read plan cannot run {step.get('kind')!r} steps")
+            if step["kind"] == "execute":
+                self.shell.probe(step["command"], step.get("timeout_s", EXECUTE_TIMEOUT_SECONDS))
+            else:
+                self.run_step(step)
+        commands = {}
+        for command in plan.get("commands", []):
+            output = self.shell.probe(command, READ_TIMEOUT_SECONDS)
+            commands[command] = {"stdout": truncated(output.stdout, MAX_READ_CHARACTERS),
+                                 "stderr": truncated(output.stderr, MAX_READ_CHARACTERS),
+                                 "exit_code": output.exit_code}
+        return {"files": {path: self.read_file(path) for path in plan.get("files", [])}, "commands": commands}
+
     def extract(self, params: dict[str, Any]) -> dict[str, Any]:
-        return extract_world_state(params.get("apps", []), self.world_root)
+        state = extract_world_state(params.get("apps", []), self.world_root)
+        if self.reads is not None:
+            state[TASK_READS_KEY] = self.task_reads(self.reads)
+        return state

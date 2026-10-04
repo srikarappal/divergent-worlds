@@ -16,6 +16,7 @@ import httpx
 import websocket
 
 from rlworld.actions.models import (
+    ELEMENT_ATTRIBUTE,
     ActionModel,
     BackAction,
     ElementClickAction,
@@ -27,7 +28,6 @@ from rlworld.actions.models import (
 from rlworld.guest.protocol import GuestFailure
 
 TIMEOUT_SECONDS = 10.0
-ELEMENT_ATTRIBUTE = "data-rlworld-id"
 MAX_DOM_CHARACTERS = 200_000
 # Counts requests in flight on every new document; the wrappers must be functions, so this page script has them.
 PENDING_REQUESTS_SCRIPT = (
