@@ -149,3 +149,19 @@ def test_successes_keep_thumbnails_unless_sampled(context):
                             random_generator=random.Random(1))
     service.finish_episode(context, EpisodeOutcome(steps_taken=3, final_action="done"), writer)
     assert trajectory_store.load_episode("run_1", "episode_1").retention == "thumbnail"
+
+
+def test_what_the_world_changed_mid_episode_is_never_a_side_effect(context):
+    inbox_before = {**INITIAL_STATE, "mail": {"inbox": []}}
+    arrived = {**FINAL_STATE, "mail": {"inbox": [{"id": "mail_event_cfo_nudge", "subject": "Where are we?"}]}}
+    world_context = EpisodeContext(lease_id=context.lease_id, task=context.task, apps=("files", "mail"),
+                                   initial_state=inbox_before, ground_truth=GROUND_TRUTH,
+                                   world_paths=("mail/inbox/mail_event_cfo_nudge",))
+    service = RewardService(RecordingFleet([], final_state=arrived), registry_with(check_total))
+    outcome = EpisodeOutcome(steps_taken=12, final_action="done")
+    assert service.finish_episode(world_context, outcome).termination == "success"
+    unexplained = EpisodeContext(lease_id=context.lease_id, task=context.task, apps=("files", "mail"),
+                                 initial_state=inbox_before, ground_truth=GROUND_TRUTH)
+    reward = service.finish_episode(unexplained, outcome)
+    assert reward.termination == "failure"
+    assert [change.path for change in reward.side_effect_violations] == ["mail/inbox/mail_event_cfo_nudge"]

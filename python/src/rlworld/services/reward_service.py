@@ -3,7 +3,9 @@
 Order matters: freeze input and extract state through fleetd, optionally keep a
 final snapshot for audits, verify and judge, record the episode and only then
 close the lease so the env is torn down. A failure anywhere becomes a recorded
-env error, which is excluded from training; the lease is still closed.
+env error, which is excluded from training; the lease is still closed. State
+paths the world changed mid episode, such as an email that arrived, are never
+the agent's side effects.
 """
 
 import random
@@ -37,6 +39,7 @@ class EpisodeContext:
     instruction: str = ""
     screenshots: tuple[str, ...] = ()
     run_type: Literal["rl", "eval", "data"] = "rl"
+    world_paths: tuple[str, ...] = ()
 
 
 class RewardService:
@@ -80,7 +83,7 @@ class RewardService:
                 outcome,
                 self.policy,
                 self.judge,
-                self.volatile_patterns,
+                (*self.volatile_patterns, *context.world_paths),
                 instruction=context.instruction,
                 screenshots=context.screenshots,
             )

@@ -65,7 +65,7 @@ Added after checking DESIGN.md section by section against the tasks above.
 31. [done] Takeover: operator teleop of a live env through noVNC relayed by fleetd; the episode is marked human intervened and the input is recorded as a demonstration (6.14).
 32. [done] Task authoring kit: one CLI and console flow to lease a dev env, record an oracle through teleop, run every gate and submit for review (6.10, 6.14).
 33. [done] Public suites: OSWorld task import and a BrowserGym compatible interface so public suites run as eval (6.3).
-34. [todo] Scripted world events and NPCs: mid task emails and chat replies driven by the user simulator stack (6.4).
+34. [done] Scripted world events and NPCs: mid task emails and chat replies driven by the user simulator stack (6.4).
 35. [done] Snapshot builder and store: boot to the readiness probe and snapshot, content addressed chunks pulled lazily and prefetched for scheduled runs, gate reruns on image bumps, retention pins (3, 6.2).
 36. [done] Warm pools of restored, paused VMs for hot snapshots (6.7).
 37. [todo] Network proxies: record and replay proxy configuration and the logging, rate limited egress proxy for live internet eval (6.6).
