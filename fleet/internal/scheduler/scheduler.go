@@ -336,20 +336,47 @@ func (scheduler *Scheduler) FreeResources(hostID string) Resources {
 	return Resources{}
 }
 
-// PlanPrefetch picks up to hostsWanted pool hosts without the snapshot, those with the most free memory first.
-func (scheduler *Scheduler) PlanPrefetch(snapshotDigest, pool string, hostsWanted int) []string {
+// PrefetchTargets picks the pool hosts a scheduled run's snapshot should be pulled onto, roomiest first, so that
+// together with the hosts already holding it the pool can run envs VMs of it.
+func (scheduler *Scheduler) PrefetchTargets(snapshotDigest, pool string, perVM Resources, envs int) []string {
 	scheduler.mu.Lock()
 	defer scheduler.mu.Unlock()
+	remaining := envs
 	var candidates []*hostState
 	for _, state := range scheduler.hosts {
-		if state.host.Pool == pool && !state.host.Draining && !state.host.CachedSnapshots[snapshotDigest] {
+		if state.host.Pool != pool || state.host.Draining {
+			continue
+		}
+		if state.host.CachedSnapshots[snapshotDigest] {
+			remaining -= state.free().maxFit(perVM)
+		} else {
 			candidates = append(candidates, state)
 		}
 	}
 	sort.Sort(roomiestFirst(candidates))
 	var hostIDs []string
-	for _, state := range candidates[:min(hostsWanted, len(candidates))] {
-		hostIDs = append(hostIDs, state.host.ID)
+	for _, state := range candidates {
+		if remaining <= 0 {
+			break
+		}
+		if fit := state.free().maxFit(perVM); fit > 0 {
+			hostIDs = append(hostIDs, state.host.ID)
+			remaining -= fit
+		}
 	}
+	return hostIDs
+}
+
+// HostsInPool lists the pool's hosts that take new work, by id.
+func (scheduler *Scheduler) HostsInPool(pool string) []string {
+	scheduler.mu.Lock()
+	defer scheduler.mu.Unlock()
+	var hostIDs []string
+	for _, state := range scheduler.hosts {
+		if state.host.Pool == pool && !state.host.Draining {
+			hostIDs = append(hostIDs, state.host.ID)
+		}
+	}
+	sort.Strings(hostIDs)
 	return hostIDs
 }

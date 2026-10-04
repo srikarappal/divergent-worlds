@@ -141,23 +141,42 @@ func TestHostScopedLicensesPreferHoldersAndRespectSeats(t *testing.T) {
 	}
 }
 
-func TestPrefetchPicksUncachedHostsWithTheMostRoom(t *testing.T) {
-	scheduler := New()
-	scheduler.UpsertHost(host("cached", "firecracker", 100_000))
-	scheduler.UpsertHost(host("roomy", "firecracker", 90_000))
-	scheduler.UpsertHost(host("tight", "firecracker", 10_000))
-	scheduler.UpsertHost(host("windows", "qemu_templated", 200_000))
-	scheduler.MarkSnapshotCached("cached", "sha256:snap")
-	if got := scheduler.PlanPrefetch("sha256:snap", "firecracker", 5); !reflect.DeepEqual(got, []string{"roomy", "tight"}) {
-		t.Fatalf("prefetch hosts %v", got)
-	}
-	if got := scheduler.PlanPrefetch("sha256:snap", "firecracker", 1); !reflect.DeepEqual(got, []string{"roomy"}) {
-		t.Fatalf("prefetch hosts %v", got)
-	}
-}
-
 func TestInvalidCountsAreRejected(t *testing.T) {
 	if _, err := New().Place(request(0)); err == nil {
 		t.Fatal("a zero count must be rejected")
+	}
+}
+
+func TestPrefetchTargetsCoverTheRunWithHostsThatHoldTheSnapshotFirst(t *testing.T) {
+	scheduler := New()
+	perVM := Resources{CPUMillicores: 1000, MemoryMiB: 1024}
+	scheduler.UpsertHost(Host{ID: "cached", Pool: "firecracker", Capacity: Resources{CPUMillicores: 4000,
+		MemoryMiB: 4096}})
+	scheduler.UpsertHost(Host{ID: "roomy", Pool: "firecracker", Capacity: Resources{CPUMillicores: 16000,
+		MemoryMiB: 16384}})
+	scheduler.UpsertHost(Host{ID: "tight", Pool: "firecracker", Capacity: Resources{CPUMillicores: 8000,
+		MemoryMiB: 8192}})
+	scheduler.UpsertHost(Host{ID: "draining", Pool: "firecracker", Draining: true, Capacity: Resources{
+		CPUMillicores: 64000, MemoryMiB: 65536}})
+	scheduler.UpsertHost(Host{ID: "windows", Pool: "qemu_templated", Capacity: Resources{CPUMillicores: 64000,
+		MemoryMiB: 65536}})
+	scheduler.MarkSnapshotCached("cached", "sha256:snap")
+	if got := scheduler.PrefetchTargets("sha256:snap", "firecracker", perVM, 4); len(got) != 0 {
+		t.Fatalf("the cached host holds four envs alone: %v", got)
+	}
+	if got := scheduler.PrefetchTargets("sha256:snap", "firecracker", perVM, 12); !reflect.DeepEqual(got,
+		[]string{"roomy"}) {
+		t.Fatalf("eight more envs fit on the roomiest host: %v", got)
+	}
+	if got := scheduler.PrefetchTargets("sha256:snap", "firecracker", perVM, 100); !reflect.DeepEqual(got,
+		[]string{"roomy", "tight"}) {
+		t.Fatalf("a run bigger than the pool pulls onto every host that takes work: %v", got)
+	}
+	if got := scheduler.PrefetchTargets("sha256:other", "firecracker", Resources{CPUMillicores: 1000,
+		MemoryMiB: 20000}, 1); len(got) != 0 {
+		t.Fatalf("no host fits a VM this large: %v", got)
+	}
+	if got := scheduler.HostsInPool("firecracker"); !reflect.DeepEqual(got, []string{"cached", "roomy", "tight"}) {
+		t.Fatalf("hosts in the pool: %v", got)
 	}
 }
