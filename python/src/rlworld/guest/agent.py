@@ -20,6 +20,11 @@ Mid task the host delivers records into running apps, such as an email that
 arrives or a colleague's chat reply; their files are the world's doing, so
 the agent's own file changes stay counted as they were. Each observation
 reports the agent's chat posts since the last one, which colleagues answer.
+
+The Windows in session helper is this agent with other backends: screens and
+input belong to the hypervisor there, native app calls such as Excel range
+writes report their result in the next observation and app integrations such
+as Excel's join the world's.
 """
 
 import base64
@@ -27,7 +32,6 @@ import hashlib
 import io
 import itertools
 import os
-import shlex
 import stat
 import time
 from collections.abc import Callable, Mapping
@@ -45,14 +49,16 @@ from rlworld.actions.models import (
     DragAction,
     KeyAction,
     MoveAction,
+    NativeCallAction,
     ScrollAction,
     TerminalOutput,
     TypeAction,
     WaitAction,
     parse_action,
 )
-from rlworld.guest.protocol import READ_STEP_KINDS, TASK_READS_KEY, GuestFailure
+from rlworld.guest.protocol import READ_STEP_KINDS, TASK_READS_KEY, GuestFailure, NativeCallError
 from rlworld.worlds.integrations import (
+    AppIntegration,
     ChatIntegration,
     deliver_record,
     extract_world_state,
@@ -70,6 +76,8 @@ READ_TIMEOUT_SECONDS = 60
 WINDOW_POLL_SECONDS = 1.0
 MAX_READ_BYTES = 32 * 1024 * 1024
 MAX_READ_CHARACTERS = 1024 * 1024
+# Reads never follow a planted link or block on a planted pipe; Windows opens files as bytes, untranslated.
+READ_FLAGS = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
 
 
 class Screen(Protocol):
@@ -100,6 +108,14 @@ class Shell(Protocol):
     def probe(self, command: str, timeout_s: int) -> TerminalOutput: ...
 
     def launch(self, command: str) -> None: ...
+
+    def open_file(self, path: Path) -> None: ...
+
+
+class NativeApp(Protocol):
+    """An app's own API for native actions; a call it refuses raises NativeCallError."""
+
+    def call(self, method: str, arguments: Mapping[str, Any]) -> Any: ...
 
 
 class Hygiene(Protocol):
@@ -213,7 +229,7 @@ def window_titled(root: AccessibilityNode | None, text: str) -> bool:
 def read_regular_file(path: Path, limit: int) -> dict[str, Any]:
     """A regular file's bytes; a symlink, FIFO or device the policy left in its place reads as missing."""
     try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        descriptor = os.open(path, READ_FLAGS)
     except OSError as error:
         return {"missing": True, "error": error.strerror or str(error)}
     try:
@@ -249,6 +265,8 @@ class GuestAgent:
         max_output_characters: int = 16_384,
         sleep: Callable[[float], None] = time.sleep,
         monotonic: Callable[[], float] = time.monotonic,
+        native: Mapping[str, NativeApp] | None = None,
+        integrations: Mapping[str, AppIntegration] | None = None,
     ) -> None:
         self.screen = screen
         self.input_runner = input_runner
@@ -267,10 +285,13 @@ class GuestAgent:
         self.max_output_characters = max_output_characters
         self.sleep = sleep
         self.monotonic = monotonic
+        self.native = dict(native or {})
+        self.integrations = integrations
         self.reads: dict[str, Any] | None = None
         self.apps: tuple[str, ...] = ()
         self.reported_posts: set[str] = set()
         self.pending_terminal: TerminalOutput | None = None
+        self.pending_native: dict[str, Any] | None = None
         self.baseline = file_snapshot(home)
         self.busy_marks = itertools.count()
         self.methods: dict[str, Callable[[dict[str, Any]], Any]] = {
@@ -313,10 +334,19 @@ class GuestAgent:
                                                    stderr=truncated(output.stderr, self.max_output_characters),
                                                    exit_code=output.exit_code)
         elif action.modality == "native":
-            raise GuestFailure("unsupported_action", "this Linux image exposes no native app API")
+            self.call_native(action)
         else:
             raise GuestFailure("unsupported_action", "control actions are handled by the rollout worker")
         return {}
+
+    def call_native(self, action: NativeCallAction) -> None:
+        """The next observation reports the call's result, or why the app refused it."""
+        if action.app not in self.native:
+            raise GuestFailure("unsupported_action", f"this image exposes no native API for {action.app}")
+        try:
+            self.pending_native = {"result": self.native[action.app].call(action.method, action.arguments)}
+        except NativeCallError as error:
+            self.pending_native = {"error": str(error)}
 
     def screen_hash(self, params: dict[str, Any]) -> str:
         """A coarse hash for settle detection; while pages still load it never repeats, so nothing settles early."""
@@ -342,6 +372,9 @@ class GuestAgent:
         if self.pending_terminal is not None:
             observation["terminal"] = self.pending_terminal.model_dump()
             self.pending_terminal = None
+        if self.pending_native is not None:
+            observation["native_result"] = self.pending_native
+            self.pending_native = None
         if "file_diff" in kinds:
             observation["file_changes"] = file_changes(self.baseline, file_snapshot(self.home))
         posts = self.new_chat_posts()
@@ -383,7 +416,7 @@ class GuestAgent:
         """World state, task setup and entitlements; file changes are counted from here on."""
         if "world" in params:
             self.apps = tuple(params.get("apps", []))
-            materialize_world(World.model_validate(params["world"]), self.apps, self.world_root)
+            materialize_world(World.model_validate(params["world"]), self.apps, self.world_root, self.integrations)
             if self.owner is not None:
                 own_tree(self.world_root, self.owner)
             if "chat" in self.apps:
@@ -414,7 +447,7 @@ class GuestAgent:
             raise GuestFailure("bad_request", f"{delivery.get('app')} is not an app of this world")
         before = file_snapshot(self.home)
         try:
-            deliver_record(delivery["app"], delivery["record"], self.world_root)
+            deliver_record(delivery["app"], delivery["record"], self.world_root, self.integrations)
         except (KeyError, ValueError) as error:
             raise GuestFailure("bad_request", f"cannot deliver to {delivery['app']}: {error}") from error
         if self.owner is not None:
@@ -431,7 +464,7 @@ class GuestAgent:
             target = contained_path(self.home, step["path"])
             if not target.is_file():
                 raise GuestFailure("setup_failed", f"{step['path']} does not exist")
-            self.shell.launch(f"xdg-open {shlex.quote(str(target))}")
+            self.shell.open_file(target)
             self.wait_for_window((target.name, target.stem), step.get("timeout_s", OPEN_TIMEOUT_SECONDS))
         elif kind == "launch":
             self.shell.launch(step["command"])
@@ -478,7 +511,7 @@ class GuestAgent:
         return {"files": {path: self.read_file(path) for path in plan.get("files", [])}, "commands": commands}
 
     def extract(self, params: dict[str, Any]) -> dict[str, Any]:
-        state = extract_world_state(params.get("apps", []), self.world_root)
+        state = extract_world_state(params.get("apps", []), self.world_root, self.integrations)
         if self.reads is not None:
             state[TASK_READS_KEY] = self.task_reads(self.reads)
         return state

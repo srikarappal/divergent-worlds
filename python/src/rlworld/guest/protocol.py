@@ -22,6 +22,10 @@ class GuestFailure(Exception):
         self.code = code
 
 
+class NativeCallError(ValueError):
+    """A native app call the app refused, such as a bad range; the agent reads why in its next observation."""
+
+
 def read_message(stream: BinaryIO) -> dict[str, Any] | None:
     """The next message, or None once the peer has closed the stream."""
     line = stream.readline(MAX_MESSAGE_BYTES)

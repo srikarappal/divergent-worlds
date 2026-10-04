@@ -8,18 +8,20 @@ since every clone restores the same RNG state.
 
 import fcntl
 import os
+import shlex
 import struct
 import subprocess
 import time
 from datetime import datetime
+from pathlib import Path
 
 from PIL import Image, ImageGrab
 
 from rlworld.actions.models import TerminalOutput
+from rlworld.guest.commands import run_command
 
 # _IOW('R', 0x03, int[2]) on Linux: add entropy and credit it.
 RNDADDENTROPY = 0x40085203
-TIMED_OUT_EXIT_CODE = 124
 
 
 class X11Screen:
@@ -87,21 +89,15 @@ class UserShell:
                             "PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": "en_US.UTF-8"}
 
     def execute(self, command: str, timeout_s: int) -> TerminalOutput:
-        return self.run(user_command_argv(self.user, command), timeout_s)
+        return run_command(user_command_argv(self.user, command), timeout_s, self.environment)
 
     def probe(self, command: str, timeout_s: int) -> TerminalOutput:
-        return self.run(user_probe_argv(self.user, command), timeout_s)
-
-    def run(self, argv: list[str], timeout_s: int) -> TerminalOutput:
-        try:
-            completed = subprocess.run(argv, env=self.environment, capture_output=True, text=True,
-                                       timeout=timeout_s)
-        except subprocess.TimeoutExpired as error:
-            stdout = error.stdout.decode() if isinstance(error.stdout, bytes) else error.stdout or ""
-            return TerminalOutput(stdout=stdout, stderr=f"timed out after {timeout_s} s",
-                                  exit_code=TIMED_OUT_EXIT_CODE)
-        return TerminalOutput(stdout=completed.stdout, stderr=completed.stderr, exit_code=completed.returncode)
+        return run_command(user_probe_argv(self.user, command), timeout_s, self.environment)
 
     def launch(self, command: str) -> None:
         subprocess.Popen(user_command_argv(self.user, command), env=self.environment, start_new_session=True,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def open_file(self, path: Path) -> None:
+        """Opens a file in the desktop's default app for its type."""
+        self.launch(f"xdg-open {shlex.quote(str(path))}")
