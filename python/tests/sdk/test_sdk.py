@@ -14,6 +14,7 @@ from rlworld.sdk import (
     InputFrozenError,
     LeaseGroupRequest,
     LeaseInfo,
+    SnapshotNotFoundError,
     SnapshotSource,
     UnknownLeaseError,
 )
@@ -205,3 +206,56 @@ def test_mcp_serves_newline_delimited_json_over_streams():
     assert responses[0]["result"]["protocolVersion"] == "2025-06-18"
     assert responses[1]["error"]["code"] == -32700
     assert "screenshot: s3://frames/1.webp" in responses[2]["result"]["content"][1]["text"]
+
+
+class FakeSnapshotStore:
+    """Plays fleetd's snapshot routes for the client."""
+
+    def __init__(self):
+        self.requests = []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content) if request.content else None
+        self.requests.append((request.method, request.url.raw_path.decode(), body))
+        path = request.url.path
+        if path == "/v1/snapshots/current":
+            if request.url.params["pool"] == "nowhere":
+                return httpx.Response(404, json={"code": "unknown_snapshot", "message": "no current snapshot"})
+            return httpx.Response(200, json={"image": "noble_calc_v1", "snapshot": "sha256:s"})
+        if path == "/v1/snapshots":
+            return httpx.Response(200, json={"current": [{"snapshot": "sha256:s"}]})
+        if path == "/v1/snapshots/build":
+            return httpx.Response(201, json={"digest": "sha256:s", "image": "noble_calc_v1"})
+        if path == "/v1/snapshots/collect":
+            return httpx.Response(200, json={"removed": [], "removed_chunks": 0, "freed_bytes": 0})
+        if path.endswith("/prefetch"):
+            return httpx.Response(202, json={"hosts": ["host_a"]})
+        if "/pins/" in path:
+            return httpx.Response(204) if request.method == "DELETE" else httpx.Response(200, json={"holder": "x"})
+        return httpx.Response(200, json={"manifest": {"digest": "sha256:s"}, "pins": []})
+
+
+def test_the_client_reaches_every_snapshot_route():
+    store = FakeSnapshotStore()
+    client = fleet_client(store)
+    assert client.build_snapshot("/builds/noble", 2048, 2)["digest"] == "sha256:s"
+    assert client.current_snapshots() == [{"snapshot": "sha256:s"}]
+    assert client.current_snapshot("sha256:image", "linux")["snapshot"] == "sha256:s"
+    assert client.snapshot("sha256:s")["manifest"]["digest"] == "sha256:s"
+    assert client.prefetch_snapshot("sha256:s", "linux", 64, 2048, 2000) == ["host_a"]
+    client.pin_snapshot("sha256:s", "eval_report:experiment/1")
+    client.unpin_snapshot("sha256:s", "eval_report:experiment/1")
+    assert client.collect_snapshots()["removed"] == []
+    sent = [(method, path) for method, path, _ in store.requests]
+    assert sent == [
+        ("POST", "/v1/snapshots/build"), ("GET", "/v1/snapshots"),
+        ("GET", "/v1/snapshots/current?image_digest=sha256%3Aimage&pool=linux"), ("GET", "/v1/snapshots/sha256:s"),
+        ("POST", "/v1/snapshots/sha256:s/prefetch"), ("PUT", "/v1/snapshots/sha256:s/pins/eval_report:experiment%2F1"),
+        ("DELETE", "/v1/snapshots/sha256:s/pins/eval_report:experiment%2F1"), ("POST", "/v1/snapshots/collect")]
+    bodies = {path: body for _, path, body in store.requests}
+    assert bodies["/v1/snapshots/build"] == {"build_dir": "/builds/noble", "memory_mib": 2048, "vcpus": 2}
+    assert bodies["/v1/snapshots/sha256:s/prefetch"] == {"pool": "linux", "envs": 64, "memory_mib": 2048,
+                                                         "cpu_millicores": 2000, "gpus": 0}
+    with pytest.raises(SnapshotNotFoundError) as missing:
+        client.current_snapshot("sha256:image", "nowhere")
+    assert missing.value.code == "unknown_snapshot" and missing.value.status_code == 404

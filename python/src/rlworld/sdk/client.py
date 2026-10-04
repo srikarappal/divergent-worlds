@@ -2,6 +2,7 @@
 
 from dataclasses import asdict, dataclass
 from typing import Any
+from urllib.parse import quote, urlencode
 
 import httpx
 from pydantic import ValidationError
@@ -40,9 +41,13 @@ class TakenOverError(FleetError):
     """An operator drives the env; the worker waits until the takeover ends."""
 
 
+class SnapshotNotFoundError(FleetError):
+    """The snapshot store has no such snapshot, or no current snapshot of that image on that pool."""
+
+
 ERRORS_BY_STATUS = {429: AdmissionRejectedError, 503: NoCapacityError, 404: UnknownLeaseError,
                     409: InputFrozenError}
-ERRORS_BY_CODE = {"taken_over": TakenOverError}
+ERRORS_BY_CODE = {"taken_over": TakenOverError, "unknown_snapshot": SnapshotNotFoundError}
 
 
 @dataclass(frozen=True)
@@ -185,3 +190,35 @@ class FleetClient:
     def leases(self, run_id: str | None = None) -> list[LeaseInfo]:
         query = f"?run_id={run_id}" if run_id else ""
         return lease_infos(self.request("GET", f"/v1/leases{query}"))
+
+    def build_snapshot(self, build_dir: str, memory_mib: int, vcpus: int) -> dict[str, Any]:
+        """Boots an image build on fleetd's host to its readiness probe and publishes its base snapshot."""
+        body = {"build_dir": build_dir, "memory_mib": memory_mib, "vcpus": vcpus}
+        return self.request("POST", "/v1/snapshots/build", body)
+
+    def current_snapshots(self) -> list[dict[str, Any]]:
+        """The snapshot every image uses on every pool, each with when it became current."""
+        return self.request("GET", "/v1/snapshots")["current"]
+
+    def current_snapshot(self, image_digest: str, pool: str) -> dict[str, Any]:
+        query = urlencode({"image_digest": image_digest, "pool": pool})
+        return self.request("GET", f"/v1/snapshots/current?{query}")
+
+    def snapshot(self, digest: str) -> dict[str, Any]:
+        """A snapshot's manifest with its image spec and who pins it."""
+        return self.request("GET", f"/v1/snapshots/{digest}")
+
+    def prefetch_snapshot(self, digest: str, pool: str, envs: int, memory_mib: int, cpu_millicores: int,
+                          gpus: int = 0) -> list[str]:
+        """Pulls a scheduled run's snapshot onto enough hosts for its envs; returns the hosts pulling."""
+        body = {"pool": pool, "envs": envs, "memory_mib": memory_mib, "cpu_millicores": cpu_millicores, "gpus": gpus}
+        return self.request("POST", f"/v1/snapshots/{digest}/prefetch", body)["hosts"]
+
+    def pin_snapshot(self, digest: str, holder: str) -> dict[str, Any]:
+        return self.request("PUT", f"/v1/snapshots/{digest}/pins/{quote(holder, safe=':')}")
+
+    def unpin_snapshot(self, digest: str, holder: str) -> None:
+        self.request("DELETE", f"/v1/snapshots/{digest}/pins/{quote(holder, safe=':')}")
+
+    def collect_snapshots(self) -> dict[str, Any]:
+        return self.request("POST", "/v1/snapshots/collect")
