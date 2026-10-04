@@ -66,7 +66,7 @@ Added after checking DESIGN.md section by section against the tasks above.
 32. [done] Task authoring kit: one CLI and console flow to lease a dev env, record an oracle through teleop, run every gate and submit for review (6.10, 6.14).
 33. [todo] Public suites: OSWorld task import and a BrowserGym compatible interface so public suites run as eval (6.3).
 34. [todo] Scripted world events and NPCs: mid task emails and chat replies driven by the user simulator stack (6.4).
-35. [todo] Snapshot builder and store: boot to the readiness probe and snapshot, content addressed chunks pulled lazily and prefetched for scheduled runs, gate reruns on image bumps, retention pins (3, 6.2).
+35. [done] Snapshot builder and store: boot to the readiness probe and snapshot, content addressed chunks pulled lazily and prefetched for scheduled runs, gate reruns on image bumps, retention pins (3, 6.2).
 36. [todo] Warm pools of restored, paused VMs for hot snapshots (6.7).
 37. [todo] Network proxies: record and replay proxy configuration and the logging, rate limited egress proxy for live internet eval (6.6).
 38. [todo] Eval integrity: clone fidelity measured against real apps and split overlap checks against public benchmarks (6.4, 6.10).
@@ -74,6 +74,7 @@ Added after checking DESIGN.md section by section against the tasks above.
 40. [todo] Windows guest channel: QMP screens and input at the hypervisor plus the autologon in session helper for UIA trees, Excel COM state, injection and extraction (6.1, 6.3).
 41. [done] Task generators and registry: task templates generated over worlds along the difficulty axes, the registry the curriculum samples from and the task provider that hands rollout workers task instances with their snapshots (3, 5, 6.10).
 42. [todo] experimentd server: the entry point wiring the spec, run, catalog, review and admin stores, auth, the gateway, the trainer launcher and platform hosted rollout workers, beside the fleetd command (5, 6.7).
+43. [todo] World diff snapshots: measure world materialization on a restored base snapshot; when it takes more than about 5 s or is nondeterministic, snapshot the materialized world so task setup injects only the task's own state after restore (3, 6.2).
 
 ## Follow ups
 
