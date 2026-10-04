@@ -1,0 +1,14 @@
+# Scrapes the platform health signals fleetd and experimentd expose (DESIGN.md 6.15); schemas/metrics.json lists them.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: fleetd
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["fleetd:8700"]
+  - job_name: experimentd
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["experimentd:8080"]

@@ -1,0 +1,724 @@
+{
+  "uid": "rlworld-platform-health",
+  "title": "rlworld platform health",
+  "description": "Platform health for operators (DESIGN.md 6.15); run level views live in the web console.",
+  "tags": [
+    "rlworld"
+  ],
+  "timezone": "utc",
+  "editable": false,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Lease latency p50 and p99 per pool",
+      "description": "Time to place, admit and start a lease group.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rlworld-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rlworld-prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le, pool) (rate(rlworld_fleet_lease_seconds_bucket[5m])))",
+          "legendFormat": "p50 {{pool}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rlworld-prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, pool) (rate(rlworld_fleet_lease_seconds_bucket[5m])))",
+          "legendFormat": "p99 {{pool}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Restore failures per pool",
+      "description": "Envs whose snapshot restore or start failed, per second.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rlworld-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rlworld-prometheus"
+          },
+          "expr": "sum by (pool) (rate(rlworld_fleet_restore_failures_total[5m]))",
+          "legendFormat": "{{pool}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Env error rate per image",
+      "description": "Share of scored episodes that ended in an env error.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rlworld-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rlworld-prometheus"
+          },
+          "expr": "sum by (image) (rate(rlworld_episodes_total{termination=\"env_error\"}[15m])) / sum by (image) (rate(rlworld_episodes_total[15m]))",
+          "legendFormat": "{{image}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Env error rate per app",
+      "description": "Share of scored episodes whose world held the app that ended in an env error.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rlworld-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rlworld-prometheus"
+          },
+          "expr": "sum by (app) (rate(rlworld_app_episodes_total{termination=\"env_error\"}[15m])) / sum by (app) (rate(rlworld_app_episodes_total[15m]))",
+          "legendFormat": "{{app}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Step latency split",
+      "description": "Median model call, env act and observe time and settle wait per step.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rlworld-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rlworld-prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(rlworld_gateway_call_seconds_bucket{purpose=\"policy\"}[5m])))",
+          "legendFormat": "model"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rlworld-prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(rlworld_fleet_step_seconds_bucket{part=\"env\"}[5m])))",
+          "legendFormat": "env"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rlworld-prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(rlworld_fleet_step_seconds_bucket{part=\"settle\"}[5m])))",
+          "legendFormat": "settle"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Env step failures per pool",
+      "description": "Steps that failed in the env, per second.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rlworld-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rlworld-prometheus"
+          },
+          "expr": "sum by (pool) (rate(rlworld_fleet_step_failures_total[5m]))",
+          "legendFormat": "{{pool}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Leases held per pool",
+      "description": "Leases held right now.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rlworld-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rlworld-prometheus"
+          },
+          "expr": "sum by (pool) (rlworld_fleet_leases)",
+          "legendFormat": "{{pool}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Seat and identity utilization",
+      "description": "Share of each license seat pool and identity pool leased right now.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rlworld-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rlworld-prometheus"
+          },
+          "expr": "sum by (product) (rlworld_seats_in_use) / sum by (product) (rlworld_seats_total)",
+          "legendFormat": "seats {{product}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rlworld-prometheus"
+          },
+          "expr": "sum by (pool) (rlworld_identities_in_use) / sum by (pool) (rlworld_identities_total)",
+          "legendFormat": "identities {{pool}}"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Gateway rate limit hits",
+      "description": "Gateway calls that waited on or were refused by an endpoint rate limit.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rlworld-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rlworld-prometheus"
+          },
+          "expr": "sum by (endpoint) (rate(rlworld_gateway_rate_limit_hits_total[5m]))",
+          "legendFormat": "{{endpoint}}"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Gateway errors",
+      "description": "Gateway calls that failed, by endpoint and purpose.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rlworld-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rlworld-prometheus"
+          },
+          "expr": "sum by (endpoint, purpose) (rate(rlworld_gateway_calls_total{outcome=\"error\"}[5m]))",
+          "legendFormat": "{{endpoint}} {{purpose}}"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Judge spend per hour",
+      "description": "Judge model spend over the last hour.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rlworld-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 40
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rlworld-prometheus"
+          },
+          "expr": "sum(increase(rlworld_gateway_spend_usd_total{purpose=\"judge\"}[1h]))",
+          "legendFormat": "judge"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Verifier precision and recall",
+      "description": "Verifier agreement with human labels at the last calibration.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rlworld-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 40
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rlworld-prometheus"
+          },
+          "expr": "rlworld_verifier_precision",
+          "legendFormat": "precision"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rlworld-prometheus"
+          },
+          "expr": "rlworld_verifier_recall",
+          "legendFormat": "recall"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Replay divergence",
+      "description": "Median share of steps that diverged when actions were rerun from the start snapshot.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rlworld-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 48
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rlworld-prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(rlworld_replay_divergence_rate_bucket[1h])))",
+          "legendFormat": "median"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Clone fidelity per app",
+      "description": "One minus the success gap between each app clone and the real app.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rlworld-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 48
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rlworld-prometheus"
+          },
+          "expr": "rlworld_clone_fidelity",
+          "legendFormat": "{{app}}"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Cost per 1,000 episodes per run",
+      "description": "Each run's spend per 1,000 scored episodes.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rlworld-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 56
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rlworld-prometheus"
+          },
+          "expr": "rlworld_run_cost_per_1000_episodes_usd",
+          "legendFormat": "{{run_id}}"
+        }
+      ]
+    }
+  ]
+}

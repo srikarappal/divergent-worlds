@@ -1,0 +1,9 @@
+# Loads the dashboards in observability/grafana/dashboards, mounted at this path, into an rlworld folder.
+apiVersion: 1
+providers:
+  - name: rlworld
+    folder: rlworld
+    type: file
+    disableDeletion: true
+    options:
+      path: /var/lib/grafana/dashboards/rlworld

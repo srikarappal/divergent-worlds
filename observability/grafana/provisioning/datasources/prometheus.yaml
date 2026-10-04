@@ -1,0 +1,9 @@
+# The Prometheus every rlworld dashboard queries, by the uid the dashboards name.
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    uid: rlworld-prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
