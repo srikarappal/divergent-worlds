@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -171,8 +172,8 @@ func TestConfigDefaultsAndValidation(t *testing.T) {
 	if loaded.LeaseTTLSeconds != 300 || loaded.GuestTimeoutSeconds != 30 {
 		t.Fatalf("defaults: %+v", loaded)
 	}
-	_, err = loadConfig(writeConfig(t, map[string]any{"driver": "qemu_templated", "capacity": 0}))
-	for _, problem := range []string{"listen is required", `driver "qemu_templated"`, "host needs an id",
+	_, err = loadConfig(writeConfig(t, map[string]any{"driver": "hyperv", "capacity": 0}))
+	for _, problem := range []string{"listen is required", `driver "hyperv"`, "host needs an id",
 		"capacity must be positive", "state_dir and object_store_dir"} {
 		if err == nil || !strings.Contains(err.Error(), problem) {
 			t.Fatalf("missing %q in %v", problem, err)
@@ -195,24 +196,177 @@ func TestTheLaptopExampleConfigLoads(t *testing.T) {
 	}
 }
 
+// lineAgent plays a guest end that answers one JSON request per connection with result, after an optional
+// Firecracker vsock CONNECT; a CONNECT to the VNC relay's port gets a banner instead.
+type lineAgent struct {
+	mu        sync.Mutex
+	listener  net.Listener
+	directory string
+	vsock     bool
+	result    any
+	greetings []string
+}
+
+func startLineAgent(t *testing.T, directory, socketPath string, vsock bool, result any) *lineAgent {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		os.RemoveAll(directory)
+		t.Fatal(err)
+	}
+	agent := &lineAgent{listener: listener, directory: directory, vsock: vsock, result: result}
+	t.Cleanup(agent.close)
+	go agent.serve()
+	return agent
+}
+
+func (agent *lineAgent) close() {
+	agent.listener.Close()
+	os.RemoveAll(agent.directory)
+}
+
+func (agent *lineAgent) serve() {
+	for {
+		connection, err := agent.listener.Accept()
+		if err != nil {
+			return
+		}
+		agent.answer(connection)
+	}
+}
+
+func (agent *lineAgent) answer(connection net.Conn) {
+	defer connection.Close()
+	reader := bufio.NewReader(connection)
+	if agent.vsock {
+		greeting, err := reader.ReadString('\n')
+		if err != nil {
+			return
+		}
+		agent.mu.Lock()
+		agent.greetings = append(agent.greetings, strings.TrimSpace(greeting))
+		agent.mu.Unlock()
+		if greeting == fmt.Sprintf("CONNECT %d\n", guestVNCPort) {
+			connection.Write([]byte("OK 1\nRFB 003.008\n"))
+			return
+		}
+		connection.Write([]byte("OK 1\n"))
+	}
+	line, err := reader.ReadBytes('\n')
+	if err != nil {
+		return
+	}
+	var request struct {
+		ID int64 `json:"id"`
+	}
+	json.Unmarshal(line, &request)
+	reply, _ := json.Marshal(map[string]any{"id": request.ID, "result": agent.result})
+	connection.Write(append(reply, '\n'))
+}
+
 func TestFirecrackerHostsReachGuestsOverVsock(t *testing.T) {
 	loaded, err := loadConfig(writeConfig(t, laptopConfig(t)))
 	if err != nil {
 		t.Fatal(err)
 	}
+	chroot, err := os.MkdirTemp("/tmp", "jail")
+	if err != nil {
+		t.Fatal(err)
+	}
 	loaded.Driver = "firecracker"
-	loaded.Firecracker.ChrootBaseDir = "/srv/jailer"
+	loaded.Firecracker.ChrootBaseDir = chroot
 	loaded.Firecracker.FirecrackerPath = "/usr/bin/firecracker"
-	driver, dialer, vncDialer := newDriver(loaded, tools{})
-	vsock, isVsock := dialer.(guest.VsockDialer)
-	if driver.Name() != "firecracker" || !isVsock || vsock.Port != guestAgentPort {
-		t.Fatalf("driver %s dialer %T", driver.Name(), dialer)
+	agent := startLineAgent(t, chroot, filepath.Join(chroot, "firecracker", "env_1", "root", "v.sock"), true,
+		"steady")
+	driver, channel := newDriver(loaded, tools{}, guest.NewFilesystemFrames(t.TempDir()))
+	if driver.Name() != "firecracker" {
+		t.Fatalf("driver %s", driver.Name())
 	}
-	if vnc, isVNC := vncDialer.(guest.VsockDialer); !isVNC || vnc.Port != guestVNCPort {
-		t.Fatalf("vnc dialer %T", vncDialer)
+	if hash, err := channel.ScreenHash(context.Background(), "env_1"); err != nil || hash != "steady" {
+		t.Fatalf("screen hash over vsock: %q %v", hash, err)
 	}
-	if path := vsock.SocketPath("env_1"); path != "/srv/jailer/firecracker/env_1/root/v.sock" {
-		t.Fatalf("vsock path: %s", path)
+	connection, reader, err := channel.DialVNC(context.Background(), "env_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	if banner, err := reader.ReadString('\n'); err != nil || banner != "RFB 003.008\n" {
+		t.Fatalf("vnc banner: %q %v", banner, err)
+	}
+	agent.mu.Lock()
+	defer agent.mu.Unlock()
+	if !slices.Equal(agent.greetings, []string{"CONNECT 5005", "CONNECT 5901"}) {
+		t.Fatalf("vsock ports: %v", agent.greetings)
+	}
+}
+
+func windowsHostConfig(t *testing.T, runDir string) map[string]any {
+	payload := laptopConfig(t)
+	payload["driver"] = "qemu_templated"
+	payload["host"] = map[string]any{"id": "kvm_win_1", "pool": "windows", "cpu_millicores": 96000,
+		"memory_mib": 393216, "licenses": []string{"office_ltsc"}}
+	payload["qemu"] = map[string]any{"qemu_path": "/usr/bin/qemu-system-x86_64", "run_dir": runDir,
+		"machine_type": "pc-q35-9.0", "cpu_model": "fleet_baseline"}
+	return payload
+}
+
+func TestQEMUHostsPinTheirMachineAndBindSnapshotsToIt(t *testing.T) {
+	missing := windowsHostConfig(t, t.TempDir())
+	missing["qemu"] = map[string]any{"qemu_path": "/usr/bin/qemu-system-x86_64"}
+	if _, err := loadConfig(writeConfig(t, missing)); err == nil ||
+		!strings.Contains(err.Error(), "qemu needs qemu_path, run_dir, machine_type and cpu_model") {
+		t.Fatalf("a qemu host without its machine: %v", err)
+	}
+	store := map[string]any{"store_dir": t.TempDir(), "cache_dir": t.TempDir(), "vmm_version": "9.0.2",
+		"machine_type": "pc-q35-8.2", "cpu_model": "fleet_baseline"}
+	mismatched := windowsHostConfig(t, t.TempDir())
+	mismatched["snapshots"] = store
+	if _, err := loadConfig(writeConfig(t, mismatched)); err == nil ||
+		!strings.Contains(err.Error(), "snapshots must bind the machine type and CPU model qemu runs") {
+		t.Fatalf("snapshots bound to another machine: %v", err)
+	}
+	store["machine_type"] = "pc-q35-9.0"
+	bound := windowsHostConfig(t, t.TempDir())
+	bound["snapshots"] = store
+	loaded, err := loadConfig(writeConfig(t, bound))
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings, enabled := loaded.snapshotSettings()
+	want := snapshot.Compatibility{Pool: "windows", VMM: "qemu_templated", VMMVersion: "9.0.2",
+		MachineType: "pc-q35-9.0", CPUModel: "fleet_baseline"}
+	if !enabled || settings.Compatibility != want {
+		t.Fatalf("windows snapshot binding: %+v", settings.Compatibility)
+	}
+}
+
+func TestQEMUHostsReachWindowsGuestsThroughTheirHelper(t *testing.T) {
+	directory, err := os.MkdirTemp("/tmp", "qemu")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runDir := filepath.Join(directory, "run")
+	loaded, err := loadConfig(writeConfig(t, windowsHostConfig(t, runDir)))
+	if err != nil {
+		os.RemoveAll(directory)
+		t.Fatal(err)
+	}
+	_, err = newFleet(loaded, tools{commands: &refusingCommands{}})
+	info, statErr := os.Stat(runDir)
+	startLineAgent(t, directory, filepath.Join(runDir, "env_1.helper"), false, map[string]any{"excel": map[string]any{}})
+	if err != nil || statErr != nil || !info.IsDir() {
+		t.Fatalf("a qemu fleet makes its run dir: %v %v", err, statErr)
+	}
+	driver, channel := newDriver(loaded, tools{}, guest.NewFilesystemFrames(t.TempDir()))
+	if _, isWindows := channel.(*guest.WindowsChannel); !isWindows || driver.Name() != "qemu_templated" {
+		t.Fatalf("driver %s channel %T", driver.Name(), channel)
+	}
+	state, err := channel.Extract(context.Background(), "env_1", []string{"excel"})
+	if err != nil || string(state) != `{"excel":{}}` {
+		t.Fatalf("extract through the helper: %s %v", state, err)
 	}
 }
 

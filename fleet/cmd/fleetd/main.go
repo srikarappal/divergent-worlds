@@ -1,8 +1,10 @@
 // Command fleetd serves the env API over one host's node agent (DESIGN.md sections 5 and 6.7).
 //
 // A JSON config names the host, its pool and capacity, the admission limits and
-// the VMM driver: firecracker for the Linux pool, or docker so a laptop without
-// KVM runs the same loop (docs/TASKS.md build decision 4). Frames land in the
+// the VMM driver: firecracker for the Linux pool, qemu_templated for the Windows
+// pool, or docker so a laptop without KVM runs the same loop (docs/TASKS.md
+// build decision 4). Windows guests are reached at the hypervisor and through
+// their in session helper (DESIGN.md 6.3). Frames land in the
 // object store directory that experimentd serves them from. With a snapshot
 // store, leases name snapshots by digest and the host pulls them to its cache;
 // fleetd builds base snapshots from image builds and sweeps unpinned snapshots
@@ -23,6 +25,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"syscall"
 	"time"
 
@@ -38,6 +41,7 @@ import (
 	"rlworld/fleet/internal/vmm"
 	"rlworld/fleet/internal/vmm/docker"
 	"rlworld/fleet/internal/vmm/firecracker"
+	"rlworld/fleet/internal/vmm/qemu"
 )
 
 const (
@@ -82,6 +86,14 @@ type firecrackerConfig struct {
 	BootArgs        string `json:"boot_args"`
 }
 
+// qemuConfig runs the Windows pool by VM templating; the run dir holds each VM's sockets and last screendump.
+type qemuConfig struct {
+	QEMUPath    string `json:"qemu_path"`
+	RunDir      string `json:"run_dir"`
+	MachineType string `json:"machine_type"`
+	CPUModel    string `json:"cpu_model"`
+}
+
 // snapshotConfig turns on the snapshot store. The cache, the jails and the overlays share one filesystem; the
 // binding fields are what this pool's snapshots are bound to (DESIGN.md 6.1.6).
 type snapshotConfig struct {
@@ -120,6 +132,7 @@ type config struct {
 	GuestTimeoutSeconds int                        `json:"guest_timeout_seconds"`
 	Docker              dockerConfig               `json:"docker"`
 	Firecracker         firecrackerConfig          `json:"firecracker"`
+	QEMU                qemuConfig                 `json:"qemu"`
 	Snapshots           snapshotConfig             `json:"snapshots"`
 	WarmPool            warmPoolConfig             `json:"warm_pool"`
 }
@@ -164,8 +177,13 @@ func (loaded config) validate() error {
 	if loaded.Listen == "" {
 		problems = append(problems, errors.New("listen is required"))
 	}
-	if loaded.Driver != "docker" && loaded.Driver != "firecracker" {
-		problems = append(problems, fmt.Errorf("driver %q is not one of docker or firecracker", loaded.Driver))
+	if !slices.Contains([]string{"docker", "firecracker", "qemu_templated"}, loaded.Driver) {
+		problems = append(problems, fmt.Errorf("driver %q is not one of docker, firecracker or qemu_templated",
+			loaded.Driver))
+	}
+	if loaded.Driver == "qemu_templated" && (loaded.QEMU.QEMUPath == "" || loaded.QEMU.RunDir == "" ||
+		loaded.QEMU.MachineType == "" || loaded.QEMU.CPUModel == "") {
+		problems = append(problems, errors.New("qemu needs qemu_path, run_dir, machine_type and cpu_model"))
 	}
 	if loaded.Host.ID == "" || loaded.Host.Pool == "" {
 		problems = append(problems, errors.New("host needs an id and a pool"))
@@ -180,11 +198,15 @@ func (loaded config) validate() error {
 		problems = append(problems, errors.New("state_dir and object_store_dir are required"))
 	}
 	if loaded.Snapshots.StoreDir != "" {
-		if loaded.Driver != "firecracker" {
+		if loaded.Driver == "docker" {
 			problems = append(problems, errors.New("the snapshot store serves VM pools; docker images are snapshots"))
 		}
 		if loaded.Snapshots.CacheDir == "" || loaded.Snapshots.CPUModel == "" || loaded.Snapshots.VMMVersion == "" {
 			problems = append(problems, errors.New("snapshots need cache_dir, vmm_version and cpu_model"))
+		}
+		if loaded.Driver == "qemu_templated" && (loaded.Snapshots.MachineType != loaded.QEMU.MachineType ||
+			loaded.Snapshots.CPUModel != loaded.QEMU.CPUModel) {
+			problems = append(problems, errors.New("snapshots must bind the machine type and CPU model qemu runs"))
 		}
 	}
 	return errors.Join(problems...)
@@ -210,27 +232,39 @@ func (loaded config) schedulerHost() scheduler.Host {
 			GPUs: loaded.Host.GPUs}}
 }
 
-// newDriver returns the driver and how the guest channel reaches its guests' agents and VNC relays.
-func newDriver(loaded config, hostTools tools) (vmm.Driver, guest.Dialer, guest.Dialer) {
-	if loaded.Driver == "docker" {
+// newDriver returns the driver and the guest channel that reaches its guests: the guest agent and its VNC relay
+// on Linux pools; the hypervisor, the in session helper and QEMU's VNC server on the Windows pool.
+func newDriver(loaded config, hostTools tools, frames guest.FrameStore) (vmm.Driver, nodeagent.GuestChannel) {
+	timeout := time.Duration(loaded.GuestTimeoutSeconds) * time.Second
+	switch loaded.Driver {
+	case "docker":
 		driver := docker.NewDriver(docker.Config{Binary: loaded.Docker.Binary, AgentPort: guestAgentPort,
 			SecurityOptions: loaded.Docker.SecurityOptions, ShmSizeMiB: loaded.Docker.ShmSizeMiB,
 			ReadyTimeout:       time.Duration(loaded.Docker.ReadyTimeoutSeconds) * time.Second,
 			SnapshotRepository: loaded.Docker.SnapshotRepository}, hostTools.docker)
-		return driver, guest.TokenDialer{Endpoints: driver}, guest.TokenDialer{Endpoints: driver, Greeting: "VNC"}
+		return driver, guest.NewChannel(guest.TokenDialer{Endpoints: driver},
+			guest.TokenDialer{Endpoints: driver, Greeting: "VNC"}, frames, timeout)
+	case "qemu_templated":
+		driver := qemu.NewDriver(qemu.Config{QEMUPath: loaded.QEMU.QEMUPath, MachineType: loaded.QEMU.MachineType,
+			CPUModel: loaded.QEMU.CPUModel, RunDir: loaded.QEMU.RunDir}, hostTools.processes, nil)
+		return driver, guest.NewWindowsChannel(driver, frames, timeout, time.Sleep)
 	}
 	driver := firecracker.NewDriver(firecracker.Config{JailerPath: loaded.Firecracker.JailerPath,
 		FirecrackerPath: loaded.Firecracker.FirecrackerPath, ChrootBaseDir: loaded.Firecracker.ChrootBaseDir,
 		UID: loaded.Firecracker.UID, GID: loaded.Firecracker.GID, CPUTemplatePath: loaded.Firecracker.CPUTemplatePath,
 		BootArgs: loaded.Firecracker.BootArgs}, hostTools.processes, nil)
-	return driver, guest.VsockDialer{SocketPath: driver.VsockPath, Port: guestAgentPort},
-		guest.VsockDialer{SocketPath: driver.VsockPath, Port: guestVNCPort}
+	return driver, guest.NewChannel(guest.VsockDialer{SocketPath: driver.VsockPath, Port: guestAgentPort},
+		guest.VsockDialer{SocketPath: driver.VsockPath, Port: guestVNCPort}, frames, timeout)
 }
 
 func newFleet(loaded config, hostTools tools) (*fleet, error) {
 	overlayDir := filepath.Join(loaded.StateDir, "overlays")
 	checkpointDir := filepath.Join(loaded.StateDir, "checkpoints")
-	for _, directory := range []string{overlayDir, checkpointDir, loaded.ObjectStoreDir} {
+	directories := []string{overlayDir, checkpointDir, loaded.ObjectStoreDir}
+	if loaded.Driver == "qemu_templated" {
+		directories = append(directories, loaded.QEMU.RunDir)
+	}
+	for _, directory := range directories {
 		if err := os.MkdirAll(directory, 0o750); err != nil {
 			return nil, err
 		}
@@ -242,9 +276,7 @@ func newFleet(loaded config, hostTools tools) (*fleet, error) {
 	leases := lease.NewManager(controller, clock.Real{}, time.Duration(loaded.LeaseTTLSeconds)*time.Second)
 	placement := scheduler.New()
 	placement.UpsertHost(loaded.schedulerHost())
-	driver, dialer, vncDialer := newDriver(loaded, hostTools)
-	channel := guest.NewChannel(dialer, vncDialer, guest.NewFilesystemFrames(loaded.ObjectStoreDir),
-		time.Duration(loaded.GuestTimeoutSeconds)*time.Second)
+	driver, channel := newDriver(loaded, hostTools, guest.NewFilesystemFrames(loaded.ObjectStoreDir))
 	nodeConfig := nodeagent.Config{HostID: loaded.Host.ID, OverlayDir: overlayDir}
 	settings, snapshotsOn := loaded.snapshotSettings()
 	if snapshotsOn {
