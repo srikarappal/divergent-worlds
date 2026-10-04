@@ -86,12 +86,13 @@ type StartRequest struct {
 	ObservationKinds []string
 }
 
-// EnvInfo describes a running env.
+// EnvInfo describes a running env; Warm marks one restored ahead of demand, or handed to a lease from the warm pool.
 type EnvInfo struct {
 	EnvID        string
 	State        vmm.State
 	Namespace    string
 	CloneAddress string
+	Warm         bool
 }
 
 // StepResult is one turn: the observation plus where the time went.
@@ -111,20 +112,22 @@ type env struct {
 	resumedAt    time.Time
 	needsEntropy bool
 	lazyMemory   *snapshot.LazyMemory
+	warm         bool
 }
 
 // Agent manages every env on one host.
 type Agent struct {
-	mu            sync.Mutex
-	config        Config
-	driver        vmm.Driver
-	guest         GuestChannel
-	commands      CommandRunner
-	clock         clock.Clock
-	sleep         func(time.Duration)
-	envs          map[string]*env
-	usedIndexes   map[int]bool
-	nextIndexHint int
+	mu             sync.Mutex
+	config         Config
+	driver         vmm.Driver
+	guest          GuestChannel
+	commands       CommandRunner
+	clock          clock.Clock
+	sleep          func(time.Duration)
+	envs           map[string]*env
+	usedIndexes    map[int]bool
+	nextIndexHint  int
+	nextWarmNumber int
 }
 
 // New returns an agent; nil sleep uses time.Sleep.
@@ -198,9 +201,17 @@ func (agent *Agent) runAll(ctx context.Context, commands [][]string) error {
 	return nil
 }
 
-// Start pulls the snapshot when it is not on this host yet, wires the network, makes the overlay and restores;
-// any failure undoes what was done.
+// Start hands over a warm env of the snapshot when one waits; otherwise it pulls the snapshot when it is not on this
+// host yet, wires the network, makes the overlay and restores. Any failure undoes what was done.
 func (agent *Agent) Start(ctx context.Context, request StartRequest) (EnvInfo, error) {
+	if warmID := agent.takeWarm(request.SnapshotDigest); warmID != "" {
+		return agent.handOver(ctx, warmID, request)
+	}
+	return agent.restore(ctx, request)
+}
+
+// restore pulls what is missing and restores a new env.
+func (agent *Agent) restore(ctx context.Context, request StartRequest) (EnvInfo, error) {
 	request, lazyMemory, err := agent.resolveSnapshot(ctx, request)
 	if err != nil {
 		return EnvInfo{}, err
@@ -547,7 +558,7 @@ func (agent *Agent) Envs() []EnvInfo {
 	var infos []EnvInfo
 	for envID, current := range agent.envs {
 		infos = append(infos, EnvInfo{EnvID: envID, State: current.state, Namespace: current.network.Namespace,
-			CloneAddress: current.network.CloneAddress.String()})
+			CloneAddress: current.network.CloneAddress.String(), Warm: current.warm})
 	}
 	slices.SortFunc(infos, compareEnvIDs)
 	return infos
