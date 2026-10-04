@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strconv"
 	"sync"
@@ -74,13 +76,47 @@ func (driver *Driver) Name() string {
 	return "qemu_templated"
 }
 
+// HelperPortName is the virtio serial port the in session helper of a Windows guest serves.
+const HelperPortName = "org.rlworld.helper.0"
+
+// GuestAgentPortName is the virtio serial port of the QEMU guest agent, which sets the guest clock.
+const GuestAgentPortName = "org.qemu.guest_agent.0"
+
 // QMPSocketPath is where one clone's QMP socket lives.
 func (driver *Driver) QMPSocketPath(vmID string) string {
 	return filepath.Join(driver.config.RunDir, vmID+".qmp")
 }
 
+// HelperSocketPath is the host end of the in session helper's virtio serial port.
+func (driver *Driver) HelperSocketPath(vmID string) string {
+	return filepath.Join(driver.config.RunDir, vmID+".helper")
+}
+
+// GuestAgentSocketPath is the host end of the QEMU guest agent's virtio serial port.
+func (driver *Driver) GuestAgentSocketPath(vmID string) string {
+	return filepath.Join(driver.config.RunDir, vmID+".qga")
+}
+
+// VNCSocketPath is where QEMU serves the VM's screen for operator takeover.
+func (driver *Driver) VNCSocketPath(vmID string) string {
+	return filepath.Join(driver.config.RunDir, vmID+".vnc")
+}
+
+// ScreenPath is where screendumps of the VM land before the host reads them.
+func (driver *Driver) ScreenPath(vmID string) string {
+	return filepath.Join(driver.config.RunDir, vmID+".screen.png")
+}
+
+func serialPortArgs(id, socketPath, portName string) []string {
+	return []string{"-chardev", "socket,id=" + id + ",path=" + socketPath + ",server=on,wait=off",
+		"-device", "virtserialport,chardev=" + id + ",name=" + portName}
+}
+
 // machineArgs is the command line a template and its clones share, so device state migrates between them. The
 // template writes guest RAM through to its file; clones map that file private and wait for the device state.
+// Screens and input stay at the hypervisor (QMP and a USB tablet); the in session helper and the QEMU guest agent
+// each get a virtio serial port; QEMU serves VNC on a socket for takeover. Every QEMU process gets a fresh VM
+// generation id, so Windows reseeds its RNG and renews what it ties to the VM's identity in every clone.
 func (driver *Driver) machineArgs(vmID, namespace string, vcpus, memoryMiB int, memoryPath, diskPath string,
 	template bool) []string {
 	memorySize := strconv.Itoa(memoryMiB) + "M"
@@ -104,8 +140,13 @@ func (driver *Driver) machineArgs(vmID, namespace string, vcpus, memoryMiB int, 
 		"-nic", "tap,ifname="+netplan.TapName+",script=no,downscript=no,model=virtio-net-pci,mac="+netplan.GuestMAC,
 		"-device", "qemu-xhci", "-device", "usb-tablet",
 		"-vga", "std", "-display", "none",
-		"-qmp", "unix:"+driver.QMPSocketPath(vmID)+",server=on,wait=off",
+		"-vnc", "unix:"+driver.VNCSocketPath(vmID),
+		"-device", "vmgenid,guid=auto",
+		"-device", "virtio-serial-pci",
 	)
+	argv = append(argv, serialPortArgs("helper", driver.HelperSocketPath(vmID), HelperPortName)...)
+	argv = append(argv, serialPortArgs("qga", driver.GuestAgentSocketPath(vmID), GuestAgentPortName)...)
+	argv = append(argv, "-qmp", "unix:"+driver.QMPSocketPath(vmID)+",server=on,wait=off")
 	if !template {
 		argv = append(argv, "-incoming", "defer")
 	}
@@ -331,19 +372,24 @@ func (driver *Driver) VMMVersion(ctx context.Context, vmID string) (string, erro
 	return fmt.Sprintf("%d.%d.%d", version.QEMU.Major, version.QEMU.Minor, version.QEMU.Micro), nil
 }
 
-// Destroy asks QEMU to quit, then kills the process either way.
+// Destroy asks QEMU to quit, kills the process either way, then removes the VM's sockets and last screendump.
 func (driver *Driver) Destroy(ctx context.Context, vmID string) error {
 	target, err := driver.lookup(vmID)
 	if err != nil {
 		return err
 	}
 	target.qmp.Execute(ctx, "quit", nil)
-	closeErr := target.qmp.Close()
-	killErr := vmm.Stop(target.process)
+	problems := []error{target.qmp.Close(), vmm.Stop(target.process)}
 	driver.mu.Lock()
 	delete(driver.vmsByID, vmID)
 	driver.mu.Unlock()
-	return errors.Join(closeErr, killErr)
+	for _, path := range []string{driver.QMPSocketPath(vmID), driver.HelperSocketPath(vmID),
+		driver.GuestAgentSocketPath(vmID), driver.VNCSocketPath(vmID), driver.ScreenPath(vmID)} {
+		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			problems = append(problems, err)
+		}
+	}
+	return errors.Join(problems...)
 }
 
 // CaptureScreen writes the framebuffer as PNG, outside the guest's reach.
@@ -355,6 +401,11 @@ func (driver *Driver) CaptureScreen(ctx context.Context, vmID, outputPath string
 func (driver *Driver) SendPointer(ctx context.Context, vmID string, x, y, screenWidth, screenHeight int,
 	button string, down bool) error {
 	events := PointerEvents(x, y, screenWidth, screenHeight, button, down)
+	return driver.execute(ctx, vmID, "input-send-event", map[string]any{"events": events})
+}
+
+// SendInput delivers input events in order through the USB tablet and keyboard.
+func (driver *Driver) SendInput(ctx context.Context, vmID string, events []map[string]any) error {
 	return driver.execute(ctx, vmID, "input-send-event", map[string]any{"events": events})
 }
 

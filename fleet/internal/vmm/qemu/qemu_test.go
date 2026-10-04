@@ -334,3 +334,58 @@ func TestATemplateSnapshotWritesOnlyDeviceStateAndKeepsItsRAMFile(t *testing.T) 
 		t.Fatalf("version of an unknown vm: %v", err)
 	}
 }
+
+func TestEveryVMGetsSerialPortsAVNCSocketAndAFreshGenerationID(t *testing.T) {
+	driver, _ := newTestDriver(&fakeQMP{})
+	argv := strings.Join(driver.TemplatingArgs(windowsSpec(false)), " ")
+	for _, fragment := range []string{
+		"-display none -vnc unix:/run/rlworld/win_1.vnc",
+		"-device vmgenid,guid=auto",
+		"-device virtio-serial-pci",
+		"-chardev socket,id=helper,path=/run/rlworld/win_1.helper,server=on,wait=off",
+		"-device virtserialport,chardev=helper,name=org.rlworld.helper.0",
+		"-chardev socket,id=qga,path=/run/rlworld/win_1.qga,server=on,wait=off",
+		"-device virtserialport,chardev=qga,name=org.qemu.guest_agent.0",
+	} {
+		if !strings.Contains(argv, fragment) {
+			t.Fatalf("qemu argv %q lacks %q", argv, fragment)
+		}
+	}
+	paths := []string{driver.HelperSocketPath("win_1"), driver.GuestAgentSocketPath("win_1"),
+		driver.VNCSocketPath("win_1"), driver.ScreenPath("win_1")}
+	want := []string{"/run/rlworld/win_1.helper", "/run/rlworld/win_1.qga", "/run/rlworld/win_1.vnc",
+		"/run/rlworld/win_1.screen.png"}
+	if !slices.Equal(paths, want) {
+		t.Fatalf("paths %v, want %v", paths, want)
+	}
+}
+
+func TestDestroyRemovesTheVMsSocketsAndLastScreendump(t *testing.T) {
+	ctx := context.Background()
+	channel := &fakeQMP{migrationStatus: []string{"completed"}}
+	runDir := t.TempDir()
+	driver := NewDriver(Config{QEMUPath: "qemu-system-x86_64", MachineType: "pc-q35-9.0", CPUModel: "fleet_baseline",
+		RunDir: runDir}, &recordingRunner{}, channel.dial)
+	if _, err := driver.Restore(ctx, windowsSpec(false)); err != nil {
+		t.Fatal(err)
+	}
+	for _, suffix := range []string{".helper", ".qga", ".screen.png"} {
+		if err := os.WriteFile(filepath.Join(runDir, "win_1"+suffix), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keep := filepath.Join(runDir, "win_2.screen.png")
+	if err := os.WriteFile(keep, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := driver.Destroy(ctx, "win_1"); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(runDir)
+	if err != nil || len(entries) != 1 || entries[0].Name() != "win_2.screen.png" {
+		t.Fatalf("run dir after destroy: %v %v", entries, err)
+	}
+	if err := driver.Destroy(ctx, "win_1"); err == nil {
+		t.Fatal("a destroyed VM is gone")
+	}
+}
