@@ -10,6 +10,7 @@ import type {
   AuthoringSession,
   CalibrationReport,
   CatalogEntry,
+  CloneFidelity,
   CohortEpisode,
   Comparison,
   DataPolicy,
@@ -99,6 +100,7 @@ export interface ConsoleApi {
   getFailures(runId: string): Promise<FailureAnalysis>;
   runReport(runId: string): Promise<EvalReport>;
   compareRuns(runIds: readonly string[]): Promise<Comparison>;
+  cloneFidelity(app: string, cloneRunId: string, realRunId: string): Promise<CloneFidelity>;
   comparePolicyVersions(runId: string): Promise<Comparison>;
   listReviewItems(filter?: ReviewItemFilter): Promise<ReviewItem[]>;
   setFrameGrant(grant: string): void;
@@ -452,6 +454,10 @@ export class ApiClient implements ConsoleApi {
 
   compareRuns(runIds: readonly string[]): Promise<Comparison> {
     return this.call("compare_runs", { query: { run_ids: runIds.join(",") } });
+  }
+
+  cloneFidelity(app: string, cloneRunId: string, realRunId: string): Promise<CloneFidelity> {
+    return this.call("clone_fidelity", { query: { app, clone_run_id: cloneRunId, real_run_id: realRunId } });
   }
 
   comparePolicyVersions(runId: string): Promise<Comparison> {

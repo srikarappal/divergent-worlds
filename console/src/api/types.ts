@@ -316,6 +316,23 @@ export interface Comparison {
   shared_tasks: ComparisonRow[];
 }
 
+// An app clone's eval run against the real app's on the tasks both scored (DESIGN.md 6.4).
+export interface CloneFidelity {
+  app: string;
+  clone_run_id: string;
+  real_run_id: string;
+  tasks: number;
+  clone_success_rate: number;
+  real_success_rate: number;
+  gap: number;
+  fidelity: number;
+  agreement: number;
+  clone_only: number;
+  real_only: number;
+  p_value: number;
+  large_gap: boolean;
+}
+
 export type ReviewAction = "flag" | "label" | "verifier_bug" | "task_draft" | "audit_sample";
 
 export interface ReviewItem {

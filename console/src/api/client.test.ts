@@ -111,6 +111,8 @@ function sampleArguments(operationName: string): unknown[] {
                                     exports: [] }];
     case "set_tenant_quota":
       return [PATH_VALUES.tenant, 40];
+    case "clone_fidelity":
+      return ["crm", "run_clone", "run_real"];
     case "list_runs":
     case "list_endpoints":
       return [];

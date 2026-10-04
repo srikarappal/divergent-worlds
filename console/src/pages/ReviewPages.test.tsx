@@ -214,6 +214,30 @@ async function runsCompareOnSharedTasks(): Promise<void> {
 
 test("runs compare on the tasks both attempted", runsCompareOnSharedTasks);
 
+async function aCloneRunMeasuresFidelityAgainstTheRealApp(): Promise<void> {
+  const api = new FakeApi();
+  render(inRouter(<ComparePage api={api} runIds={["run_clone", "run_real"]} />));
+  const measure = await screen.findByRole("button", { name: "Measure clone fidelity" });
+  expect(measure).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("app clone"), { target: { value: "crm" } });
+  fireEvent.click(measure);
+  expect(await screen.findByText("run_clone and run_real share no task")).toBeInTheDocument();
+  api.fidelity = { app: "crm", clone_run_id: "run_clone", real_run_id: "run_real", tasks: 40,
+                   clone_success_rate: 0.7, real_success_rate: 0.45, gap: 0.25, fidelity: 0.75, agreement: 0.7,
+                   clone_only: 11, real_only: 1, p_value: 0.0063, large_gap: true };
+  fireEvent.click(measure);
+  const table = await screen.findByLabelText("clone fidelity");
+  expect(table).toHaveTextContent("Gap25%");
+  expect(table).toHaveTextContent("Fidelity75%");
+  expect(table).toHaveTextContent("11, 1");
+  expect(table).toHaveTextContent("Large gap: training on the clone will not transfer");
+  expect(api.callsTo("cloneFidelity")).toEqual([["crm", "run_clone", "run_real"], ["crm", "run_clone", "run_real"]]);
+  expect(screen.getByLabelText("clone_fidelity cli"))
+    .toHaveTextContent("rlworld compare fidelity crm run_clone run_real");
+}
+
+test("a clone run measures its fidelity against the real app run", aCloneRunMeasuresFidelityAgainstTheRealApp);
+
 function filtersAndMarkersAreTyped(): void {
   expect(episodeFilter({ termination: "failure", policy_version: "3", limit: "", bogus: "x" }))
     .toEqual({ termination: "failure", policy_version: 3 });

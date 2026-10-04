@@ -10,6 +10,7 @@ import type {
   AuthoringSession,
   CalibrationReport,
   CatalogEntry,
+  CloneFidelity,
   CohortEpisode,
   Comparison,
   DataPolicy,
@@ -125,6 +126,7 @@ export class FakeApi implements ConsoleApi {
   failureAnalysis: FailureAnalysis | null = null;
   report: EvalReport | null = null;
   comparison: Comparison = { reports: {}, shared_tasks: [] };
+  fidelity: CloneFidelity | null = null;
   reviewItems: ReviewItem[] = [];
   alerts: Alert[] = [];
   authSettings: AuthConfig = { enabled: false };
@@ -432,6 +434,14 @@ export class FakeApi implements ConsoleApi {
   async compareRuns(runIds: readonly string[]): Promise<Comparison> {
     this.record("compareRuns", runIds);
     return this.comparison;
+  }
+
+  async cloneFidelity(app: string, cloneRunId: string, realRunId: string): Promise<CloneFidelity> {
+    this.record("cloneFidelity", app, cloneRunId, realRunId);
+    if (this.fidelity === null) {
+      throw new ApiError(400, "invalid_request", "no shared tasks", [`${cloneRunId} and ${realRunId} share no task`]);
+    }
+    return this.fidelity;
   }
 
   async comparePolicyVersions(runId: string): Promise<Comparison> {

@@ -1,10 +1,12 @@
 // Review (DESIGN.md 6.11 and 6.14): the trajectory scrubber with reward provenance and one click actions, the
-// cohort view, a run's report with failure clusters and policy versions plus run against run comparisons.
+// cohort view, a run's report with failure clusters and policy versions plus run against run comparisons, where a
+// clone run against a real app run measures the clone's fidelity (DESIGN.md 6.4).
 import { Component, type ChangeEvent, type MouseEvent, type ReactElement } from "react";
 import { Link } from "react-router-dom";
 
 import type { ConsoleApi } from "../api/client";
 import type {
+  CloneFidelity,
   CohortEpisode,
   Comparison,
   EpisodeFilter,
@@ -666,13 +668,56 @@ interface CompareProps {
 interface CompareState {
   comparison: Comparison | null;
   problems: string[];
+  app: string;
+  fidelity: CloneFidelity | null;
+  fidelityProblems: string[];
 }
 
-// Run against run on the tasks both attempted, with each run's report beside it.
+function FidelityTable(props: { fidelity: CloneFidelity }): ReactElement {
+  const fidelity = props.fidelity;
+  const verdict = fidelity.large_gap
+    ? "Large gap: training on the clone will not transfer"
+    : "Within tolerance or not significant";
+  return (
+    <table aria-label="clone fidelity">
+      <tbody>
+        <tr><th>Tasks compared</th><td>{fidelity.tasks}</td></tr>
+        <tr><th>Success on the clone</th><td>{formatPercent(fidelity.clone_success_rate)}</td></tr>
+        <tr><th>Success on the real app</th><td>{formatPercent(fidelity.real_success_rate)}</td></tr>
+        <tr><th>Gap</th><td>{formatPercent(fidelity.gap)}</td></tr>
+        <tr><th>Fidelity</th><td>{formatPercent(fidelity.fidelity)}</td></tr>
+        <tr><th>Tasks with the same outcome</th><td>{formatPercent(fidelity.agreement)}</td></tr>
+        <tr><th>Solved only on the clone, only on the real app</th>
+          <td>{fidelity.clone_only}, {fidelity.real_only}</td></tr>
+        <tr><th>McNemar p value</th><td>{fidelity.p_value.toFixed(3)}</td></tr>
+        <tr><th>Verdict</th><td>{verdict}</td></tr>
+      </tbody>
+    </table>
+  );
+}
+
+// Run against run on the tasks both attempted, with each run's report beside it; the first run against the
+// second also measures the first as an app clone of the second's real app.
 export class ComparePage extends Component<CompareProps, CompareState> {
   constructor(props: CompareProps) {
     super(props);
-    this.state = { comparison: null, problems: [] };
+    this.state = { comparison: null, problems: [], app: "", fidelity: null, fidelityProblems: [] };
+    this.handleApp = this.handleApp.bind(this);
+    this.handleMeasure = this.handleMeasure.bind(this);
+  }
+
+  handleApp(event: ChangeEvent<HTMLInputElement>): void {
+    this.setState({ app: event.target.value });
+  }
+
+  async handleMeasure(): Promise<void> {
+    const [cloneRunId, realRunId] = this.props.runIds;
+    try {
+      const fidelity = await this.props.api.cloneFidelity(this.state.app.trim(), cloneRunId, realRunId);
+      this.setState({ fidelity, fidelityProblems: [] });
+    } catch (error) {
+      this.setState({ fidelity: null, fidelityProblems: failureProblems(error) });
+    }
   }
 
   async componentDidMount(): Promise<void> {
@@ -689,14 +734,29 @@ export class ComparePage extends Component<CompareProps, CompareState> {
     for (const [runId, report] of Object.entries(comparison?.reports ?? {})) {
       reports.push(<section key={runId}><h2>{runId}</h2><ReportTable report={report} /></section>);
     }
+    const [cloneRunId, realRunId] = this.props.runIds;
     return (
       <div className="compare">
         <h1>Compare runs</h1>
         <ProblemList title="Compare" problems={this.state.problems} />
         {comparison !== null ? <SharedTasksTable comparison={comparison} /> : null}
         {reports}
-        <ParityPanel items={[{ name: "compare_runs", values: { run_id: this.props.runIds[0],
-                                                              other_run_id: this.props.runIds[1] } }]} />
+        <section>
+          <h2>Clone fidelity</h2>
+          <p>{cloneRunId} as the app clone, {realRunId} as the real app; both must be eval runs.</p>
+          <input aria-label="app clone" value={this.state.app} onChange={this.handleApp} />
+          <button type="button" onClick={this.handleMeasure}
+                  disabled={this.state.app.trim() === "" || this.props.runIds.length < 2}>
+            Measure clone fidelity
+          </button>
+          <ProblemList title="Clone fidelity" problems={this.state.fidelityProblems} />
+          {this.state.fidelity !== null ? <FidelityTable fidelity={this.state.fidelity} /> : null}
+        </section>
+        <ParityPanel items={[
+          { name: "compare_runs", values: { run_id: cloneRunId, other_run_id: realRunId } },
+          { name: "clone_fidelity", values: { app: this.state.app || "app", run_id: cloneRunId,
+                                              other_run_id: realRunId } },
+        ]} />
       </div>
     );
   }
