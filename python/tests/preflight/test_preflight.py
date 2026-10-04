@@ -16,6 +16,7 @@ from rlworld.preflight import (
 from rlworld.specs import expand_sweep, parse_spec_document, set_path
 from rlworld.specs.digest import spec_digest
 from rlworld.tasks import GateReport, GateResult
+from rlworld.tasks.splits import HoldoutPolicy
 
 FULL_PRICES = {
     "policy_profile": PolicyProfile(gpu_hourly_cost_usd=2.0),
@@ -115,6 +116,13 @@ def test_seats_quota_hosts_and_identities_cap_concurrency(example_document, pref
     assert {"tenant_quota", "fleet_capacity", "license_seats", "identity_pool"} <= set(report.codes("warning"))
     missing_pool = dataclasses.replace(preflight_context, seat_pools={"windows_server_dc": SeatPool(1000, "per_host")})
     assert "unknown_license_pool" in run_preflight(example_document, missing_pool).codes("error")
+
+
+def test_training_on_what_eval_holds_out_is_blocked(example_document, preflight_context):
+    holdout = HoldoutPolicy(templates={example_document.task.generator}, world_seeds={example_document.world.seed})
+    held = run_preflight(example_document, dataclasses.replace(preflight_context, holdout=holdout))
+    assert held.codes("error").count("holdout_overlap") == 2 and not held.is_valid
+    assert "holdout_overlap" not in run_preflight(example_document, preflight_context).codes("error")
 
 
 def test_live_internet_warns_that_rewards_drift(example_payload, preflight_context):

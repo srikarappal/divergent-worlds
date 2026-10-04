@@ -26,6 +26,7 @@ from rlworld.specs.digest import run_spec_digest, spec_digest
 from rlworld.specs.document import SpecDocument, SpecValidationError, parse_spec_document
 from rlworld.specs.sweep import expand_sweep
 from rlworld.tasks.gates import GateReport
+from rlworld.tasks.splits import HoldoutPolicy, holdout_problems
 
 BROWSER_APPS = frozenset({"chrome", "chromium", "firefox", "edge", "webkit", "safari"})
 
@@ -55,6 +56,7 @@ class PreflightContext:
     judge_profile: JudgeProfile = field(default_factory=JudgeProfile)
     pool_profiles: Mapping[str, PoolProfile] = field(default_factory=default_pool_profiles)
     storage_profile: StorageProfile = field(default_factory=StorageProfile)
+    holdout: HoldoutPolicy = field(default_factory=HoldoutPolicy)
 
 
 class PreflightIssue(BaseModel):
@@ -137,6 +139,12 @@ def check_gates(document: SpecDocument, context: PreflightContext, collector: Is
                 "false_negative_risk",
                 "no alternative solution passed the verifiers, so valid work may be scored as failure",
             )
+
+
+def check_holdout(document: SpecDocument, context: PreflightContext, collector: IssueCollector) -> None:
+    """Training may not touch the apps, sites, templates and world seeds held out for eval."""
+    for problem in holdout_problems(document, context.holdout):
+        collector.error("holdout_overlap", problem)
 
 
 def check_image_fits_task(document: SpecDocument, collector: IssueCollector) -> None:
@@ -239,6 +247,7 @@ def run_preflight(document: SpecDocument, context: PreflightContext | None = Non
     collector = IssueCollector()
     check_verifiers_and_rubric(document, preflight_context, collector)
     check_gates(document, preflight_context, collector)
+    check_holdout(document, preflight_context, collector)
     check_image_fits_task(document, collector)
     policy_probe, _ = check_endpoints(document, preflight_context, collector)
     estimate = estimate_capacity(
