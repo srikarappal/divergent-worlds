@@ -1,0 +1,6 @@
+# The policy the reference spec plays: an OpenAI compatible server on this machine, such as vLLM.
+endpoints:
+  - name: local_policy
+    base_url: http://localhost:8000/v1
+    allowed_models: [my_policy]
+    provider_kind: self_hosted

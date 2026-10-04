@@ -1,0 +1,18 @@
+# experimentd beside examples/fleetd/laptop.json. The Docker dev backend serves the Linux pool, so the snapshot of
+# the reference task is the dev image rlworld-build-image --target dev builds for
+# examples/specs/reconcile_invoices_linux.yaml.
+# Secrets come from the environment: RLWORLD_RUN_TOKEN_SECRET and RLWORLD_JUDGE_SECRET.
+host: 127.0.0.1
+port: 8080
+public_url: http://127.0.0.1:8080
+fleet_url: http://127.0.0.1:8700
+state_dir: /tmp/rlworld/experimentd
+object_store_dir: /tmp/rlworld/objects
+endpoints_file: endpoints.yaml
+pools:
+  firecracker: {pool: linux, memory_mib: 4096, vcpus: 2}
+snapshot_store: false
+static_snapshots:
+  "sha256:e197927b25a48f8a2a938f4eea30f6665e42a8086f0cd1340cc2a33816dfbf0b":
+    digest: "sha256:e197927b25a48f8a2a938f4eea30f6665e42a8086f0cd1340cc2a33816dfbf0b"
+    base_disk_path: "rlworld-dev/noble_calc_v1:e197927b25a4"

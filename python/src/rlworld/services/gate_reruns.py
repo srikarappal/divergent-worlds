@@ -166,7 +166,8 @@ class GateReruns:
         oracle_runs = tuple(envs.replay(oracle, f"oracle_run_{index}") for index in range(self.gate_config.rerun_count))
         near_misses = tuple(envs.replay(parsed(actions), f"near_miss_{index}")
                             for index, actions in enumerate(recipe.near_misses))
-        agent_attempts = (tuple(self.solvability.attempts(envs.instance, self.gate_config.solvability_tries))
+        agent_attempts = (tuple(self.solvability.attempts(envs.document, envs.instance,
+                                                          self.gate_config.solvability_tries))
                           if self.solvability is not None else ())
         return GateInputs(initial_state=envs.instance.initial_state, ground_truth=envs.instance.ground_truth,
                           oracle_runs=oracle_runs, alternative_solutions=tuple(alternatives), near_misses=near_misses,

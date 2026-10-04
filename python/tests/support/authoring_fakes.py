@@ -175,7 +175,7 @@ class OracleAgent:
         self.root = root
         self.calls = []
 
-    def attempts(self, instance, tries):
+    def attempts(self, document, instance, tries):
         self.calls.append((instance.task_id, tries))
         world = World.model_validate(instance.setup_payload["world"])
         home = self.root / f"agent_{len(self.calls)}"
@@ -187,7 +187,7 @@ class OracleAgent:
 
 
 class CrashingAgent:
-    def attempts(self, instance, tries):
+    def attempts(self, document, instance, tries):
         raise RuntimeError("the strong agent's endpoint is down")
 
 

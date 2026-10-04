@@ -73,7 +73,7 @@ Added after checking DESIGN.md section by section against the tasks above.
 39. [todo] Observability: Prometheus metrics from fleetd and experimentd, Grafana dashboards for platform health, chaos tests (6.15).
 40. [todo] Windows guest channel: QMP screens and input at the hypervisor plus the autologon in session helper for UIA trees, Excel COM state, injection and extraction (6.1, 6.3).
 41. [done] Task generators and registry: task templates generated over worlds along the difficulty axes, the registry the curriculum samples from and the task provider that hands rollout workers task instances with their snapshots (3, 5, 6.10).
-42. [todo] experimentd server: the entry point wiring the spec, run, catalog, review and admin stores, auth, the gateway, the trainer launcher and platform hosted rollout workers, beside the fleetd command (5, 6.7).
+42. [done] experimentd server: the entry point wiring the spec, run, catalog, review and admin stores, auth, the gateway, the trainer launcher and platform hosted rollout workers, beside the fleetd command (5, 6.7).
 43. [todo] World diff snapshots: measure world materialization on a restored base snapshot; when it takes more than about 5 s or is nondeterministic, snapshot the materialized world so task setup injects only the task's own state after restore (3, 6.2).
 
 ## Follow ups

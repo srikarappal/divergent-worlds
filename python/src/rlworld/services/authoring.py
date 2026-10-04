@@ -55,9 +55,9 @@ class AuthoringFleet(ReplayFleet, Protocol):
 
 
 class SolvabilityProbe(Protocol):
-    """The solvability gate's strong agent: tries attempts at the task, each in a fresh env."""
+    """The solvability gate's strong agent: tries attempts at the task, each in a fresh env of the spec's image."""
 
-    def attempts(self, instance: TaskInstance, tries: int) -> list[SolutionAttempt]: ...
+    def attempts(self, document: SpecDocument, instance: TaskInstance, tries: int) -> list[SolutionAttempt]: ...
 
 
 @dataclass
@@ -218,7 +218,8 @@ class AuthoringService:
         oracle_runs = tuple(draft.envs.replay(oracle_actions, f"oracle_run_{index}")
                             for index in range(self.gate_config.rerun_count))
         near_misses = tuple(attempts[recording.recording_id] for recording in recorded if recording.kind == "near_miss")
-        agent_attempts = (tuple(self.solvability.attempts(draft.instance, self.gate_config.solvability_tries))
+        agent_attempts = (tuple(self.solvability.attempts(draft.document, draft.instance,
+                                                          self.gate_config.solvability_tries))
                           if self.solvability is not None else ())
         return GateInputs(initial_state=draft.instance.initial_state, ground_truth=draft.instance.ground_truth,
                           oracle_runs=oracle_runs, alternative_solutions=tuple(alternatives), near_misses=near_misses,
