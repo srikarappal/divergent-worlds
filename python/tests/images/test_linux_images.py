@@ -33,12 +33,15 @@ def test_dockerfile_starts_from_the_pinned_base_and_installs_from_snapshots_only
     dockerfile = text(plan, "context/Dockerfile")
     assert f"FROM docker.io/library/ubuntu@sha256:{DIGEST}\n" in dockerfile
     assert "RUN rm -f /etc/apt/sources.list.d/*" in dockerfile
+    assert dockerfile.index("COPY aptroot/ /") < dockerfile.index("apt-get -o")
+    assert dockerfile.index("COPY inputs/bootstrap_ca.pem /tmp/rlworld/inputs/") < dockerfile.index("apt-get -o")
+    assert dockerfile.index("apt-get -o") < dockerfile.index("COPY rootfs/ /") < dockerfile.index("COPY inputs/ ")
     assert ("apt-get -o Acquire::Check-Valid-Until=false"
             " -o Acquire::https::CaInfo=/tmp/rlworld/inputs/bootstrap_ca.pem update") in dockerfile
     assert "context/inputs/bootstrap_ca.pem" in plan.copies
-    assert text(plan, "context/rootfs/etc/apt/apt.conf.d/10rlworld-keep-overlay") == (
+    assert text(plan, "context/aptroot/etc/apt/apt.conf.d/10rlworld-keep-overlay") == (
         'Dpkg::Options { "--force-confdef"; "--force-confold"; };\n')
-    assert text(plan, "context/rootfs/etc/apt/sources.list") == (
+    assert text(plan, "context/aptroot/etc/apt/sources.list") == (
         "deb http://snapshot.ubuntu.com/ubuntu/20260301T000000Z noble main universe\n")
     install_line = next(line for line in dockerfile.splitlines() if "bootstrap_ca.pem install -y" in line)
     packages = install_line.split("--no-install-recommends ")[1].split()
@@ -127,7 +130,7 @@ def test_hardening_reaches_browsers_office_and_apt():
     plan = plan_for()
     dockerfile = text(plan, "context/Dockerfile")
     assert "ln -sf /dev/null /etc/systemd/system/apt-daily.timer" in dockerfile
-    no_updates = text(plan, "context/rootfs/etc/apt/apt.conf.d/10rlworld-no-updates")
+    no_updates = text(plan, "context/aptroot/etc/apt/apt.conf.d/10rlworld-no-updates")
     assert 'APT::Periodic::Unattended-Upgrade "0";' in no_updates
     chromium = json.loads(text(plan, "context/rootfs/etc/opt/chrome_for_testing/policies/managed/rlworld.json"))
     assert chromium["ComponentUpdatesEnabled"] is False and chromium["MetricsReportingEnabled"] is False

@@ -66,7 +66,9 @@ CA_PACKAGES = ("libnss3-tools",)
 # Snapshot mirrors redirect http to https before the base image has a CA bundle, so the first apt step trusts
 # the builder's pinned certifi bundle until ca-certificates is installed.
 BOOTSTRAP_CA = "bootstrap_ca.pem"
-# The overlay lands before apt, so dpkg keeps its files instead of stopping at a conffile prompt.
+# Only apt's own configuration lands before the package install, so overlay and input changes keep that layer
+# cached; apt runs after the overlay, such as app installs, keep overlay files instead of stopping at a prompt.
+APT_OVERLAY_PREFIX = "etc/apt/"
 KEEP_OVERLAY_CONFFILES = 'Dpkg::Options { "--force-confdef"; "--force-confold"; };\n'
 DOWNLOAD_DIRECTORY = "/tmp/rlworld/downloads"
 INPUT_DIRECTORY = "/tmp/rlworld/inputs"
@@ -425,11 +427,13 @@ def render_dockerfile(image: ImageSpec, config: LinuxBuildConfig, apps: Mapping[
         f"FROM {base_reference(image, config)}",
         "ENV DEBIAN_FRONTEND=noninteractive",
         'SHELL ["/bin/bash", "-euo", "pipefail", "-c"]',
-        "COPY rootfs/ /",
-        f"COPY inputs/ {INPUT_DIRECTORY}/",
+        "COPY aptroot/ /",
+        f"COPY inputs/{BOOTSTRAP_CA} {INPUT_DIRECTORY}/",
         run_step(["rm -f /etc/apt/sources.list.d/*",
                   f"apt-get -o Acquire::Check-Valid-Until=false {bootstrap_ca_option} update",
                   f"apt-get {bootstrap_ca_option} install -y --no-install-recommends {' '.join(packages)}"]),
+        "COPY rootfs/ /",
+        f"COPY inputs/ {INPUT_DIRECTORY}/",
         run_step([f"localedef -i {locale} -f UTF-8 {locale}.UTF-8", f"update-locale LANG={locale}.UTF-8"]),
         # Ubuntu base images since 23.04 ship an ubuntu user holding UID 1000.
         run_step(["if getent passwd ubuntu > /dev/null; then userdel --remove ubuntu; fi",
@@ -495,8 +499,8 @@ def linux_context(image: ImageSpec, config: LinuxBuildConfig, lock: ArtifactLock
     downloads = {recipe.artifact: lock.require(recipe.artifact) for recipe in apps.values() if recipe.artifact}
     files = {"context/Dockerfile": render_dockerfile(image, config, apps, downloads, hardening,
                                                      sorted(trusted_cas)).encode()}
-    files.update({f"context/rootfs/{path}": content
-                  for path, content in overlay_files(image, config, apps, hardening, trusted_cas).items()})
+    for path, content in overlay_files(image, config, apps, hardening, trusted_cas).items():
+        files[f"context/{'aptroot' if path.startswith(APT_OVERLAY_PREFIX) else 'rootfs'}/{path}"] = content
     copies = {f"context/inputs/{config.guest_agent_wheel.name}": config.guest_agent_wheel,
               f"context/inputs/{GUEST_REQUIREMENTS}": config.guest_agent_requirements,
               f"context/inputs/{BOOTSTRAP_CA}": Path(certifi.where())}
