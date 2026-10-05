@@ -26,6 +26,8 @@ SWEEPABLE_LAYERS = ("image", "world", "task", "run")
 DottedPath = Annotated[str, Field(pattern=DOTTED_PATH_PATTERN)]
 StatePathPattern = Annotated[str, Field(pattern=r"^[^/]+(/[^/]+)*$")]
 OsFamily = Literal["linux", "windows", "macos", "android"]
+# The Linux desktop session: a bare openbox window manager or a full Xfce desktop with panel, menu and file manager.
+LinuxDesktop = Literal["openbox", "xfce"]
 VmmKind = Literal["firecracker", "qemu_templated", "cloud_windows", "apple_virtualization", "cuttlefish"]
 ActionModality = Literal["computer", "browser", "terminal", "native", "control"]
 ActionFormat = Literal["computer_tool", "typed_actions", "text_actions"]
@@ -71,6 +73,7 @@ class ImageSpec(SpecModel):
     apps: dict[str, str] = Field(default_factory=dict)
     licenses: list[Annotated[str, Field(pattern=NAME_PATTERN)]] = Field(default_factory=list)
     display: DisplaySpec
+    desktop: LinuxDesktop = "openbox"
     hardening: list[str] = Field(default_factory=list)
     ready_probe: ReadyProbeSpec = Field(default_factory=ReadyProbeSpec)
 
@@ -81,6 +84,8 @@ class ImageSpec(SpecModel):
         if self.pool.vmm not in VMM_KINDS_BY_OS[self.os]:
             allowed_kinds = ", ".join(sorted(VMM_KINDS_BY_OS[self.os]))
             raise ValueError(f"vmm {self.pool.vmm} cannot run {self.os} guests, use one of: {allowed_kinds}")
+        if self.os != "linux" and self.desktop != "openbox":
+            raise ValueError(f"desktop {self.desktop} only applies to linux images")
         if self.pool.vmm == "qemu_templated" and not self.pool.machine:
             raise ValueError("qemu_templated pools must pin a machine type so snapshots stay restorable")
         return self

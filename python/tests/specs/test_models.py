@@ -26,6 +26,15 @@ def test_fixed_clocks_reach_leases_in_rfc_3339_and_a_time_without_offset_is_utc(
     assert ClockSpec().lease_time() is None
 
 
+def test_linux_images_pick_their_desktop_and_other_images_keep_the_default(example_payload):
+    linux_payload = {**example_payload, "image": {**example_payload["image"], "os": "linux",
+                                                    "pool": {"vmm": "firecracker", "cpu_model": "fleet_baseline"},
+                                                    "desktop": "xfce"}}
+    assert parse_spec_document(linux_payload).image.desktop == "xfce"
+    windows_payload = {**example_payload, "image": {**example_payload["image"], "desktop": "xfce"}}
+    assert_rejected(windows_payload, "desktop xfce only applies to linux images")
+
+
 def test_unpinned_base_image_is_rejected(example_payload):
     assert_rejected(set_path(example_payload, "image.base", "windows_server_2025_desktop:stable"), "pinned")
 
