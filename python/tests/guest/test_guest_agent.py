@@ -362,6 +362,21 @@ def test_atspi_accessibles_become_nodes_and_hidden_components_are_marked():
         node_id="0.0.0.0", role="text", name="Total", value="1250", bounds=Bounds(x=10, y=20, width=100, height=30),
         states=("editable", "focused"))
     assert window_node.children[1].states == ("invisible",)
+    desktop_with_component = FakeAccessible("desktop frame", "main", (), FakeExtents(0, 0, 1024, 768),
+                                            children=(window,))
+    assert accessibility_node(desktop_with_component).states == ()
+
+
+def test_tables_that_manage_their_descendants_keep_their_cells_unlisted_and_long_child_lists_stop():
+    cells = tuple(FakeAccessible("table cell", f"A{index}", ("visible", "showing"), FakeExtents(0, index, 10, 1))
+                  for index in range(600))
+    sheet = FakeAccessible("table", "Sheet1", ("visible", "showing", "manages-descendants"),
+                           FakeExtents(0, 0, 1280, 700), children=cells)
+    panel = FakeAccessible("panel", "Cells", ("visible", "showing"), FakeExtents(0, 0, 1280, 700), children=cells)
+    window = FakeAccessible("frame", "Calc", ("visible", "showing"), FakeExtents(0, 0, 1280, 800),
+                            children=(sheet, panel))
+    window_node = accessibility_node(window)
+    assert window_node.children[0].children == () and len(window_node.children[1].children) == 500
 
 
 class FakeSocket:

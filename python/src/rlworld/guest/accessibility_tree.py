@@ -11,6 +11,9 @@ from rlworld.actions.accessibility import AccessibilityNode, Bounds
 
 SCREEN_COORDINATES = 0
 KEPT_STATES = frozenset({"focused", "selected", "checked", "editable", "expanded", "pressed", "sensitive"})
+# Spreadsheet tables report every cell as a child and mark themselves as managing their descendants.
+MANAGES_DESCENDANTS = "manages-descendants"
+MAX_CHILDREN = 500
 
 
 class Accessible(Protocol):
@@ -49,12 +52,16 @@ def node_bounds(accessible: Accessible) -> Bounds | None:
     return Bounds(x=extents.x, y=extents.y, width=max(0, extents.width), height=max(0, extents.height))
 
 
-def node_states(accessible: Accessible, on_screen_component: bool) -> tuple[str, ...]:
+def state_names(accessible: Accessible) -> set[str]:
+    return {state.value_nick for state in accessible.getState().getStates()}
+
+
+def node_states(names: set[str], on_screen_component: bool) -> tuple[str, ...]:
     """Kept states plus invisible for a component not both visible and showing, so pruning drops it.
 
-    The desktop and application objects have no component and are never hidden this way.
+    Application objects have no component and the desktop root, which has one since at-spi2-core 2.52, is never
+    hidden this way.
     """
-    names = {state.value_nick for state in accessible.getState().getStates()}
     states = sorted(names & KEPT_STATES)
     if on_screen_component and not {"visible", "showing"} <= names:
         states.append("invisible")
@@ -63,13 +70,15 @@ def node_states(accessible: Accessible, on_screen_component: bool) -> tuple[str,
 
 def accessibility_node(accessible: Accessible, node_id: str = "0", depth: int = 0,
                        max_depth: int = 40) -> AccessibilityNode:
+    """Children of nodes that manage their descendants stay unlisted and others stop at MAX_CHILDREN."""
+    names = state_names(accessible)
     children = []
-    if depth < max_depth:
-        for index in range(accessible.childCount):
+    if depth < max_depth and MANAGES_DESCENDANTS not in names:
+        for index in range(min(accessible.childCount, MAX_CHILDREN)):
             child = accessible.getChildAtIndex(index)
             if child is not None:
                 children.append(accessibility_node(child, f"{node_id}.{index}", depth + 1, max_depth))
     bounds = node_bounds(accessible)
     return AccessibilityNode(node_id=node_id, role=accessible.getRoleName(), name=accessible.name or "",
                              value=node_value(accessible), bounds=bounds,
-                             states=node_states(accessible, bounds is not None), children=tuple(children))
+                             states=node_states(names, bounds is not None and depth > 0), children=tuple(children))
