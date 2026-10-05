@@ -31,6 +31,7 @@ export const FORM_SECTIONS: FormSection[] = [
       field("Image", ["image", "id"], "text", "images"),
       field("Operating system", ["image", "os"], "select"),
       field("VMM pool", ["image", "pool", "vmm"], "select"),
+      field("Desktop", ["image", "desktop"], "select"),
       field("Display width", ["image", "display", "width"], "number"),
       field("Display height", ["image", "display", "height"], "number"),
     ],

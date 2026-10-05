@@ -41,6 +41,7 @@ function enumOptionsComeFromTheSchema(): void {
   expect(schemaOptions(["run", "policy", "action_format"])).toEqual(["computer_tool", "typed_actions", "text_actions"]);
   expect(schemaOptions(["task", "allowed_actions"])).toEqual(["computer", "browser", "terminal", "native", "control"]);
   expect(schemaOptions(["experiment", "tracker"])).toEqual(["wandb", "mlflow"]);
+  expect(schemaOptions(["image", "desktop"])).toEqual(["openbox", "xfce"]);
 }
 
 test("enum options come from the shared schema", enumOptionsComeFromTheSchema);
