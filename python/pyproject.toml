@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Computer use RL world platform: specs, SDK, rewards and services"
 requires-python = ">=3.12"
 dependencies = [
+    "certifi>=2024.2",
     "cryptography>=43",
     "flask>=3.0",
     "httpx>=0.27",

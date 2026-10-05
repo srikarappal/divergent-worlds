@@ -1,5 +1,7 @@
 import json
+from pathlib import Path
 
+import certifi
 import pytest
 from support.image_fakes import DIGEST, LOCK, linux_config, linux_image, world_ca_pem
 
@@ -22,10 +24,12 @@ def test_dockerfile_starts_from_the_pinned_base_and_installs_from_snapshots_only
     dockerfile = text(plan, "context/Dockerfile")
     assert f"FROM docker.io/library/ubuntu@sha256:{DIGEST}\n" in dockerfile
     assert "RUN rm -f /etc/apt/sources.list.d/*" in dockerfile
-    assert "apt-get -o Acquire::Check-Valid-Until=false update" in dockerfile
+    assert ("apt-get -o Acquire::Check-Valid-Until=false"
+            " -o Acquire::https::CaInfo=/tmp/rlworld/inputs/bootstrap_ca.pem update") in dockerfile
+    assert "context/inputs/bootstrap_ca.pem" in plan.copies
     assert text(plan, "context/rootfs/etc/apt/sources.list") == (
         "deb http://snapshot.ubuntu.com/ubuntu/20260301T000000Z noble main universe\n")
-    install_line = next(line for line in dockerfile.splitlines() if "apt-get install -y" in line)
+    install_line = next(line for line in dockerfile.splitlines() if "bootstrap_ca.pem install -y" in line)
     packages = install_line.split("--no-install-recommends ")[1].split()
     assert packages[:len(BASE_PACKAGES)] == list(BASE_PACKAGES)
     assert {"fonts-dejavu-core", "libreoffice-calc=4:24.2.7-0ubuntu0.24.04.1",
@@ -54,7 +58,8 @@ def test_guest_agent_installs_from_hashed_requirements_and_reads_accessibility_a
     assert "pip install --no-cache-dir --no-deps /tmp/rlworld/inputs/rlworld-0.1.0-py3-none-any.whl" in dockerfile
     assert '<allow user="root"/>' in dockerfile and "grep -q" in dockerfile
     assert plan.copies == {"context/inputs/rlworld-0.1.0-py3-none-any.whl": linux_config().guest_agent_wheel,
-                           "context/inputs/guest-requirements.txt": linux_config().guest_agent_requirements}
+                           "context/inputs/guest-requirements.txt": linux_config().guest_agent_requirements,
+                           "context/inputs/bootstrap_ca.pem": Path(certifi.where())}
     assert f"systemctl enable {' '.join(ENABLED_UNITS)}" in dockerfile
     assert "ln -sf /dev/null /etc/systemd/system/systemd-timesyncd.service" in dockerfile
 

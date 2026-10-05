@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import certifi
+
 from rlworld.images.config import (
     Artifact,
     ArtifactLock,
@@ -41,6 +43,9 @@ BASE_PACKAGES = ("systemd", "systemd-sysv", "dbus", "iproute2", "xvfb", "x11-xse
                  "at-spi2-core", "python3", "python3-venv", "python3-gi", "python3-pyatspi", "xdotool", "x11vnc",
                  "locales", "ca-certificates", "curl", "unzip", "xz-utils")
 CA_PACKAGES = ("libnss3-tools",)
+# Snapshot mirrors redirect http to https before the base image has a CA bundle, so the first apt step trusts
+# the builder's pinned certifi bundle until ca-certificates is installed.
+BOOTSTRAP_CA = "bootstrap_ca.pem"
 DOWNLOAD_DIRECTORY = "/tmp/rlworld/downloads"
 INPUT_DIRECTORY = "/tmp/rlworld/inputs"
 CA_DIRECTORY = "/usr/local/share/ca-certificates/rlworld"
@@ -338,6 +343,7 @@ def render_dockerfile(image: ImageSpec, config: LinuxBuildConfig, apps: Mapping[
                       ca_names: Sequence[str]) -> str:
     locale = image.display.locale
     has_chromium = any(app in apps for app in CHROMIUM_POLICY_DIRECTORIES)
+    bootstrap_ca_option = f"-o Acquire::https::CaInfo={INPUT_DIRECTORY}/{BOOTSTRAP_CA}"
     packages = list(dict.fromkeys([*BASE_PACKAGES, *config.fonts, *(CA_PACKAGES if ca_names and has_chromium else ()),
                                    *(package for recipe in apps.values() for package in recipe.packages)]))
     steps = [
@@ -347,8 +353,9 @@ def render_dockerfile(image: ImageSpec, config: LinuxBuildConfig, apps: Mapping[
         'SHELL ["/bin/bash", "-euo", "pipefail", "-c"]',
         "COPY rootfs/ /",
         f"COPY inputs/ {INPUT_DIRECTORY}/",
-        run_step(["rm -f /etc/apt/sources.list.d/*", "apt-get -o Acquire::Check-Valid-Until=false update",
-                  f"apt-get install -y --no-install-recommends {' '.join(packages)}"]),
+        run_step(["rm -f /etc/apt/sources.list.d/*",
+                  f"apt-get -o Acquire::Check-Valid-Until=false {bootstrap_ca_option} update",
+                  f"apt-get {bootstrap_ca_option} install -y --no-install-recommends {' '.join(packages)}"]),
         run_step([f"localedef -i {locale} -f UTF-8 {locale}.UTF-8", f"update-locale LANG={locale}.UTF-8"]),
         run_step([f"useradd --create-home --uid 1000 --shell /bin/bash {config.user}", f"passwd --lock {config.user}"]),
     ]
@@ -411,7 +418,8 @@ def linux_context(image: ImageSpec, config: LinuxBuildConfig, lock: ArtifactLock
     files.update({f"context/rootfs/{path}": content
                   for path, content in overlay_files(image, config, apps, hardening, trusted_cas).items()})
     copies = {f"context/inputs/{config.guest_agent_wheel.name}": config.guest_agent_wheel,
-              f"context/inputs/{GUEST_REQUIREMENTS}": config.guest_agent_requirements}
+              f"context/inputs/{GUEST_REQUIREMENTS}": config.guest_agent_requirements,
+              f"context/inputs/{BOOTSTRAP_CA}": Path(certifi.where())}
     return LinuxContext(files=files, copies=copies, downloads=downloads, launchers=launchers)
 
 
