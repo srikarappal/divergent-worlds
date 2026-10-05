@@ -47,7 +47,7 @@ def test_dockerfile_starts_from_the_pinned_base_and_installs_from_snapshots_only
     packages = install_line.split("--no-install-recommends ")[1].split()
     assert packages[:len(BASE_PACKAGES)] == list(BASE_PACKAGES)
     assert {"fonts-dejavu-core", "libreoffice-calc=4:24.2.7-0ubuntu0.24.04.1",
-            "libreoffice-gtk3=4:24.2.7-0ubuntu0.24.04.1", "libgtk-3-0"} <= set(packages)
+            "libreoffice-gtk3=4:24.2.7-0ubuntu0.24.04.1", "libgtk-3-0t64"} <= set(packages)
     assert "libnss3-tools" not in packages
     assert dockerfile.rstrip().endswith("rm -rf /var/lib/apt/lists/* /tmp/rlworld")
 

@@ -24,8 +24,9 @@ CHROMIUM_BASE_FLAGS = ("--remote-debugging-port=9222", "--remote-allow-origins=h
 FIREFOX_ICON = "/opt/firefox/browser/chrome/icons/default/default128.png"
 GUEST_BIN = "/opt/rlworld/bin"
 CHAT_URL = f"http://127.0.0.1:{DEFAULT_CHAT_PORT}/"
-# Runtime libraries of Mozilla's Linux builds, which ship everything else in their own folder.
-MOZILLA_PACKAGES = ("libgtk-3-0", "libasound2", "libx11-xcb1", "bzip2")
+# Runtime libraries of Mozilla's Linux builds, which ship everything else in their own folder; Ubuntu 24.04 names
+# the 64 bit time builds of GTK and ALSA with a t64 suffix.
+MOZILLA_PACKAGES = ("libgtk-3-0t64", "libasound2t64", "libx11-xcb1", "bzip2")
 # LibreOffice modules beside Calc, which the libreoffice app installs, by app name and the window each opens.
 LIBREOFFICE_MODULES = {"libreoffice_writer": "Writer", "libreoffice_impress": "Impress"}
 OFFICE_PRODUCTS = {
