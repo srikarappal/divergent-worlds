@@ -10,7 +10,7 @@ state_dir: /tmp/rlworld/experimentd
 object_store_dir: /tmp/rlworld/objects
 endpoints_file: endpoints.yaml
 pools:
-  firecracker: {pool: linux, memory_mib: 4096, vcpus: 2}
+  firecracker: {pool: linux, memory_mib: 1536, vcpus: 2}
 snapshot_store: false
 static_snapshots:
   "sha256:0d5553a2b2e4c8a9d50191056cfe871376a34f3a2c3f0a187c8dc4f581c4aa4e":

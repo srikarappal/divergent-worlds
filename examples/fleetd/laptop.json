@@ -1,8 +1,8 @@
 {
   "listen": "127.0.0.1:8700",
   "driver": "docker",
-  "host": {"id": "laptop", "pool": "linux", "cpu_millicores": 8000, "memory_mib": 16384, "gpus": 0, "licenses": []},
-  "capacity": 4,
+  "host": {"id": "laptop", "pool": "linux", "cpu_millicores": 8000, "memory_mib": 3584, "gpus": 0, "licenses": []},
+  "capacity": 2,
   "reserved": {"interactive": 1},
   "lease_ttl_seconds": 300,
   "state_dir": "/tmp/rlworld/fleetd",
