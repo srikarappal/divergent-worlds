@@ -17,6 +17,7 @@ from rlworld.actions.models import TerminalOutput, parse_action
 from rlworld.gateway import BlobImageResolver
 from rlworld.guest import GuestAgent, GuestFailure, VsockServer, serve_stream, xdotool_argv
 from rlworld.guest.accessibility_tree import accessibility_node
+from rlworld.guest.agent import file_snapshot
 from rlworld.guest.cdp import CdpBrowser
 from rlworld.guest.system import entropy_payload, user_command_argv
 from rlworld.trajectories import InMemoryObjectStore
@@ -473,3 +474,12 @@ def test_blob_frames_travel_to_models_as_data_urls():
     resolver = BlobImageResolver(object_store)
     assert resolver.resolve(f"blob:{digest}").startswith("data:image/webp;base64,UklGR")
     assert resolver.resolve("https://frames.example/1.webp") == "https://frames.example/1.webp"
+
+
+def test_file_snapshots_leave_out_app_profiles_and_app_stores(tmp_path):
+    for relative_path in ("world/files/invoices.csv", ".thunderbird/rlworld/prefs.js",
+                          "world/mail/current/inbox/new/m1", ".bashrc", "notes.txt"):
+        (tmp_path / relative_path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / relative_path).write_text("x")
+    snapshot = file_snapshot(tmp_path, frozenset({tmp_path / "world" / "mail"}))
+    assert sorted(snapshot) == [".bashrc", "notes.txt", "world/files/invoices.csv"]

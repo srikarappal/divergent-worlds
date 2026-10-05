@@ -166,9 +166,13 @@ def cookie_domain(cookie_name: str) -> str:
     return cookie_name.removeprefix(SESSION_COOKIE_PREFIX)
 
 
-def file_snapshot(root: Path) -> dict[str, tuple[int, int]]:
+def file_snapshot(root: Path, excluded: frozenset[Path] = frozenset()) -> dict[str, tuple[int, int]]:
+    """Files under root with their modification time and size. Hidden folders, which hold app profiles and caches,
+    and the excluded folders stay out."""
     snapshot = {}
-    for directory, _, file_names in os.walk(root):
+    for directory, directory_names, file_names in os.walk(root):
+        directory_names[:] = [name for name in directory_names
+                              if not name.startswith(".") and Path(directory) / name not in excluded]
         for file_name in file_names:
             file_path = Path(directory) / file_name
             try:
@@ -276,6 +280,8 @@ class GuestAgent:
         self.hygiene = hygiene
         self.home = home
         self.world_root = world_root
+        # The mail and chat stores change whenever their apps run, so they never read as the policy's file changes.
+        self.app_stores = frozenset({world_root / "mail", world_root / "chat"})
         self.license_root = license_root
         self.secrets_path = secrets_path
         self.launchers = dict(launchers)
@@ -292,7 +298,7 @@ class GuestAgent:
         self.reported_posts: set[str] = set()
         self.pending_terminal: TerminalOutput | None = None
         self.pending_native: dict[str, Any] | None = None
-        self.baseline = file_snapshot(home)
+        self.baseline = self.snapshot_files()
         self.busy_marks = itertools.count()
         self.methods: dict[str, Callable[[dict[str, Any]], Any]] = {
             "health": self.health,
@@ -376,7 +382,7 @@ class GuestAgent:
             observation["native_result"] = self.pending_native
             self.pending_native = None
         if "file_diff" in kinds:
-            observation["file_changes"] = file_changes(self.baseline, file_snapshot(self.home))
+            observation["file_changes"] = file_changes(self.baseline, self.snapshot_files())
         posts = self.new_chat_posts()
         if posts:
             observation["chat_posts"] = posts
@@ -438,21 +444,24 @@ class GuestAgent:
             self.run_step(step)
         if "reads" in params:
             self.reads = params["reads"]
-        self.baseline = file_snapshot(self.home)
+        self.baseline = self.snapshot_files()
+
+    def snapshot_files(self) -> dict[str, tuple[int, int]]:
+        return file_snapshot(self.home, self.app_stores)
 
     def deliver(self, delivery: dict[str, Any]) -> None:
         """A record lands in a running app; the files it writes join the baseline, so they never read as the
         agent's changes."""
         if delivery.get("app") not in self.apps:
             raise GuestFailure("bad_request", f"{delivery.get('app')} is not an app of this world")
-        before = file_snapshot(self.home)
+        before = self.snapshot_files()
         try:
             deliver_record(delivery["app"], delivery["record"], self.world_root, self.integrations)
         except (KeyError, ValueError) as error:
             raise GuestFailure("bad_request", f"cannot deliver to {delivery['app']}: {error}") from error
         if self.owner is not None:
             own_tree(self.world_root, self.owner)
-        after = file_snapshot(self.home)
+        after = self.snapshot_files()
         self.baseline.update({path: stamp for path, stamp in after.items() if before.get(path) != stamp})
 
     def run_step(self, step: dict[str, Any]) -> None:
