@@ -1,4 +1,6 @@
+import mailbox
 from datetime import datetime
+from email.message import EmailMessage
 
 import openpyxl
 import pytest
@@ -39,6 +41,41 @@ def test_mail_round_trips_through_the_persona_mailbox(world, tmp_path):
     extracted_message = mail_state["inbox"][0]
     assert (extracted_message["subject"], extracted_message["body"]) == (first_message.subject, first_message.body)
     assert extracted_message["to"] == list(first_message.recipients)
+
+
+def test_mailboxes_are_maildirs_with_the_persona_linked_as_current(world, tmp_path):
+    materialize_world(world, ["mail"], tmp_path)
+    persona = world.agent_persona
+    mail_root = tmp_path / "mail"
+    assert (mail_root / "current").resolve() == (mail_root / persona.email).resolve()
+    assert (mail_root / "owner_name.txt").read_text() == persona.full_name
+    inbox = mailbox.Maildir(mail_root / persona.email / "inbox", factory=None, create=False)
+    assert inbox.keys() and all(inbox.get_message(key).get_subdir() == "new" for key in inbox.keys())
+    sent = mailbox.Maildir(mail_root / persona.email / "sent", factory=None, create=False)
+    assert all(sent.get_message(key).get_flags() == "S" for key in sent.keys())
+    drafts = mailbox.Maildir(mail_root / persona.email / "drafts", factory=None, create=False)
+    assert [drafts.get_message(key).get_flags() for key in drafts.keys()] == ["DS"]
+    materialize_world(world, ["mail"], tmp_path)
+    assert (mail_root / "current").resolve() == (mail_root / persona.email).resolve()
+
+
+def test_mail_a_client_sent_reads_back_by_its_message_id(world, tmp_path):
+    materialize_world(world, ["mail"], tmp_path)
+    client_message = EmailMessage()
+    client_message["Message-ID"] = "<4f2c9a7e-1b3d-4e5f@fjordlogistics.example>"
+    client_message["From"] = world.agent_persona.email
+    client_message["To"] = "cfo@fjordlogistics.example"
+    client_message["Subject"] = "December reconciliation"
+    client_message["Date"] = "Sat, 14 Mar 2026 10:15:00 +0000"
+    client_message.set_content("Totals attached.")
+    client_message.add_alternative("<p>Totals attached.</p>", subtype="html")
+    sent_message = mailbox.MaildirMessage(client_message)
+    sent_message.set_subdir("cur")
+    sent_message.set_flags("S")
+    mailbox.Maildir(tmp_path / "mail" / "current" / "sent", create=False).add(sent_message)
+    sent = extract_world_state(["mail"], tmp_path)["mail"]["sent"]
+    client_copy = next(message for message in sent if message["id"] == "4f2c9a7e-1b3d-4e5f")
+    assert (client_copy["to"], client_copy["body"]) == (["cfo@fjordlogistics.example"], "Totals attached.")
 
 
 def test_files_extract_csv_rows_and_text(world, tmp_path):

@@ -35,7 +35,7 @@ from rlworld.rewards.records import CheckResult
 from rlworld.rewards.verifiers import FunctionVerifier, Verifier, VerifierContext
 from rlworld.specs.models import DifficultySpec
 from rlworld.tasks.generators import GeneratedTask, TaskGenerationError
-from rlworld.worlds.integrations import USER_WORLD_FOLDER
+from rlworld.worlds.integrations import MESSAGE_ID_DOMAIN, USER_WORLD_FOLDER
 from rlworld.worlds.model import Document, World
 from rlworld.worlds.perturbations import INVOICE_EXPORT_PATH, apply_perturbations, corrupt_amount
 
@@ -133,7 +133,7 @@ def summary_lists_discrepant_invoices(context: VerifierContext) -> list[CheckRes
 
 
 def oracle_script(task: GeneratedTask) -> str:
-    """Python the desktop user runs: the workbook, then for two app tasks the summary in the sent folder."""
+    """Python the desktop user runs: the workbook, then for two app tasks the summary in the sent Maildir."""
     truth = task.ground_truth
     lines = ["import json, pathlib", "import openpyxl",
              f"world = pathlib.Path.home() / {USER_WORLD_FOLDER!r}",
@@ -146,18 +146,22 @@ def oracle_script(task: GeneratedTask) -> str:
                 f"{', '.join(truth['discrepant_invoice_ids']) or 'none'}.")
         if truth["summary_states_totals"]:
             body += f" Open total {truth['totals']['open']:.2f}, overdue total {truth['totals']['overdue']:.2f}."
-        lines += ["from datetime import datetime, timezone",
+        lines += ["import mailbox",
+                  "from datetime import datetime, timezone",
                   "from email.message import EmailMessage",
                   "from email.utils import format_datetime",
                   "message = EmailMessage()",
+                  f"message['Message-ID'] = {f'<{ORACLE_MESSAGE_ID}@{MESSAGE_ID_DOMAIN}>'!r}",
                   f"message['From'] = {truth['persona_email']!r}",
                   f"message['To'] = {truth['summary_recipient']!r}",
                   f"message['Subject'] = {'Invoice reconciliation for ' + month_label(truth['month'])!r}",
                   "message['Date'] = format_datetime(datetime.now(timezone.utc))",
                   f"message.set_content({body!r})",
+                  "sent_message = mailbox.MaildirMessage(message)",
+                  "sent_message.set_subdir('cur')",
+                  "sent_message.set_flags('S')",
                   f"sent = world / 'mail' / {truth['persona_email']!r} / 'sent'",
-                  "sent.mkdir(parents=True, exist_ok=True)",
-                  f"(sent / {ORACLE_MESSAGE_ID + '.eml'!r}).write_bytes(message.as_bytes())"]
+                  "mailbox.Maildir(sent, create=True).add(sent_message)"]
     return "\n".join(lines)
 
 
