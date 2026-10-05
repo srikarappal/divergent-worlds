@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Chat</title>
+<style>
+  :root { --sidebar: #3f0e40; --sidebar-text: #e8dbe9; --active: #1164a3; --border: #dddddd; }
+  * { box-sizing: border-box; }
+  body { margin: 0; height: 100vh; display: flex; font: 15px/1.4 "Noto Sans", "DejaVu Sans", sans-serif; color: #1d1c1d; }
+  nav { width: 260px; background: var(--sidebar); color: var(--sidebar-text); padding: 12px 0; overflow-y: auto; }
+  nav h1 { font-size: 18px; margin: 0 16px 12px; color: #ffffff; }
+  nav h2 { font-size: 13px; font-weight: 600; margin: 16px 16px 4px; text-transform: uppercase; opacity: 0.8; }
+  nav ul { list-style: none; margin: 0; padding: 0; }
+  nav button { width: 100%; text-align: left; border: 0; background: none; color: inherit; font: inherit;
+               padding: 4px 16px; cursor: pointer; }
+  nav button[aria-current="true"] { background: var(--active); color: #ffffff; }
+  main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  header { padding: 12px 20px; border-bottom: 1px solid var(--border); font-weight: 700; font-size: 17px; }
+  #messages { flex: 1; overflow-y: auto; padding: 12px 20px; margin: 0; list-style: none; }
+  #messages li { margin-bottom: 12px; }
+  .sender { font-weight: 700; margin-right: 8px; }
+  .time { color: #616061; font-size: 12px; }
+  .text { white-space: pre-wrap; }
+  form { display: flex; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--border); }
+  textarea { flex: 1; resize: none; height: 64px; font: inherit; padding: 8px; border: 1px solid #b8b8b8; border-radius: 6px; }
+  form button { padding: 0 20px; font: inherit; font-weight: 600; color: #ffffff; background: #007a5a; border: 0;
+                border-radius: 6px; cursor: pointer; }
+  #status { color: #b00020; padding: 0 20px 8px; min-height: 1em; }
+</style>
+</head>
+<body>
+<nav aria-label="Conversations">
+  <h1>Chat</h1>
+  <h2 id="channels-heading">Channels</h2>
+  <ul id="channels" aria-labelledby="channels-heading"></ul>
+  <h2 id="direct-heading">Direct messages</h2>
+  <ul id="direct" aria-labelledby="direct-heading"></ul>
+</nav>
+<main>
+  <header id="title" role="heading" aria-level="2"></header>
+  <ul id="messages" aria-live="polite" aria-label="Messages"></ul>
+  <div id="status" role="alert"></div>
+  <form id="composer">
+    <label for="message" hidden>Message</label>
+    <textarea id="message" name="message" placeholder="Write a message" aria-label="Message"></textarea>
+    <button type="submit">Send</button>
+  </form>
+</main>
+<script>
+  let state = { owner: "", channels: [] };
+  let selected = null;
+  let shownCount = -1;
+
+  function conversationButton(channel) {
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = channel.title;
+    button.setAttribute("aria-current", String(channel.name === selected));
+    button.addEventListener("click", () => { selected = channel.name; shownCount = -1; render(); });
+    item.appendChild(button);
+    return item;
+  }
+
+  function messageItem(message) {
+    const item = document.createElement("li");
+    const sender = document.createElement("span");
+    sender.className = "sender";
+    sender.textContent = message.sender_id === state.owner ? message.sender + " (you)" : message.sender;
+    const time = document.createElement("span");
+    time.className = "time";
+    time.textContent = new Date(message.sent_at).toLocaleString();
+    const text = document.createElement("div");
+    text.className = "text";
+    text.textContent = message.text;
+    item.append(sender, time, text);
+    return item;
+  }
+
+  function render() {
+    const channels = document.getElementById("channels");
+    const direct = document.getElementById("direct");
+    channels.replaceChildren(...state.channels.filter((c) => !c.name.startsWith("dm_")).map(conversationButton));
+    direct.replaceChildren(...state.channels.filter((c) => c.name.startsWith("dm_")).map(conversationButton));
+    const channel = state.channels.find((c) => c.name === selected);
+    document.getElementById("title").textContent = channel ? channel.title : "";
+    if (!channel || channel.messages.length === shownCount) return;
+    const list = document.getElementById("messages");
+    list.replaceChildren(...channel.messages.map(messageItem));
+    list.scrollTop = list.scrollHeight;
+    shownCount = channel.messages.length;
+  }
+
+  async function refresh() {
+    const response = await fetch("/api/state");
+    state = await response.json();
+    if (!state.channels.some((c) => c.name === selected) && state.channels.length) selected = state.channels[0].name;
+    render();
+  }
+
+  document.getElementById("composer").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const box = document.getElementById("message");
+    const response = await fetch("/api/messages", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channel: selected, text: box.value }),
+    });
+    const status = document.getElementById("status");
+    if (response.ok) { box.value = ""; status.textContent = ""; await refresh(); }
+    else { status.textContent = (await response.json()).error; }
+  });
+
+  document.getElementById("message").addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      document.getElementById("composer").requestSubmit();
+    }
+  });
+
+  refresh();
+  setInterval(refresh, 2000);
+</script>
+</body>
+</html>

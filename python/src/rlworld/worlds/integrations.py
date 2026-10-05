@@ -38,6 +38,7 @@ from rlworld.worlds.model import ChatMessage, MailMessage, World
 MAIL_FOLDERS = ("inbox", "sent", "drafts")
 # Mail clients and Dovecot reach the agent persona's mailbox through this link beside the per address Maildirs.
 CURRENT_MAILBOX = "current"
+PEOPLE_FILE = "people.json"
 MESSAGE_ID_DOMAIN = "rlworld.example"
 MESSAGE_ID_PATTERN = re.compile(r"\s*<?([^@<>\s]+)@")
 MAX_EXTRACTED_TEXT_BYTES = 64 * 1024
@@ -252,7 +253,7 @@ def utc_time(moment: datetime) -> datetime:
 
 
 class ChatIntegration:
-    """One JSON file per message under chat/<channel>/; owner.txt names the agent persona.
+    """One JSON file per message under chat/<channel>/; owner.txt names the agent persona and people.json who is who.
 
     The folder names the channel and the file name the message, whatever the file says; a file that is not a
     message is skipped, so a malformed post the policy wrote counts as no post.
@@ -273,6 +274,8 @@ class ChatIntegration:
         chat_root = self.chat_root(target)
         chat_root.mkdir(parents=True, exist_ok=True)
         (chat_root / "owner.txt").write_text(world.agent_persona_id)
+        people = {person.id: {"name": person.full_name, "role": person.role} for person in world.people}
+        (chat_root / PEOPLE_FILE).write_text(json.dumps(people, indent=2, sort_keys=True))
         for message in world.chat_messages:
             self.write(message, target)
 
