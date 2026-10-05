@@ -447,7 +447,7 @@ def refuse_connection(request):
 
 def test_entropy_payload_and_shell_commands():
     assert entropy_payload(b"abcd") == struct.pack("ii4s", 32, 4, b"abcd")
-    assert user_command_argv("agent", "ls -la") == ["runuser", "-u", "agent", "--", "bash", "-lc", "ls -la"]
+    assert user_command_argv("agent", "ls -la") == ["/usr/sbin/runuser", "-u", "agent", "--", "bash", "-lc", "ls -la"]
 
 
 def test_blob_frames_travel_to_models_as_data_urls():

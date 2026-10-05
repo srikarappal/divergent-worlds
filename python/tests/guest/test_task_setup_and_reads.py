@@ -206,7 +206,7 @@ def test_windows_are_found_by_role_and_title():
 
 def test_probes_run_outside_the_login_shell():
     assert user_probe_argv("agent", "which spotify") == [
-        "runuser", "-u", "agent", "--", "bash", "--noprofile", "--norc", "-c", "which spotify"]
+        "/usr/sbin/runuser", "-u", "agent", "--", "bash", "--noprofile", "--norc", "-c", "which spotify"]
     assert user_command_argv("agent", "ls")[-2:] == ["-lc", "ls"]
 
 

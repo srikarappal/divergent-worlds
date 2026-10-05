@@ -22,6 +22,8 @@ from rlworld.guest.commands import run_command
 
 # _IOW('R', 0x03, int[2]) on Linux: add entropy and credit it.
 RNDADDENTROPY = 0x40085203
+# By absolute path: the environments commands run with keep sbin off PATH.
+RUNUSER = "/usr/sbin/runuser"
 
 
 class X11Screen:
@@ -69,12 +71,12 @@ class SharedKernelHygiene:
 
 
 def user_command_argv(user: str, command: str) -> list[str]:
-    return ["runuser", "-u", user, "--", "bash", "-lc", command]
+    return [RUNUSER, "-u", user, "--", "bash", "-lc", command]
 
 
 def user_probe_argv(user: str, command: str) -> list[str]:
     """Outside a login shell, so profile and rc files the policy may have edited never run."""
-    return ["runuser", "-u", user, "--", "bash", "--noprofile", "--norc", "-c", command]
+    return [RUNUSER, "-u", user, "--", "bash", "--noprofile", "--norc", "-c", command]
 
 
 class UserShell:
