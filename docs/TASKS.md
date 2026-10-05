@@ -76,6 +76,14 @@ Added after checking DESIGN.md section by section against the tasks above.
 42. [done] experimentd server: the entry point wiring the spec, run, catalog, review and admin stores, auth, the gateway, the trainer launcher and platform hosted rollout workers, beside the fleetd command (5, 6.7).
 43. [done] World diff snapshots: measure world materialization on a restored base snapshot; when it takes more than about 5 s or is nondeterministic, snapshot the materialized world so task setup injects only the task's own state after restore (3, 6.2).
 
+### Real runs
+
+Added once the platform ran on real images instead of fakes.
+
+44. [done] Laptop run: the reference image built from real snapshot mirrors and played through fleetd's Docker backend and experimentd, fixing what the fakes hid: a pinned CA for the first apt step, overlay conffiles, the base image's ubuntu user, x11vnc flags, runuser's path, accessibility trees read as the desktop user, the ready window and the world clock format.
+45. [done] Full Linux desktop: Xfce with its panel, menu, file manager, terminal and editor; LibreOffice Writer and Impress beside Calc; Firefox; Thunderbird on the world's Maildir through a guest SMTP and preauthenticated IMAP server; the world's chat as a web app.
+46. [todo] App clones on a remote Docker host: Odoo, EspoCRM, Mattermost, Nextcloud, a mail server and Keycloak as per env sidecars behind the world's hostnames, with world integrations for each (6.4, 6.5, 6.6).
+
 ## Follow ups
 
 1. Native transports for frontier computer use APIs behind the gateway Transport protocol; the OpenAI compatible transport ships first.
