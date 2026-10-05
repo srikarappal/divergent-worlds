@@ -14,12 +14,16 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
 from rlworld.images.config import BuildError, WindowsBuildConfig
+from rlworld.images.mail_client import THUNDERBIRD_ICON, THUNDERBIRD_LAUNCHER, mail_client_files
 
 DOWNLOAD_PLACEHOLDER = "{download}"
 LABEL_PATTERN = re.compile(r"^[A-Za-z0-9._+:~-]+$")
 CHROMIUM_BASE_FLAGS = ("--remote-debugging-port=9222", "--remote-allow-origins=http://127.0.0.1:9222",
                        "--force-renderer-accessibility", "--start-maximized")
 FIREFOX_ICON = "/opt/firefox/browser/chrome/icons/default/default128.png"
+GUEST_BIN = "/opt/rlworld/bin"
+# Runtime libraries of Mozilla's Linux builds, which ship everything else in their own folder.
+MOZILLA_PACKAGES = ("libgtk-3-0", "libasound2", "libx11-xcb1", "bzip2")
 # LibreOffice modules beside Calc, which the libreoffice app installs, by app name and the window each opens.
 LIBREOFFICE_MODULES = {"libreoffice_writer": "Writer", "libreoffice_impress": "Impress"}
 OFFICE_PRODUCTS = {
@@ -94,9 +98,18 @@ def linux_app(app: str, label: str, user: str, chromium_flags: Sequence[str] = (
                      " /opt/chrome/deb.deps)"))
     if app == "firefox":
         return LinuxApp(window="Firefox", artifact=f"firefox_{label}", launch="/opt/firefox/firefox",
-                        packages=("libgtk-3-0", "libasound2", "libdbus-glib-1-2", "libx11-xcb1", "bzip2"),
+                        packages=(*MOZILLA_PACKAGES, "libdbus-glib-1-2"),
                         install=("tar -xf {download} -C /opt", "ln -sf /opt/firefox/firefox /usr/local/bin/firefox"),
                         menu=MenuEntry("Firefox Web Browser", "firefox %u", FIREFOX_ICON, "Network;WebBrowser;"))
+    if app == "thunderbird":
+        return LinuxApp(window="Thunderbird", artifact=f"thunderbird_{label}", launch=THUNDERBIRD_LAUNCHER,
+                        packages=(*MOZILLA_PACKAGES, "dovecot-imapd"),
+                        install=("tar -xf {download} -C /opt",
+                                 f"ln -sf {THUNDERBIRD_LAUNCHER} /usr/local/bin/thunderbird",
+                                 "systemctl mask dovecot.service dovecot.socket"),
+                        menu=MenuEntry("Thunderbird Mail", "thunderbird %u", THUNDERBIRD_ICON, "Network;Email;"),
+                        files=mail_client_files(user),
+                        services=(LinuxService("mail", f"{GUEST_BIN}/rlworld-mail-server"),))
     if app == "edge":
         return LinuxApp(
             window="Edge", artifact=f"edge_{label}",

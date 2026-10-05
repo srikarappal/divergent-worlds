@@ -12,6 +12,7 @@ WORLD_TIME = datetime(2026, 3, 14, 9, 0, tzinfo=timezone.utc)
 LOCK = ArtifactLock.model_validate({"artifacts": {
     "chrome_130.0.6723.58": {"url": "https://storage.example/cft/chrome-linux64.zip", "sha256": "1" * 64},
     "firefox_128.5.0esr": {"url": "https://ftp.example/firefox-128.5.0esr.tar.xz?product=esr", "sha256": "2" * 64},
+    "thunderbird_153.4.0esr": {"url": "https://ftp.example/thunderbird-153.4.0esr.tar.xz", "sha256": "a" * 64},
     "edge_131.0.2903.70": {"url": "https://msedge.example/microsoft-edge-stable_131_amd64.deb", "sha256": "3" * 64},
     "guest_kernel": {"url": "https://kernels.example/vmlinux-6.1", "sha256": "4" * 64},
     "office_deployment_tool": {"url": "https://download.example/officedeploymenttool.exe", "sha256": "5" * 64},
