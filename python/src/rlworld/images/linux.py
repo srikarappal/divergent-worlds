@@ -134,6 +134,7 @@ LINUX_HARDENING = {
         chromium_flags=("--no-first-run", "--no-default-browser-check"),
         chromium_policies={"BrowserSignin": 0, "SyncDisabled": True, "HideFirstRunExperience": True},
         firefox_policies={"OverrideFirstRunPage": "", "OverridePostUpdatePage": "", "DontCheckDefaultBrowser": True,
+                          "SkipTermsOfUse": True,
                           "UserMessaging": {"SkipOnboarding": True, "ExtensionRecommendations": False,
                                             "FeatureRecommendations": False}},
         libreoffice_off=("Misc/ShowTipOfTheDay",)),

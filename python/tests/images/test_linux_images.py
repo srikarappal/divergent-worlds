@@ -141,6 +141,7 @@ def test_hardening_reaches_browsers_office_and_apt():
     assert "context/rootfs/etc/opt/edge/policies/managed/rlworld.json" not in plan.files
     firefox = json.loads(text(plan, "context/rootfs/etc/firefox/policies/policies.json"))["policies"]
     assert firefox["DisableAppUpdate"] is True and firefox["DisableTelemetry"] is True
+    assert firefox["SkipTermsOfUse"] is True
     assert firefox["Preferences"]["ui.prefersReducedMotion"] == {"Value": 1, "Status": "locked"}
     assert "Certificates" not in firefox
     registry = text(plan, "context/rootfs/etc/libreoffice/registry/rlworld.xcd")
