@@ -74,7 +74,8 @@ def test_the_laptop_example_pairs_with_the_dev_backend_and_the_reference_spec():
     assert config.pools[image.pool.vmm].pool == "linux" and config.fleet_url == "http://127.0.0.1:8700"
     assert config.endpoints_file == LAPTOP.parent / "endpoints.yaml"
     policy = load_spec_document(REFERENCE_SPEC.read_text()).run.policy
-    assert load_endpoint_registry(config.endpoints_file).resolve(policy.endpoint).name == "local_policy"
+    endpoint = load_endpoint_registry(config.endpoints_file).resolve(policy.endpoint)
+    assert endpoint.name == "openrouter" and policy.model in endpoint.allowed_models
 
 
 def test_configs_refuse_unknown_fields_and_secrets_come_only_from_the_environment(tmp_path):

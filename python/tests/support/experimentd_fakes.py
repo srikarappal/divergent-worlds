@@ -1,5 +1,5 @@
-"""experimentd test helpers: the laptop config under a temporary directory, a small reference spec, an endpoint
-that always finishes and a recording trainer launcher."""
+"""experimentd test helpers: the laptop config under a temporary directory, a small reference spec on the keyless
+local endpoint, an endpoint that always finishes and a recording trainer launcher."""
 
 import threading
 from pathlib import Path
@@ -51,4 +51,5 @@ def small_reference_spec():
     payload = yaml.safe_load(REFERENCE_SPEC.read_text())
     payload["world"]["size"] = {"employees": 6, "customers": 6, "invoices_per_customer": 3, "emails_per_person": 2}
     payload["run"]["tasks_per_batch"] = 2
+    payload["run"]["policy"] = {**payload["run"]["policy"], "endpoint": "local_policy", "model": "my_policy"}
     return dump_spec_document(parse_spec_document(payload))

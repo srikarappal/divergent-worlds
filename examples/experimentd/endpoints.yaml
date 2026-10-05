@@ -1,5 +1,14 @@
-# The policy the reference spec plays: an OpenAI compatible server on this machine, such as vLLM.
+# Policies the example specs play. Keys come from RLWORLD_SECRET_<API_KEY_SECRET> in experimentd's environment.
 endpoints:
+  # Qwen2.5 VL 72B on OpenRouter, the reference spec's policy: export RLWORLD_SECRET_OPENROUTER=$OPENROUTER_API_KEY.
+  - name: openrouter
+    base_url: https://openrouter.ai/api/v1
+    allowed_models: [qwen/qwen2.5-vl-72b-instruct]
+    api_key_secret: openrouter
+    max_concurrency: 8
+    input_price_per_million_usd: 0.8
+    output_price_per_million_usd: 1.0
+  # An OpenAI compatible server on this machine, such as vLLM.
   - name: local_policy
     base_url: http://localhost:8000/v1
     allowed_models: [my_policy]
