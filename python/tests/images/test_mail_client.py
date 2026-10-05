@@ -1,6 +1,7 @@
+import pytest
 from support.image_fakes import LOCK, linux_config, linux_image
 
-from rlworld.images import linux_build_plan, linux_dev_build_plan
+from rlworld.images import BuildError, linux_build_plan, linux_dev_build_plan
 from rlworld.images.mail_client import DOVECOT_IMAP_CONFIG, profile_template, thunderbird_launcher
 from rlworld.images.recipes import linux_app
 
@@ -46,3 +47,13 @@ def test_images_with_thunderbird_enable_the_mail_service_and_list_it_in_the_menu
     assert "Exec=thunderbird %u" in text(plan, "context/rootfs/usr/share/applications/rlworld-thunderbird.desktop")
     init = text(linux_dev_build_plan(image, linux_config(), LOCK, {}), "context/dev/usr/local/bin/rlworld-dev-init")
     assert "exec /opt/rlworld/bin/rlworld-mail-server" in init
+
+
+def test_the_chat_app_runs_its_server_and_opens_in_firefox():
+    chat = linux_app("chat", "1", "agent")
+    assert (chat.window, chat.launch) == ("Chat", "/opt/firefox/firefox --new-window http://127.0.0.1:8065/")
+    assert [(service.name, service.command) for service in chat.services] == [
+        ("chat", "/opt/rlworld/bin/rlworld-chat-app")]
+    with pytest.raises(BuildError, match="needs the firefox app"):
+        linux_build_plan(linux_image(apps={"libreoffice": "4:24.2.7-0ubuntu0.24.04.6", "chat": "1"},
+                                     ready_probe={"window": "Calc"}), linux_config(), LOCK, {})

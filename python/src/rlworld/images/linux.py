@@ -493,6 +493,8 @@ def linux_context(image: ImageSpec, config: LinuxBuildConfig, lock: ArtifactLock
     chromium_flags = tuple(flag for step in hardening for flag in step.chromium_flags)
     apps = {app: linux_app(app, label, config.user, chromium_flags) for app, label in image.apps.items()}
     launchers = {recipe.window: recipe.launch for recipe in apps.values()}
+    if "chat" in apps and "firefox" not in apps:
+        raise BuildError(["the chat app opens in Firefox, so the image needs the firefox app too"])
     probe_window = image.ready_probe.window
     if probe_window is not None and probe_window not in launchers:
         raise BuildError([f"ready probe window {probe_window} is not opened by any app in the image"])

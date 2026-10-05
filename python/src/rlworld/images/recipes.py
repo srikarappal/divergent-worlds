@@ -13,6 +13,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
+from rlworld.guest.chat_app import DEFAULT_CHAT_PORT
 from rlworld.images.config import BuildError, WindowsBuildConfig
 from rlworld.images.mail_client import THUNDERBIRD_ICON, THUNDERBIRD_LAUNCHER, mail_client_files
 
@@ -22,6 +23,7 @@ CHROMIUM_BASE_FLAGS = ("--remote-debugging-port=9222", "--remote-allow-origins=h
                        "--force-renderer-accessibility", "--start-maximized")
 FIREFOX_ICON = "/opt/firefox/browser/chrome/icons/default/default128.png"
 GUEST_BIN = "/opt/rlworld/bin"
+CHAT_URL = f"http://127.0.0.1:{DEFAULT_CHAT_PORT}/"
 # Runtime libraries of Mozilla's Linux builds, which ship everything else in their own folder.
 MOZILLA_PACKAGES = ("libgtk-3-0", "libasound2", "libx11-xcb1", "bzip2")
 # LibreOffice modules beside Calc, which the libreoffice app installs, by app name and the window each opens.
@@ -110,6 +112,10 @@ def linux_app(app: str, label: str, user: str, chromium_flags: Sequence[str] = (
                         menu=MenuEntry("Thunderbird Mail", "thunderbird %u", THUNDERBIRD_ICON, "Network;Email;"),
                         files=mail_client_files(user),
                         services=(LinuxService("mail", f"{GUEST_BIN}/rlworld-mail-server"),))
+    if app == "chat":
+        return LinuxApp(window="Chat", launch=f"/opt/firefox/firefox --new-window {CHAT_URL}",
+                        menu=MenuEntry("Chat", f"firefox --new-window {CHAT_URL}", "user-available", "Network;Chat;"),
+                        services=(LinuxService("chat", f"{GUEST_BIN}/rlworld-chat-app"),))
     if app == "edge":
         return LinuxApp(
             window="Edge", artifact=f"edge_{label}",
