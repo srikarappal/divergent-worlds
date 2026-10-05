@@ -27,7 +27,8 @@ from rlworld.images import (
     build_plan,
     load_image_spec,
 )
-from rlworld.images.builder import build_snapshot, main
+from rlworld.images.builder import build_snapshot, clear_plan_folders, main
+from rlworld.images.config import BuildPlan
 from rlworld.specs.digest import spec_digest
 
 BUILT_AT = datetime(2026, 10, 3, 12, 0, tzinfo=timezone.utc)
@@ -104,6 +105,17 @@ def test_downloads_already_in_place_are_reused(tmp_path):
     (work / "vmlinux").write_bytes(b"stale kernel")
     builder.build(linux_image(), config, LOCK_WITH_REAL_KERNEL, work)
     assert len(fetcher.fetched) == 1 and (work / "vmlinux").read_bytes() == KERNEL
+
+
+def test_files_an_earlier_plan_left_never_reach_the_next_build(tmp_path):
+    stale = tmp_path / "context" / "rootfs" / "usr" / "lib" / "stale.xcd"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("left over")
+    kept_download = tmp_path / "vmlinux"
+    kept_download.write_bytes(b"kernel")
+    clear_plan_folders(BuildPlan(files={"context/Dockerfile": b"FROM x"}, copies={}, downloads={"vmlinux": None},
+                                 commands=(), outputs={}, manifest={}), tmp_path)
+    assert not stale.exists() and not (tmp_path / "context").exists() and kept_download.exists()
 
 
 def test_builds_that_produce_nothing_fail(tmp_path):

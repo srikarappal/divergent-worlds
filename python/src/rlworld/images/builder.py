@@ -133,6 +133,7 @@ class ImageBuilder:
               target: BuildTarget = "vm") -> dict[str, Any]:
         trusted_cas = read_trusted_cas(config.trusted_cas)
         plan = build_plan(image, config, lock, trusted_cas, target)
+        clear_plan_folders(plan, work_directory)
         for relative_path, content in plan.files.items():
             destination = work_directory / relative_path
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -164,6 +165,16 @@ class ImageBuilder:
         }
         (work_directory / MANIFEST_NAME).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
         return manifest
+
+
+def clear_plan_folders(plan: BuildPlan, work_directory: Path) -> None:
+    """Folders the plan writes into start empty, so files an earlier plan left there never reach the image; folders
+    holding downloads stay, since downloads are reused across rebuilds."""
+    download_roots = {Path(path).parts[0] for path in plan.downloads}
+    for root in sorted({Path(path).parts[0] for path in [*plan.files, *plan.copies]} - download_roots):
+        folder = work_directory / root
+        if folder.is_dir() and not folder.is_symlink():
+            shutil.rmtree(folder)
 
 
 def build_snapshot(fleet: SnapshotBuilder, work_directory: Path, manifest: Mapping[str, Any], memory_mib: int,
