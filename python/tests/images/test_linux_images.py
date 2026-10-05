@@ -6,7 +6,16 @@ import pytest
 from support.image_fakes import DIGEST, LOCK, linux_config, linux_image, world_ca_pem
 
 from rlworld.images import BuildError, dev_image_tag, linux_build_plan, linux_dev_build_plan
-from rlworld.images.linux import BASE_PACKAGES, BOOT_ARGS, DEV_TOKEN_FILE, ENABLED_UNITS, systemd_argument
+from rlworld.images.linux import (
+    BASE_PACKAGES,
+    BOOT_ARGS,
+    DEV_TOKEN_FILE,
+    ENABLED_UNITS,
+    dev_init_script,
+    service_unit,
+    systemd_argument,
+)
+from rlworld.images.recipes import LinuxService
 from rlworld.network.plan import GATEWAY_ADDRESS, GUEST_ADDRESS
 from rlworld.specs.digest import spec_digest
 
@@ -256,3 +265,33 @@ def test_dev_init_holds_the_agent_back_until_the_ready_window_shows():
     wait_line = lines.index("until xdotool search --onlyvisible --name Chrome > /dev/null 2>&1; do")
     assert desktop_line < wait_line < len(lines) - 1 and lines[-1].startswith("exec ")
     assert lines[-2] == "sleep 0.5" and lines[wait_line - 1].startswith("deadline=$(( $(date +%s) + ")
+
+
+def test_xfce_images_bring_a_full_desktop_with_preferred_apps_and_a_preset_panel():
+    plan = plan_for(linux_image(desktop="xfce"))
+    dockerfile = text(plan, "context/Dockerfile")
+    install_line = next(line for line in dockerfile.splitlines() if "bootstrap_ca.pem install -y" in line)
+    packages = install_line.split("--no-install-recommends ")[1].split()
+    assert {"xfce4-session", "xfce4-panel", "thunar", "xfce4-terminal", "mousepad"} <= set(packages)
+    assert "openbox" not in packages
+    assert "cp /etc/xdg/xfce4/panel/default.xml /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml" in dockerfile
+    assert text(plan, "context/rootfs/usr/local/bin/rlworld-desktop").endswith("exec xfce4-session\n")
+    autostart = text(plan, "context/rootfs/etc/xdg/autostart/rlworld-autostart.desktop")
+    assert "Exec=/usr/local/bin/rlworld-autostart" in autostart
+    assert "WebBrowser=firefox" in text(plan, "context/rootfs/etc/xdg/xfce4/helpers.rc")
+    xfwm4 = text(plan, "context/rootfs/etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml")
+    assert '<property name="use_compositing" type="bool" value="false"/>' in xfwm4
+    assert "Exec=firefox %u" in text(plan, "context/rootfs/usr/share/applications/rlworld-firefox.desktop")
+    openbox_plan = plan_for()
+    assert "openbox" in text(openbox_plan, "context/Dockerfile")
+    assert "context/rootfs/etc/xdg/xfce4/helpers.rc" not in openbox_plan.files
+
+
+def test_app_services_run_as_the_desktop_user_from_units_and_the_dev_init():
+    service = LinuxService("mail", "/opt/rlworld/bin/rlworld-mail-server")
+    unit = service_unit(linux_config(), service)
+    assert "User=agent" in unit and "WorkingDirectory=~" in unit
+    assert "ExecStart=/opt/rlworld/bin/rlworld-mail-server" in unit
+    init = dev_init_script(linux_image(), linux_config(), {}, [service])
+    assert "runuser -u agent -- sh -c 'cd \"$HOME\" && exec /opt/rlworld/bin/rlworld-mail-server' &" in init
+    assert init.index("rlworld-mail-server") < init.index("exec /usr/local/bin/rlworld-desktop")

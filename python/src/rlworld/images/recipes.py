@@ -5,12 +5,13 @@ artifact lock as <app>_<label>, apt packages resolve against the dated snapshot
 mirror and Office labels map to their volume licensed product and channel.
 Every app names the window it opens, which the ready probe and the guest
 agent's launchers use. Browsers expose DevTools on loopback only and their
-page content to the accessibility tree.
+page content to the accessibility tree. Apps installed outside apt bring a
+menu entry; apps may also bring files and services the desktop user runs.
 """
 
 import re
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 
 from rlworld.images.config import BuildError, WindowsBuildConfig
 
@@ -18,6 +19,9 @@ DOWNLOAD_PLACEHOLDER = "{download}"
 LABEL_PATTERN = re.compile(r"^[A-Za-z0-9._+:~-]+$")
 CHROMIUM_BASE_FLAGS = ("--remote-debugging-port=9222", "--remote-allow-origins=http://127.0.0.1:9222",
                        "--force-renderer-accessibility", "--start-maximized")
+FIREFOX_ICON = "/opt/firefox/browser/chrome/icons/default/default128.png"
+# LibreOffice modules beside Calc, which the libreoffice app installs, by app name and the window each opens.
+LIBREOFFICE_MODULES = {"libreoffice_writer": "Writer", "libreoffice_impress": "Impress"}
 OFFICE_PRODUCTS = {
     "office_ltsc_2024": ("Excel2024Volume", "PerpetualVL2024"),
     "office_ltsc_2021": ("Excel2021Volume", "PerpetualVL2021"),
@@ -25,14 +29,36 @@ OFFICE_PRODUCTS = {
 
 
 @dataclass(frozen=True)
+class MenuEntry:
+    """A desktop menu entry for an app that apt did not install."""
+
+    name: str
+    command: str
+    icon: str
+    categories: str
+
+
+@dataclass(frozen=True)
+class LinuxService:
+    """A long running process the desktop user runs from the desktop user's home, such as a local server."""
+
+    name: str
+    command: str
+
+
+@dataclass(frozen=True)
 class LinuxApp:
-    """Install lines run as root in the image build; {download} is the checked download."""
+    """Install lines run as root in the image build; {download} is the checked download. Files land with the root
+    overlay before anything is installed."""
 
     window: str
     launch: str
     packages: tuple[str, ...] = ()
     artifact: str | None = None
     install: tuple[str, ...] = ()
+    menu: MenuEntry | None = None
+    files: Mapping[str, str] = field(default_factory=dict)
+    services: tuple[LinuxService, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -69,7 +95,8 @@ def linux_app(app: str, label: str, user: str, chromium_flags: Sequence[str] = (
     if app == "firefox":
         return LinuxApp(window="Firefox", artifact=f"firefox_{label}", launch="/opt/firefox/firefox",
                         packages=("libgtk-3-0", "libasound2", "libdbus-glib-1-2", "libx11-xcb1", "bzip2"),
-                        install=("tar -xf {download} -C /opt",))
+                        install=("tar -xf {download} -C /opt", "ln -sf /opt/firefox/firefox /usr/local/bin/firefox"),
+                        menu=MenuEntry("Firefox Web Browser", "firefox %u", FIREFOX_ICON, "Network;WebBrowser;"))
     if app == "edge":
         return LinuxApp(
             window="Edge", artifact=f"edge_{label}",
@@ -78,6 +105,10 @@ def linux_app(app: str, label: str, user: str, chromium_flags: Sequence[str] = (
     if app == "libreoffice":
         return LinuxApp(window="Calc", launch="libreoffice --calc --nologo --norestore",
                         packages=(f"libreoffice-calc={label}", f"libreoffice-gtk3={label}"))
+    if app in LIBREOFFICE_MODULES:
+        window = LIBREOFFICE_MODULES[app]
+        return LinuxApp(window=window, launch=f"libreoffice --{window.lower()} --nologo --norestore",
+                        packages=(f"libreoffice-{window.lower()}={label}", f"libreoffice-gtk3={label}"))
     if app == "webkit":
         return LinuxApp(
             window="WebKit", launch="sh -c '/opt/playwright/browsers/webkit-*/minibrowser-gtk/MiniBrowser'",

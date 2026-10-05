@@ -97,6 +97,14 @@ def test_linux_recipes_pin_versions_and_expose_devtools_on_loopback():
     calc = linux_app("libreoffice", "4:24.2.7-0ubuntu0.24.04.1", "agent")
     assert calc.packages == ("libreoffice-calc=4:24.2.7-0ubuntu0.24.04.1", "libreoffice-gtk3=4:24.2.7-0ubuntu0.24.04.1")
     assert calc.artifact is None and calc.window == "Calc"
+    writer = linux_app("libreoffice_writer", "4:24.2.7-0ubuntu0.24.04.6", "agent")
+    assert (writer.window, writer.launch) == ("Writer", "libreoffice --writer --nologo --norestore")
+    assert writer.packages == ("libreoffice-writer=4:24.2.7-0ubuntu0.24.04.6",
+                               "libreoffice-gtk3=4:24.2.7-0ubuntu0.24.04.6")
+    assert linux_app("libreoffice_impress", "4:24.2.7-0ubuntu0.24.04.6", "agent").window == "Impress"
+    firefox = linux_app("firefox", "153.4.0esr", "agent")
+    assert "ln -sf /opt/firefox/firefox /usr/local/bin/firefox" in firefox.install
+    assert firefox.menu.command == "firefox %u" and firefox.menu.categories == "Network;WebBrowser;"
     with pytest.raises(BuildError, match="no Linux recipe for app excel"):
         linux_app("excel", "office_ltsc_2024", "agent")
     with pytest.raises(BuildError, match="version label"):

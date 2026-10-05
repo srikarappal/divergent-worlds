@@ -3,7 +3,8 @@
 The Dockerfile starts from the spec's base image by digest and installs from
 dated snapshot mirrors only; downloads are checked against the artifact lock
 and the guest agent's dependencies against their hashes. The image boots
-systemd with the clone address behind NAT, Xvfb, openbox and a session bus
+systemd with the clone address behind NAT, Xvfb, the desktop session (openbox, or
+Xfce with its panel, menu, file manager, terminal and editor) and a session bus
 whose accessibility bus the root guest agent may read; x11vnc serves the screen
 for operator takeover on a root only Unix socket. The agent listens on
 vsock and nothing else touches the clock, which the agent sets to world time.
@@ -34,15 +35,33 @@ from rlworld.images.config import (
 )
 from rlworld.guest.options import DESKTOP_RUNTIME_DIRECTORY
 from rlworld.guest.server import DEFAULT_VNC_SOCKET
-from rlworld.images.recipes import DOWNLOAD_PLACEHOLDER, LinuxApp, linux_app
+from rlworld.images.recipes import DOWNLOAD_PLACEHOLDER, LinuxApp, LinuxService, MenuEntry, linux_app
 from rlworld.network.plan import ENV_SUBNET, GATEWAY_ADDRESS, GUEST_ADDRESS
 from rlworld.specs.digest import spec_digest
 from rlworld.specs.models import DisplaySpec, ImageSpec
 
 BOOT_ARGS = "console=ttyS0 reboot=k panic=1 pci=off"
-BASE_PACKAGES = ("systemd", "systemd-sysv", "dbus", "iproute2", "xvfb", "x11-xserver-utils", "openbox",
-                 "at-spi2-core", "python3", "python3-venv", "python3-gi", "python3-pyatspi", "xdotool", "x11vnc",
-                 "locales", "ca-certificates", "curl", "unzip", "xz-utils")
+BASE_PACKAGES = ("systemd", "systemd-sysv", "dbus", "iproute2", "xvfb", "x11-xserver-utils", "at-spi2-core",
+                 "python3", "python3-venv", "python3-gi", "python3-pyatspi", "xdotool", "x11vnc", "locales",
+                 "ca-certificates", "curl", "unzip", "xz-utils")
+DESKTOP_PACKAGES = {"openbox": ("openbox",),
+                    "xfce": ("xfce4-session", "xfwm4", "xfce4-panel", "xfdesktop4", "xfce4-settings", "xfconf",
+                             "thunar", "xfce4-terminal", "mousepad", "adwaita-icon-theme")}
+DESKTOP_COMMANDS = {"openbox": "exec openbox --startup /usr/local/bin/rlworld-autostart\n",
+                    "xfce": "exec xfce4-session\n"}
+XFCONF_DIRECTORY = "etc/xdg/xfce4/xfconf/xfce-perchannel-xml"
+# The panel layout as system wide xfconf defaults, so the panel never asks on first start which layout to use.
+XFCE_PANEL_DEFAULTS = f"cp /etc/xdg/xfce4/panel/default.xml /{XFCONF_DIRECTORY}/xfce4-panel.xml"
+# Preferred apps are found by binary name on PATH; apps installed outside apt link theirs into /usr/local/bin.
+XFCE_HELPERS = ("WebBrowser=firefox\nMailReader=thunderbird\nTerminalEmulator=debian-x-terminal-emulator\n"
+                "FileManager=thunar\n")
+# Compositing off keeps frames deterministic and cheap; every other window manager setting keeps its default.
+XFWM4_SETTINGS = ('<?xml version="1.0" encoding="UTF-8"?>\n<channel name="xfwm4" version="1.0">\n'
+                  '  <property name="general" type="empty">\n'
+                  '    <property name="use_compositing" type="bool" value="false"/>\n'
+                  "  </property>\n</channel>\n")
+XFCE_AUTOSTART = ("[Desktop Entry]\nType=Application\nName=rlworld autostart\n"
+                  "Exec=/usr/local/bin/rlworld-autostart\nNoDisplay=true\n")
 CA_PACKAGES = ("libnss3-tools",)
 # Snapshot mirrors redirect http to https before the base image has a CA bundle, so the first apt step trusts
 # the builder's pinned certifi bundle until ca-certificates is installed.
@@ -212,13 +231,34 @@ def network_script() -> str:
             f"ip route add default via {GATEWAY_ADDRESS}\n")
 
 
-def desktop_script() -> str:
-    """Waits for the display and session bus, starts the accessibility bus so it publishes itself on X, then openbox."""
+def desktop_script(desktop: str) -> str:
+    """Waits for the display and session bus, starts the accessibility bus, then the desktop session, whose autostart
+    opens the ready probe's window."""
     return ("#!/bin/sh\nset -eu\n"
             f"while [ ! -S /tmp/.X11-unix/X0 ] || [ ! -S {RUNTIME_DIRECTORY}/bus ]; do sleep 0.1; done\n"
             "xrdb -nocpp -merge /etc/rlworld/Xresources\n"
             "dbus-send --session --print-reply --dest=org.a11y.Bus /org/a11y/bus org.a11y.Bus.GetAddress > /dev/null\n"
-            "exec openbox --startup /usr/local/bin/rlworld-autostart\n")
+            + DESKTOP_COMMANDS[desktop])
+
+
+def menu_entry_file(menu: MenuEntry) -> str:
+    return (f"[Desktop Entry]\nType=Application\nName={menu.name}\nExec={menu.command}\nIcon={menu.icon}\n"
+            f"Categories={menu.categories}\nTerminal=false\n")
+
+
+def service_unit_name(service: LinuxService) -> str:
+    return f"rlworld-app-{service.name}.service"
+
+
+def service_unit(config: LinuxBuildConfig, service: LinuxService) -> str:
+    return ("[Unit]\nDescription=rlworld app service " + service.name + "\nAfter=rlworld-session-bus.service\n\n"
+            f"[Service]\nUser={config.user}\nWorkingDirectory=~\nEnvironmentFile=/etc/rlworld/desktop.env\n"
+            f"ExecStart={service.command}\nRestart=always\n\n[Install]\nWantedBy=multi-user.target\n")
+
+
+def service_launch(config: LinuxBuildConfig, service: LinuxService) -> str:
+    """The dev init's line for an app service: the same command as the unit, as the desktop user in its home."""
+    return f"runuser -u {config.user} -- sh -c {shlex.quote('cd \"$HOME\" && exec ' + service.command)} &\n"
 
 
 def autostart_script(probe_launch: str | None) -> str:
@@ -251,7 +291,8 @@ def ready_wait(image: ImageSpec) -> str:
             f"sleep {probe.screen_stable_ms / 1000}\n")
 
 
-def dev_init_script(image: ImageSpec, config: LinuxBuildConfig, launchers: Mapping[str, str]) -> str:
+def dev_init_script(image: ImageSpec, config: LinuxBuildConfig, launchers: Mapping[str, str],
+                    services: Sequence[LinuxService]) -> str:
     """The dev container's init. The token goes into a root only file and leaves the environment before anything
     starts, so no process the policy can inspect holds it. Then it starts what the units start in a VM except the
     network, which is Docker's; the agent serves TCP."""
@@ -267,7 +308,8 @@ def dev_init_script(image: ImageSpec, config: LinuxBuildConfig, launchers: Mappi
             f"{VNC_COMMAND} &\n"
             f"install -d -m 0700 -o {config.user} -g {config.user} {RUNTIME_DIRECTORY}\n"
             f"runuser -u {config.user} -- {SESSION_BUS_COMMAND} &\n"
-            f"runuser -u {config.user} -- sh -c 'cd \"$HOME\" && exec /usr/local/bin/rlworld-desktop' &\n"
+            + "".join(service_launch(config, service) for service in services)
+            + f"runuser -u {config.user} -- sh -c 'cd \"$HOME\" && exec /usr/local/bin/rlworld-desktop' &\n"
             f"{ready_wait(image)}"
             f"exec {agent}\n")
 
@@ -322,12 +364,21 @@ def overlay_files(image: ImageSpec, config: LinuxBuildConfig, apps: Mapping[str,
         "etc/gtk-3.0/settings.ini": gtk_settings(image.display, hardening),
         "etc/gtk-4.0/settings.ini": gtk_settings(image.display, hardening),
         "usr/local/bin/rlworld-network": network_script(),
-        "usr/local/bin/rlworld-desktop": desktop_script(),
+        "usr/local/bin/rlworld-desktop": desktop_script(image.desktop),
         "usr/local/bin/rlworld-autostart": autostart_script(launchers[probe_window] if probe_window else None),
         **unit_files(config, image.display, " ".join(systemd_argument(argument) for argument in agent_argv)),
     }
     for step in hardening:
         files.update(step.files)
+    if image.desktop == "xfce":
+        files.update({"etc/xdg/autostart/rlworld-autostart.desktop": XFCE_AUTOSTART,
+                      "etc/xdg/xfce4/helpers.rc": XFCE_HELPERS, f"{XFCONF_DIRECTORY}/xfwm4.xml": XFWM4_SETTINGS})
+    for app, recipe in apps.items():
+        files.update(recipe.files)
+        files.update({f"etc/systemd/system/{service_unit_name(service)}": service_unit(config, service)
+                      for service in recipe.services})
+        if recipe.menu is not None:
+            files[f"usr/share/applications/rlworld-{app}.desktop"] = menu_entry_file(recipe.menu)
     chromium_policies = merged_policies(hardening, "chromium_policies")
     for app, policy_directory in CHROMIUM_POLICY_DIRECTORIES.items():
         if app in apps:
@@ -341,7 +392,7 @@ def overlay_files(image: ImageSpec, config: LinuxBuildConfig, apps: Mapping[str,
             firefox_policies["Certificates"] = {"Install": installs}
         files["etc/firefox/policies/policies.json"] = policy_json({"policies": firefox_policies})
     switched_off = [path for step in hardening for path in step.libreoffice_off]
-    if "libreoffice" in apps and switched_off:
+    if any(app.startswith("libreoffice") for app in apps) and switched_off:
         files["usr/lib/libreoffice/share/registry/rlworld.xcd"] = libreoffice_registry(switched_off)
     encoded = {path: content.encode("utf-8") for path, content in files.items()}
     encoded.update({f"{CA_DIRECTORY.lstrip('/')}/{name}.crt": pem for name, pem in trusted_cas.items()})
@@ -366,7 +417,8 @@ def render_dockerfile(image: ImageSpec, config: LinuxBuildConfig, apps: Mapping[
     locale = image.display.locale
     has_chromium = any(app in apps for app in CHROMIUM_POLICY_DIRECTORIES)
     bootstrap_ca_option = f"-o Acquire::https::CaInfo={INPUT_DIRECTORY}/{BOOTSTRAP_CA}"
-    packages = list(dict.fromkeys([*BASE_PACKAGES, *config.fonts, *(CA_PACKAGES if ca_names and has_chromium else ()),
+    packages = list(dict.fromkeys([*BASE_PACKAGES, *DESKTOP_PACKAGES[image.desktop], *config.fonts,
+                                   *(CA_PACKAGES if ca_names and has_chromium else ()),
                                    *(package for recipe in apps.values() for package in recipe.packages)]))
     steps = [
         "# syntax=docker/dockerfile:1",
@@ -400,11 +452,14 @@ def render_dockerfile(image: ImageSpec, config: LinuxBuildConfig, apps: Mapping[
     ]
     if ca_names:
         steps.append(run_step(trust_commands(config.user, ca_names, has_chromium)))
+    if image.desktop == "xfce":
+        steps.append(run_step([XFCE_PANEL_DEFAULTS]))
     hardening_commands = [command for step in hardening for command in step.commands]
+    units = [*ENABLED_UNITS, *(service_unit_name(service) for recipe in apps.values() for service in recipe.services)]
     if hardening_commands:
         steps.append(run_step(hardening_commands))
     steps += [
-        run_step(["chmod 0755 /usr/local/bin/rlworld-*", f"systemctl enable {' '.join(ENABLED_UNITS)}",
+        run_step(["chmod 0755 /usr/local/bin/rlworld-*", f"systemctl enable {' '.join(units)}",
                   "ln -sf /dev/null /etc/systemd/system/systemd-timesyncd.service"]),
         run_step(["apt-get clean", "rm -rf /var/lib/apt/lists/* /tmp/rlworld"]),
     ]
@@ -419,6 +474,7 @@ class LinuxContext:
     copies: dict[str, Path]
     downloads: dict[str, Artifact]
     launchers: dict[str, str]
+    services: tuple[LinuxService, ...]
 
     def manifest(self, image: ImageSpec, config: LinuxBuildConfig, artifacts: Mapping[str, Artifact]) -> dict[str, Any]:
         return {"base_image": base_reference(image, config), "apt_sources": list(config.apt_sources),
@@ -444,7 +500,8 @@ def linux_context(image: ImageSpec, config: LinuxBuildConfig, lock: ArtifactLock
     copies = {f"context/inputs/{config.guest_agent_wheel.name}": config.guest_agent_wheel,
               f"context/inputs/{GUEST_REQUIREMENTS}": config.guest_agent_requirements,
               f"context/inputs/{BOOTSTRAP_CA}": Path(certifi.where())}
-    return LinuxContext(files=files, copies=copies, downloads=downloads, launchers=launchers)
+    services = tuple(service for recipe in apps.values() for service in recipe.services)
+    return LinuxContext(files=files, copies=copies, downloads=downloads, launchers=launchers, services=services)
 
 
 def linux_build_plan(image: ImageSpec, config: LinuxBuildConfig, lock: ArtifactLock,
@@ -479,7 +536,8 @@ def linux_dev_build_plan(image: ImageSpec, config: LinuxBuildConfig, lock: Artif
     tag = dev_image_tag(image)
     files = {**context.files,
              "context/Dockerfile": context.files["context/Dockerfile"] + DEV_DOCKERFILE_SUFFIX.encode(),
-             "context/dev/usr/local/bin/rlworld-dev-init": dev_init_script(image, config, context.launchers).encode()}
+             "context/dev/usr/local/bin/rlworld-dev-init": dev_init_script(image, config, context.launchers,
+                                                                           context.services).encode()}
     return BuildPlan(
         files=files,
         copies=context.copies,
