@@ -8,9 +8,9 @@ experiment:                                # the reference task on a Linux image
 image:
   id: noble_calc_v1
   os: linux
-  base: ubuntu_noble@sha256:9b2f4c6e8a0d1f3b5c7e9a1d3f5b7c9e1a3c5e7f9b1d3f5a7c9e1b3d5f7a9c1e
+  base: ubuntu_noble@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55
   pool: {vmm: firecracker, cpu_model: fleet_baseline}
-  apps: {libreoffice: "4:24.2.7-0ubuntu0.24.04.1"}
+  apps: {libreoffice: "4:24.2.7-0ubuntu0.24.04.6"}
   display: {width: 1280, height: 800, dpi: 96, theme: light, locale: en_US}
   hardening: [no_auto_update, no_first_run, no_animations, no_telemetry]
   ready_probe: {window: Calc, screen_stable_ms: 500}

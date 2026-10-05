@@ -1,0 +1,10 @@
+# Build config for the Docker dev loop: rlworld-build-image --config ../examples/images/laptop.yaml, run from python/.
+# Paths are relative to this file. The snapshot date must hold every apt version the spec pins.
+linux:
+  base_images: {ubuntu_noble: docker.io/library/ubuntu}
+  apt_sources:
+    - deb http://snapshot.ubuntu.com/ubuntu/20261001T000000Z noble main universe
+    - deb http://snapshot.ubuntu.com/ubuntu/20261001T000000Z noble-updates main universe
+    - deb http://snapshot.ubuntu.com/ubuntu/20261001T000000Z noble-security main universe
+  guest_agent_wheel: ../../python/dist/rlworld-0.1.0-py3-none-any.whl
+  guest_agent_requirements: ../../python/dist/guest.txt

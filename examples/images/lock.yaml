@@ -1,0 +1,2 @@
+# Downloads outside apt, pinned by URL and sha256. The reference image downloads nothing.
+artifacts: {}

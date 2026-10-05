@@ -121,8 +121,8 @@ def test_experimentd_plays_an_eval_run_from_spec_to_episodes(tmp_path):
     policy_calls = [request for name, request in transport.requests if request.purpose == "policy"]
     assert {(request.run_id, request.model) for request in policy_calls} == {(run_id, "my_policy")}
     leases = fleet.calls_named("lease_group")
-    assert leases and {call[3] for call in leases} == {"sha256:e197927b25a48f8a2a938f4eea30f6665e42a8086f0cd1340cc"
-                                                         "2a33816dfbf0b"}
+    reference_image = load_spec_document(REFERENCE_SPEC.read_text()).image
+    assert leases and {call[3] for call in leases} == {spec_digest(reference_image)}
     assert experimentd.meter.summary(run_id)["local_policy"].calls == len(policy_calls)
     assert launches.submitted == [] and experimentd.gate_reruns is None
     assert {job.name for job in experimentd.jobs} == {"alerts", "retention"}

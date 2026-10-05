@@ -13,6 +13,6 @@ pools:
   firecracker: {pool: linux, memory_mib: 4096, vcpus: 2}
 snapshot_store: false
 static_snapshots:
-  "sha256:e197927b25a48f8a2a938f4eea30f6665e42a8086f0cd1340cc2a33816dfbf0b":
-    digest: "sha256:e197927b25a48f8a2a938f4eea30f6665e42a8086f0cd1340cc2a33816dfbf0b"
-    base_disk_path: "rlworld-dev/noble_calc_v1:e197927b25a4"
+  "sha256:0d5553a2b2e4c8a9d50191056cfe871376a34f3a2c3f0a187c8dc4f581c4aa4e":
+    digest: "sha256:0d5553a2b2e4c8a9d50191056cfe871376a34f3a2c3f0a187c8dc4f581c4aa4e"
+    base_disk_path: "rlworld-dev/noble_calc_v1:0d5553a2b2e4"
