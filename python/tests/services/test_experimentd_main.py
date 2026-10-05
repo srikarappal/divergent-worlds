@@ -48,7 +48,7 @@ class SnapshotStoreFleet(FakeFleet):
         self.pins = []
 
     def current_snapshot(self, image_digest, pool):
-        return {"image": "noble_calc_v1", "image_digest": image_digest, "pool": pool,
+        return {"image": "noble_office_v1", "image_digest": image_digest, "pool": pool,
                 "snapshot": SNAPSHOT_STORE_FLEET_DIGEST, "updated_at": "2026-10-03T12:00:00Z"}
 
     def current_snapshots(self):
@@ -151,7 +151,7 @@ def test_metrics_follow_an_eval_run(tmp_path):
     run_id = client.post(f"/v1/specs/{digest}/launch", json={"budget_usd": 10.0}).get_json()["run_ids"][0]
     assert experimentd.executor.wait(run_id, timeout_seconds=120)
     samples = scraped(client)
-    assert samples['rlworld_episodes_total{image="noble_calc_v1",termination="failure"}'] == 2
+    assert samples['rlworld_episodes_total{image="noble_office_v1",termination="failure"}'] == 2
     assert samples['rlworld_app_episodes_total{app="mail",termination="failure"}'] == 2
     assert samples['rlworld_gateway_calls_total{endpoint="local_policy",purpose="policy",outcome="ok"}'] >= 2
     assert samples['rlworld_gateway_call_seconds_count{endpoint="local_policy",purpose="policy"}'] >= 2

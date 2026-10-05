@@ -6,16 +6,23 @@ experiment:                                # the reference task on a Linux image
   budget_usd: 50
 
 image:
-  id: noble_calc_v1
+  id: noble_office_v1                      # an Xfce desktop with office, browser, mail and chat
   os: linux
   base: ubuntu_noble@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55
   pool: {vmm: firecracker, cpu_model: fleet_baseline}
-  apps: {libreoffice: "4:24.2.7-0ubuntu0.24.04.6"}
+  desktop: xfce
+  apps:
+    libreoffice: "4:24.2.7-0ubuntu0.24.04.6"
+    libreoffice_writer: "4:24.2.7-0ubuntu0.24.04.6"
+    libreoffice_impress: "4:24.2.7-0ubuntu0.24.04.6"
+    firefox: "153.4.0esr"
+    thunderbird: "153.4.0esr"
+    chat: "1"
   display: {width: 1280, height: 800, dpi: 96, theme: light, locale: en_US}
   hardening: [no_auto_update, no_first_run, no_animations, no_telemetry]
   ready_probe: {window: Calc, screen_stable_ms: 500}
 
-world:                                     # mail and files are the app integrations there are
+world:                                     # Thunderbird and the file manager show the mail and files
   generator: worlds.mid_market_company
   seed: 1842
   size: {employees: 12, customers: 20, invoices_per_customer: 2, emails_per_person: 5}

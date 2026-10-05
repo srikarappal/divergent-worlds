@@ -23,7 +23,7 @@ from rlworld.tasks.finance import ReconcileInvoices, oracle_script
 from rlworld.tasks.gates import GateReport, GateResult
 from rlworld.tasks.registry import default_task_registry
 
-IMAGE = "noble_calc_v1"
+IMAGE = "noble_office_v1"
 POOL = "linux_dev"
 REBUILT = "sha256:" + "11" * 32
 NEW_VERSION = "sha256:" + "22" * 32

@@ -1,2 +1,8 @@
-# Downloads outside apt, pinned by URL and sha256. The reference image downloads nothing.
-artifacts: {}
+# Downloads outside apt, pinned by URL and sha256 from Mozilla's published SHA256SUMS.
+artifacts:
+  firefox_153.4.0esr:
+    url: https://archive.mozilla.org/pub/firefox/releases/153.4.0esr/linux-x86_64/en-US/firefox-153.4.0esr.tar.xz
+    sha256: 1832c20dd8c5f69cee933debe62372f5c997845413c8eff846317f6463172032
+  thunderbird_153.4.0esr:
+    url: https://archive.mozilla.org/pub/thunderbird/releases/153.4.0esr/linux-x86_64/en-US/thunderbird-153.4.0esr.tar.xz
+    sha256: fa5dc77f6dce0347a9672df86a13df23231a74f9ac5459b935e7e64f83d73428

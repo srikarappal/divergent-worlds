@@ -67,7 +67,7 @@ def test_sessions_need_a_servable_spec_a_shape_and_a_snapshot(example_payload, t
         shapeless.start(bench.digest, "ada", "finance_lab")
     unsnapshotted = AuthoringService(bench.experiments, default_task_registry(), StaticSnapshots({}), bench.fleet,
                                      bench.review, SHAPES)
-    with pytest.raises(AuthoringError, match="no snapshot of image noble_calc_v1"):
+    with pytest.raises(AuthoringError, match="no snapshot of image noble_office_v1"):
         unsnapshotted.start(bench.digest, "ada", "finance_lab")
     three_apps = bench.experiments.save_spec(reconcile_spec_yaml(apps=3))
     with pytest.raises(AuthoringError, match="at most 2 apps"):
