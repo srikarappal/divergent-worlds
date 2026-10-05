@@ -139,7 +139,7 @@ def test_hardening_reaches_browsers_office_and_apt():
     assert firefox["DisableAppUpdate"] is True and firefox["DisableTelemetry"] is True
     assert firefox["Preferences"]["ui.prefersReducedMotion"] == {"Value": 1, "Status": "locked"}
     assert "Certificates" not in firefox
-    registry = text(plan, "context/rootfs/usr/lib/libreoffice/share/registry/rlworld.xcd")
+    registry = text(plan, "context/rootfs/etc/libreoffice/registry/rlworld.xcd")
     assert '<prop oor:name="ShowTipOfTheDay" oor:op="fuse"><value>false</value></prop>' in registry
     assert '<node oor:name="Accessibility">' in registry
     chrome_launch = plan.manifest["launchers"]["Chrome"]
@@ -150,7 +150,7 @@ def test_hardening_reaches_browsers_office_and_apt():
 
 def test_unhardened_images_keep_defaults():
     plan = plan_for(linux_image(hardening=[]))
-    assert "context/rootfs/usr/lib/libreoffice/share/registry/rlworld.xcd" not in plan.files
+    assert "context/rootfs/etc/libreoffice/registry/rlworld.xcd" not in plan.files
     assert "apt-daily" not in text(plan, "context/Dockerfile")
     assert plan.manifest["launchers"]["Chrome"].endswith("--start-maximized --user-data-dir=/home/agent/.config"
                                                          "/rlworld-chrome")

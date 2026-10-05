@@ -73,6 +73,9 @@ KEEP_OVERLAY_CONFFILES = 'Dpkg::Options { "--force-confdef"; "--force-confold"; 
 DOWNLOAD_DIRECTORY = "/tmp/rlworld/downloads"
 INPUT_DIRECTORY = "/tmp/rlworld/inputs"
 CA_DIRECTORY = "/usr/local/share/ca-certificates/rlworld"
+# Ubuntu keeps LibreOffice's registry layers in /etc and links them from the install folder, which a copy into
+# the image cannot write through.
+LIBREOFFICE_REGISTRY_LAYER = "etc/libreoffice/registry/rlworld.xcd"
 RUNTIME_DIRECTORY = DESKTOP_RUNTIME_DIRECTORY
 ACCESSIBILITY_BUS_CONFIG = "/usr/share/defaults/at-spi2/accessibility.conf"
 GUEST_AGENT = "/opt/rlworld/bin/rlworld-guest-agent"
@@ -395,7 +398,7 @@ def overlay_files(image: ImageSpec, config: LinuxBuildConfig, apps: Mapping[str,
         files["etc/firefox/policies/policies.json"] = policy_json({"policies": firefox_policies})
     switched_off = [path for step in hardening for path in step.libreoffice_off]
     if any(app.startswith("libreoffice") for app in apps) and switched_off:
-        files["usr/lib/libreoffice/share/registry/rlworld.xcd"] = libreoffice_registry(switched_off)
+        files[LIBREOFFICE_REGISTRY_LAYER] = libreoffice_registry(switched_off)
     encoded = {path: content.encode("utf-8") for path, content in files.items()}
     encoded.update({f"{CA_DIRECTORY.lstrip('/')}/{name}.crt": pem for name, pem in trusted_cas.items()})
     return encoded
