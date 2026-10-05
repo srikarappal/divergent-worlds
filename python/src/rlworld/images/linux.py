@@ -1,8 +1,10 @@
 """Linux images: a pinned Dockerfile becomes an ext4 rootfs plus a guest kernel (DESIGN.md sections 6.1 to 6.3).
 
 The Dockerfile starts from the spec's base image by digest and installs from
-dated snapshot mirrors only; downloads are checked against the artifact lock
-and the guest agent's dependencies against their hashes. The image boots
+dated snapshot mirrors only; app downloads are fetched on the build host and
+checked against the artifact lock, the guest agent's dependencies against
+their hashes. Apps install before the root overlay lands, so config changes
+keep the package and app layers cached. The image boots
 systemd with the clone address behind NAT, Xvfb, the desktop session (openbox, or
 Xfce with its panel, menu, file manager, terminal and editor) and a session bus
 whose accessibility bus the root guest agent may read; x11vnc serves the screen
@@ -71,6 +73,9 @@ BOOTSTRAP_CA = "bootstrap_ca.pem"
 APT_OVERLAY_PREFIX = "etc/apt/"
 KEEP_OVERLAY_CONFFILES = 'Dpkg::Options { "--force-confdef"; "--force-confold"; };\n'
 DOWNLOAD_DIRECTORY = "/tmp/rlworld/downloads"
+# App downloads are fetched on the build host, checked against the lock and reused across builds, then reach the
+# Dockerfile as a second build context; containers fetch far slower than the host does.
+HOST_DOWNLOADS = "downloads"
 INPUT_DIRECTORY = "/tmp/rlworld/inputs"
 CA_DIRECTORY = "/usr/local/share/ca-certificates/rlworld"
 # Ubuntu keeps LibreOffice's registry layers in /etc and links them from the install folder, which a copy into
@@ -169,10 +174,15 @@ def download_path(name: str, artifact: Artifact) -> str:
     return f"{DOWNLOAD_DIRECTORY}/{name}/{artifact.file_name}"
 
 
-def download_commands(name: str, artifact: Artifact) -> list[str]:
+def host_download_path(name: str, artifact: Artifact) -> str:
+    return f"{HOST_DOWNLOADS}/{name}/{artifact.file_name}"
+
+
+def download_steps(name: str, artifact: Artifact) -> list[str]:
     path = download_path(name, artifact)
-    return [f"mkdir -p {DOWNLOAD_DIRECTORY}/{name}", f"curl -fsSL --retry 3 -o {path} {shlex.quote(artifact.url)}",
-            f"echo '{artifact.sha256}  {path}' | sha256sum --check --strict -"]
+    """The host checked the download already; the image checks its copy once more."""
+    return [f"COPY --from={HOST_DOWNLOADS} {name}/{artifact.file_name} {path}",
+            run_step([f"echo '{artifact.sha256}  {path}' | sha256sum --check --strict -"])]
 
 
 def desktop_environment(locale: str) -> str:
@@ -435,19 +445,19 @@ def render_dockerfile(image: ImageSpec, config: LinuxBuildConfig, apps: Mapping[
         run_step(["rm -f /etc/apt/sources.list.d/*",
                   f"apt-get -o Acquire::Check-Valid-Until=false {bootstrap_ca_option} update",
                   f"apt-get {bootstrap_ca_option} install -y --no-install-recommends {' '.join(packages)}"]),
-        "COPY rootfs/ /",
-        f"COPY inputs/ {INPUT_DIRECTORY}/",
         run_step([f"localedef -i {locale} -f UTF-8 {locale}.UTF-8", f"update-locale LANG={locale}.UTF-8"]),
         # Ubuntu base images since 23.04 ship an ubuntu user holding UID 1000.
         run_step(["if getent passwd ubuntu > /dev/null; then userdel --remove ubuntu; fi",
                   f"useradd --create-home --uid 1000 --shell /bin/bash {config.user}", f"passwd --lock {config.user}"]),
     ]
-    steps += [run_step(download_commands(name, artifact)) for name, artifact in downloads.items()]
+    steps += [step for name, artifact in downloads.items() for step in download_steps(name, artifact)]
     for recipe in apps.values():
         if recipe.install:
             archive = download_path(recipe.artifact, downloads[recipe.artifact]) if recipe.artifact else ""
             steps.append(run_step([line.replace(DOWNLOAD_PLACEHOLDER, archive) for line in recipe.install]))
     steps += [
+        "COPY rootfs/ /",
+        f"COPY inputs/ {INPUT_DIRECTORY}/",
         run_step(["python3 -m venv --system-site-packages /opt/rlworld",
                   "/opt/rlworld/bin/pip install --no-cache-dir --no-deps --require-hashes"
                   f" -r {INPUT_DIRECTORY}/{GUEST_REQUIREMENTS}",
@@ -482,6 +492,12 @@ class LinuxContext:
     downloads: dict[str, Artifact]
     launchers: dict[str, str]
     services: tuple[LinuxService, ...]
+
+    def host_downloads(self) -> dict[str, Artifact]:
+        return {host_download_path(name, artifact): artifact for name, artifact in self.downloads.items()}
+
+    def build_context_arguments(self) -> tuple[str, ...]:
+        return ("--build-context", f"{HOST_DOWNLOADS}={HOST_DOWNLOADS}") if self.downloads else ()
 
     def manifest(self, image: ImageSpec, config: LinuxBuildConfig, artifacts: Mapping[str, Artifact]) -> dict[str, Any]:
         return {"base_image": base_reference(image, config), "apt_sources": list(config.apt_sources),
@@ -520,10 +536,10 @@ def linux_build_plan(image: ImageSpec, config: LinuxBuildConfig, lock: ArtifactL
     return BuildPlan(
         files=context.files,
         copies=context.copies,
-        downloads={"vmlinux": kernel},
+        downloads={"vmlinux": kernel, **context.host_downloads()},
         commands=(
             BuildCommand(("docker", "build", "--platform", config.platform, "--output", "type=tar,dest=rootfs.tar",
-                          "--file", "context/Dockerfile", "context")),
+                          *context.build_context_arguments(), "--file", "context/Dockerfile", "context")),
             BuildCommand(("mke2fs", "-F", "-q", "-t", "ext4", "-L", "rootfs", "-d", "rootfs.tar", "rootfs.ext4",
                           f"{config.rootfs_size_mib}M")),
             BuildCommand(("rm", "-f", "rootfs.tar")),
@@ -550,9 +566,10 @@ def linux_dev_build_plan(image: ImageSpec, config: LinuxBuildConfig, lock: Artif
     return BuildPlan(
         files=files,
         copies=context.copies,
-        downloads={},
+        downloads=context.host_downloads(),
         commands=(BuildCommand(("docker", "build", "--platform", config.platform, "--tag", tag, "--iidfile",
-                                "image.id", "--file", "context/Dockerfile", "context")),),
+                                "image.id", *context.build_context_arguments(), "--file", "context/Dockerfile",
+                                "context")),),
         outputs={"image_id": "image.id"},
         manifest={**context.manifest(image, config, context.downloads), "image_tag": tag, "agent_transport": "tcp"},
     )

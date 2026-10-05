@@ -52,17 +52,21 @@ def test_dockerfile_starts_from_the_pinned_base_and_installs_from_snapshots_only
     assert dockerfile.rstrip().endswith("rm -rf /var/lib/apt/lists/* /tmp/rlworld")
 
 
-def test_downloads_are_checked_against_the_lock_before_apps_install():
-    dockerfile = text(plan_for(), "context/Dockerfile")
+def test_downloads_come_from_the_host_checked_against_the_lock_before_apps_install():
+    plan = plan_for()
+    dockerfile = text(plan, "context/Dockerfile")
     chrome_path = "/tmp/rlworld/downloads/chrome_130.0.6723.58/chrome-linux64.zip"
     firefox_path = "/tmp/rlworld/downloads/firefox_128.5.0esr/firefox-128.5.0esr.tar.xz"
-    assert f"curl -fsSL --retry 3 -o {chrome_path} https://storage.example/cft/chrome-linux64.zip" in dockerfile
+    assert plan.downloads["downloads/chrome_130.0.6723.58/chrome-linux64.zip"] == LOCK.require("chrome_130.0.6723.58")
+    firefox_download = "downloads/firefox_128.5.0esr/firefox-128.5.0esr.tar.xz"
+    assert plan.downloads[firefox_download] == LOCK.require("firefox_128.5.0esr")
+    assert f"COPY --from=downloads chrome_130.0.6723.58/chrome-linux64.zip {chrome_path}" in dockerfile
     assert f"echo '{'1' * 64}  {chrome_path}' | sha256sum --check --strict -" in dockerfile
-    assert f"-o {firefox_path} 'https://ftp.example/firefox-128.5.0esr.tar.xz?product=esr'" in dockerfile
     assert dockerfile.index("sha256sum --check") < dockerfile.index(f"unzip -q {chrome_path} -d /opt")
     assert f"tar -xf {firefox_path} -C /opt" in dockerfile
     assert dockerfile.index("userdel --remove ubuntu") < dockerfile.index("useradd --create-home --uid 1000")
     assert dockerfile.index("useradd --create-home --uid 1000") < dockerfile.index("unzip -q")
+    assert dockerfile.index(f"tar -xf {firefox_path} -C /opt") < dockerfile.index("COPY rootfs/ /")
 
 
 def test_guest_agent_installs_from_hashed_requirements_and_reads_accessibility_as_root():
@@ -197,12 +201,12 @@ def test_base_images_need_a_registry_repository():
 def test_build_exports_a_tarball_into_ext4_and_fetches_the_kernel():
     plan = plan_for(config=linux_config(rootfs_size_mib=4096, platform="linux/arm64"))
     assert [command.argv for command in plan.commands] == [
-        ("docker", "build", "--platform", "linux/arm64", "--output", "type=tar,dest=rootfs.tar", "--file",
-         "context/Dockerfile", "context"),
+        ("docker", "build", "--platform", "linux/arm64", "--output", "type=tar,dest=rootfs.tar", "--build-context",
+         "downloads=downloads", "--file", "context/Dockerfile", "context"),
         ("mke2fs", "-F", "-q", "-t", "ext4", "-L", "rootfs", "-d", "rootfs.tar", "rootfs.ext4", "4096M"),
         ("rm", "-f", "rootfs.tar"),
     ]
-    assert plan.downloads == {"vmlinux": LOCK.require("guest_kernel")}
+    assert plan.downloads["vmlinux"] == LOCK.require("guest_kernel") and len(plan.downloads) == 3
     assert plan.outputs == {"rootfs": "rootfs.ext4", "kernel": "vmlinux"}
     assert plan.manifest["boot_args"] == BOOT_ARGS
     assert plan.manifest["artifacts"] == {"chrome_130.0.6723.58": "1" * 64, "firefox_128.5.0esr": "2" * 64,
@@ -226,9 +230,10 @@ def test_dev_target_tags_the_same_build_as_a_container_image():
     tag = dev_image_tag(linux_image())
     assert tag == f"rlworld-dev/noble_browsers_v1:{spec_digest(linux_image())[7:19]}"
     assert [command.argv for command in dev_plan.commands] == [
-        ("docker", "build", "--platform", "linux/amd64", "--tag", tag, "--iidfile", "image.id", "--file",
-         "context/Dockerfile", "context")]
-    assert dev_plan.downloads == {} and dev_plan.outputs == {"image_id": "image.id"}
+        ("docker", "build", "--platform", "linux/amd64", "--tag", tag, "--iidfile", "image.id", "--build-context",
+         "downloads=downloads", "--file", "context/Dockerfile", "context")]
+    assert dev_plan.downloads == {path: artifact for path, artifact in vm_plan.downloads.items() if path != "vmlinux"}
+    assert dev_plan.outputs == {"image_id": "image.id"}
     assert dev_plan.manifest["image_tag"] == tag and dev_plan.manifest["agent_transport"] == "tcp"
     assert "guest_kernel" not in dev_plan.manifest["artifacts"] and "boot_args" not in dev_plan.manifest
     assert dev_plan.copies == vm_plan.copies

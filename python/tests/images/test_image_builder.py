@@ -43,6 +43,11 @@ def fixed_clock():
     return BUILT_AT
 
 
+def calc_image():
+    """An image whose apps all come from apt, so the build fetches nothing but the kernel."""
+    return linux_image(apps={"libreoffice": "4:24.2.7-0ubuntu0.24.04.1"}, ready_probe={"window": "Calc"})
+
+
 def linux_inputs(tmp_path):
     wheel = tmp_path / "dist" / "rlworld-0.1.0-py3-none-any.whl"
     requirements = tmp_path / "dist" / "guest.txt"
@@ -57,7 +62,7 @@ def test_builder_runs_the_plan_and_records_a_manifest(tmp_path):
     runner = RecordingRunner(creates={"mke2fs": {"rootfs.ext4": b"ext4 image"}})
     fetcher = RecordingFetcher(KERNEL)
     work = tmp_path / "work"
-    manifest = ImageBuilder(runner, fetcher, clock=fixed_clock).build(linux_image(), config, LOCK_WITH_REAL_KERNEL,
+    manifest = ImageBuilder(runner, fetcher, clock=fixed_clock).build(calc_image(), config, LOCK_WITH_REAL_KERNEL,
                                                                      work)
     assert (work / "context" / "Dockerfile").read_text().startswith("# syntax=docker/dockerfile:1\n")
     assert (work / "context" / "inputs" / "rlworld-0.1.0-py3-none-any.whl").read_bytes() == b"wheel"
@@ -65,7 +70,7 @@ def test_builder_runs_the_plan_and_records_a_manifest(tmp_path):
     assert [command[0][0] for command in runner.commands] == ["docker", "mke2fs", "rm"]
     assert all(command[1] == work for command in runner.commands)
     assert fetcher.fetched == [("https://kernels.example/vmlinux-6.1", work / "vmlinux")]
-    assert manifest["image_digest"] == spec_digest(linux_image())
+    assert manifest["image_digest"] == spec_digest(calc_image())
     assert manifest["built_at"] == BUILT_AT.isoformat()
     assert manifest["outputs"]["rootfs"] == {"path": "rootfs.ext4", "sha256": hashlib.sha256(b"ext4 image").hexdigest(),
                                              "bytes": len(b"ext4 image")}
@@ -100,11 +105,22 @@ def test_downloads_already_in_place_are_reused(tmp_path):
     (work / "vmlinux").write_bytes(KERNEL)
     fetcher = RecordingFetcher(KERNEL)
     builder = ImageBuilder(RecordingRunner(creates={"mke2fs": {"rootfs.ext4": b"ext4"}}), fetcher, clock=fixed_clock)
-    builder.build(linux_image(), config, LOCK_WITH_REAL_KERNEL, work)
+    builder.build(calc_image(), config, LOCK_WITH_REAL_KERNEL, work)
     assert fetcher.fetched == []
     (work / "vmlinux").write_bytes(b"stale kernel")
-    builder.build(linux_image(), config, LOCK_WITH_REAL_KERNEL, work)
+    builder.build(calc_image(), config, LOCK_WITH_REAL_KERNEL, work)
     assert len(fetcher.fetched) == 1 and (work / "vmlinux").read_bytes() == KERNEL
+
+
+def test_app_downloads_are_fetched_on_the_host_and_reach_docker_as_a_build_context(tmp_path):
+    runner = RecordingRunner(creates={"docker": {"image.id": b"sha256:1234"}})
+    fetcher = RecordingFetcher(b"archive")
+    work = tmp_path / "work"
+    ImageBuilder(runner, fetcher, clock=fixed_clock).build(linux_image(), linux_inputs(tmp_path), LOCK, work,
+                                                          target="dev")
+    assert sorted(destination.relative_to(work).as_posix() for _, destination in fetcher.fetched) == [
+        "downloads/chrome_130.0.6723.58/chrome-linux64.zip", "downloads/firefox_128.5.0esr/firefox-128.5.0esr.tar.xz"]
+    assert "--build-context" in runner.commands[0][0] and "downloads=downloads" in runner.commands[0][0]
 
 
 def test_files_an_earlier_plan_left_never_reach_the_next_build(tmp_path):
@@ -127,7 +143,7 @@ def test_builds_that_produce_nothing_fail(tmp_path):
 def test_dev_builds_record_the_container_image(tmp_path):
     runner = RecordingRunner(creates={"docker": {"image.id": b"sha256:1234"}})
     fetcher = RecordingFetcher(KERNEL)
-    manifest = ImageBuilder(runner, fetcher, clock=fixed_clock).build(linux_image(), linux_inputs(tmp_path), LOCK,
+    manifest = ImageBuilder(runner, fetcher, clock=fixed_clock).build(calc_image(), linux_inputs(tmp_path), LOCK,
                                                                      tmp_path / "work", target="dev")
     assert manifest["target"] == "dev" and fetcher.fetched == []
     assert manifest["outputs"]["image_id"]["sha256"] == hashlib.sha256(b"sha256:1234").hexdigest()
