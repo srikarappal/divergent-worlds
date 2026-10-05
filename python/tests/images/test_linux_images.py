@@ -49,6 +49,7 @@ def test_downloads_are_checked_against_the_lock_before_apps_install():
     assert f"-o {firefox_path} 'https://ftp.example/firefox-128.5.0esr.tar.xz?product=esr'" in dockerfile
     assert dockerfile.index("sha256sum --check") < dockerfile.index(f"unzip -q {chrome_path} -d /opt")
     assert f"tar -xf {firefox_path} -C /opt" in dockerfile
+    assert dockerfile.index("userdel --remove ubuntu") < dockerfile.index("useradd --create-home --uid 1000")
     assert dockerfile.index("useradd --create-home --uid 1000") < dockerfile.index("unzip -q")
 
 

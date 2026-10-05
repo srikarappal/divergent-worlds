@@ -360,7 +360,9 @@ def render_dockerfile(image: ImageSpec, config: LinuxBuildConfig, apps: Mapping[
                   f"apt-get -o Acquire::Check-Valid-Until=false {bootstrap_ca_option} update",
                   f"apt-get {bootstrap_ca_option} install -y --no-install-recommends {' '.join(packages)}"]),
         run_step([f"localedef -i {locale} -f UTF-8 {locale}.UTF-8", f"update-locale LANG={locale}.UTF-8"]),
-        run_step([f"useradd --create-home --uid 1000 --shell /bin/bash {config.user}", f"passwd --lock {config.user}"]),
+        # Ubuntu base images since 23.04 ship an ubuntu user holding UID 1000.
+        run_step(["if getent passwd ubuntu > /dev/null; then userdel --remove ubuntu; fi",
+                  f"useradd --create-home --uid 1000 --shell /bin/bash {config.user}", f"passwd --lock {config.user}"]),
     ]
     steps += [run_step(download_commands(name, artifact)) for name, artifact in downloads.items()]
     for recipe in apps.values():
