@@ -27,6 +27,8 @@ def test_dockerfile_starts_from_the_pinned_base_and_installs_from_snapshots_only
     assert ("apt-get -o Acquire::Check-Valid-Until=false"
             " -o Acquire::https::CaInfo=/tmp/rlworld/inputs/bootstrap_ca.pem update") in dockerfile
     assert "context/inputs/bootstrap_ca.pem" in plan.copies
+    assert text(plan, "context/rootfs/etc/apt/apt.conf.d/10rlworld-keep-overlay") == (
+        'Dpkg::Options { "--force-confdef"; "--force-confold"; };\n')
     assert text(plan, "context/rootfs/etc/apt/sources.list") == (
         "deb http://snapshot.ubuntu.com/ubuntu/20260301T000000Z noble main universe\n")
     install_line = next(line for line in dockerfile.splitlines() if "bootstrap_ca.pem install -y" in line)

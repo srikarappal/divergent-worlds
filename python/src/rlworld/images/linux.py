@@ -46,6 +46,8 @@ CA_PACKAGES = ("libnss3-tools",)
 # Snapshot mirrors redirect http to https before the base image has a CA bundle, so the first apt step trusts
 # the builder's pinned certifi bundle until ca-certificates is installed.
 BOOTSTRAP_CA = "bootstrap_ca.pem"
+# The overlay lands before apt, so dpkg keeps its files instead of stopping at a conffile prompt.
+KEEP_OVERLAY_CONFFILES = 'Dpkg::Options { "--force-confdef"; "--force-confold"; };\n'
 DOWNLOAD_DIRECTORY = "/tmp/rlworld/downloads"
 INPUT_DIRECTORY = "/tmp/rlworld/inputs"
 CA_DIRECTORY = "/usr/local/share/ca-certificates/rlworld"
@@ -292,6 +294,7 @@ def overlay_files(image: ImageSpec, config: LinuxBuildConfig, apps: Mapping[str,
     probe_window = image.ready_probe.window
     files = {
         "etc/apt/sources.list": "".join(f"{line}\n" for line in config.apt_sources),
+        "etc/apt/apt.conf.d/10rlworld-keep-overlay": KEEP_OVERLAY_CONFFILES,
         "etc/rlworld/desktop.env": desktop_environment(image.display.locale),
         "etc/rlworld/Xresources": f"Xft.dpi: {image.display.dpi}\n",
         "etc/rlworld/hosts": "127.0.0.1 localhost\n::1 localhost ip6-localhost ip6-loopback\n",
