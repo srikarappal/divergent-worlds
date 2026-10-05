@@ -246,3 +246,13 @@ def test_dev_init_hides_the_token_before_starting_anything():
     assert agent.startswith("exec /opt/rlworld/bin/rlworld-guest-agent --user agent --screen 1280x800 ")
     assert agent.endswith(f" --transport tcp --token-file {DEV_TOKEN_FILE} --container")
     assert "'--launcher=Calc=libreoffice --calc --nologo --norestore'" in agent
+
+
+def test_dev_init_holds_the_agent_back_until_the_ready_window_shows():
+    init = text(linux_dev_build_plan(linux_image(), linux_config(), LOCK, {}),
+                "context/dev/usr/local/bin/rlworld-dev-init")
+    lines = init.splitlines()
+    desktop_line = next(index for index, line in enumerate(lines) if "rlworld-desktop" in line)
+    wait_line = lines.index("until xdotool search --onlyvisible --name Chrome > /dev/null 2>&1; do")
+    assert desktop_line < wait_line < len(lines) - 1 and lines[-1].startswith("exec ")
+    assert lines[-2] == "sleep 0.5" and lines[wait_line - 1].startswith("deadline=$(( $(date +%s) + ")

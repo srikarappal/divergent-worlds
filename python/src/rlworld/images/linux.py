@@ -235,6 +235,21 @@ def guest_agent_argv(image: ImageSpec, config: LinuxBuildConfig, launchers: Mapp
             *(f"--launcher={window}={command}" for window, command in launchers.items())]
 
 
+def ready_wait(image: ImageSpec) -> str:
+    """Containers boot instead of restoring a snapshot taken at the ready probe, so the dev init holds the agent
+    back until the probe's window shows and the screen has had its stable time; the driver's wait for the agent
+    then waits for a ready desktop. A window that never shows only costs the probe's timeout."""
+    probe = image.ready_probe
+    if probe.window is None:
+        return ""
+    return (f"deadline=$(( $(date +%s) + {probe.timeout_s} ))\n"
+            f"until xdotool search --onlyvisible --name {shlex.quote(probe.window)} > /dev/null 2>&1; do\n"
+            '  [ "$(date +%s)" -lt "$deadline" ] || break\n'
+            "  sleep 0.5\n"
+            "done\n"
+            f"sleep {probe.screen_stable_ms / 1000}\n")
+
+
 def dev_init_script(image: ImageSpec, config: LinuxBuildConfig, launchers: Mapping[str, str]) -> str:
     """The dev container's init. The token goes into a root only file and leaves the environment before anything
     starts, so no process the policy can inspect holds it. Then it starts what the units start in a VM except the
@@ -252,6 +267,7 @@ def dev_init_script(image: ImageSpec, config: LinuxBuildConfig, launchers: Mappi
             f"install -d -m 0700 -o {config.user} -g {config.user} {RUNTIME_DIRECTORY}\n"
             f"runuser -u {config.user} -- {SESSION_BUS_COMMAND} &\n"
             f"runuser -u {config.user} -- sh -c 'cd \"$HOME\" && exec /usr/local/bin/rlworld-desktop' &\n"
+            f"{ready_wait(image)}"
             f"exec {agent}\n")
 
 
