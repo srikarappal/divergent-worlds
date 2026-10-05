@@ -3,6 +3,7 @@ from typing import Any
 import pytest
 
 from rlworld.specs import SpecValidationError, parse_spec_document, set_path
+from rlworld.specs.models import ClockSpec
 
 
 def assert_rejected(payload: dict[str, Any], expected_fragment: str) -> None:
@@ -17,6 +18,12 @@ def test_example_spec_parses(example_payload):
     assert document.task.allowed_actions == ["computer", "control"]
     assert document.run.group_size == 8
     assert document.world.clock.fixed.isoformat() == "2026-03-14T09:00:00"
+
+
+def test_fixed_clocks_reach_leases_in_rfc_3339_and_a_time_without_offset_is_utc():
+    assert ClockSpec(fixed="2026-03-14T09:00:00").lease_time() == "2026-03-14T09:00:00+00:00"
+    assert ClockSpec(fixed="2026-03-14T09:00:00-07:00").lease_time() == "2026-03-14T09:00:00-07:00"
+    assert ClockSpec().lease_time() is None
 
 
 def test_unpinned_base_image_is_rejected(example_payload):

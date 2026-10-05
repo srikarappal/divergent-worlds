@@ -120,7 +120,8 @@ class PlatformWorkers:
                                  self.entitlements, npc_simulator=colleagues, observer=observer)
         lease = LeaseSettings(run_id=run_id, tenant=self.tenants(run_id), cost_center=document.experiment.name,
                               policy_endpoint=document.run.policy.endpoint,
-                              shape=self.shapes[document.image.pool.vmm], licenses=tuple(document.image.licenses))
+                              shape=self.shapes[document.image.pool.vmm], licenses=tuple(document.image.licenses),
+                              world_time=document.world.clock.lease_time())
         return GroupRunner(self.fleet, episodes, lease, self.entitlements)
 
     def __call__(self, run_id: str, document: SpecDocument) -> RolloutWorker:

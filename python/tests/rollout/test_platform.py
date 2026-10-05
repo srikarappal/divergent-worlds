@@ -90,6 +90,7 @@ def test_platform_workers_play_with_the_runs_policy_on_its_images_pool(example_p
     assert (request.run_id, request.tenant, request.pool, request.memory_mib, request.vcpus, request.priority) == (
         "run_1", "tenant_of_run_1", "windows", 6144, 2, "eval")
     assert request.cost_center == document.experiment.name and request.endpoint == document.run.policy.endpoint
+    assert request.world_time == "2026-03-14T09:00:00+00:00"
     sent = gateway.requests[0]
     assert (sent.endpoint, sent.model, sent.run_id, sent.purpose) == (document.run.policy.endpoint,
                                                                      document.run.policy.model, "run_1", "policy")

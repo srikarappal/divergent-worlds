@@ -83,7 +83,7 @@ def test_a_recording_hands_over_a_dev_env_at_the_task_start_state(example_payloa
         session.session_id, "finance_lab", "linux_dev", "interactive", "authoring")
     assert (request.snapshot, request.memory_mib, request.vcpus, request.ttl_seconds) == (
         SNAPSHOT, 4096, 2, AUTHORING_LEASE_TTL_SECONDS)
-    assert request.world_time == "2026-03-14T09:00:00"
+    assert request.world_time == "2026-03-14T09:00:00+00:00"
     assert request.observation_kinds == ("screenshot", "accessibility_tree")
     lease_id = started.recording.lease_id
     assert (bench.fleet.world_root(lease_id) / "files" / "invoices.csv").exists()

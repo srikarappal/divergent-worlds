@@ -5,7 +5,7 @@ saved spec never changes underneath a run.
 """
 
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import (
@@ -111,6 +111,12 @@ class NetworkSpec(SpecModel):
 
 class ClockSpec(SpecModel):
     fixed: datetime | None = None
+
+    def lease_time(self) -> str | None:
+        """The fixed time in RFC 3339 as leases carry it to fleetd; a time without an offset is UTC."""
+        if self.fixed is None:
+            return None
+        return (self.fixed if self.fixed.tzinfo is not None else self.fixed.replace(tzinfo=UTC)).isoformat()
 
 
 class WorldSpec(SpecModel):

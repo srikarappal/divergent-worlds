@@ -59,13 +59,12 @@ class FreshEnvs:
 
     def lease(self) -> LeaseInfo:
         """An env at the task's start state: the instance's snapshot restored at the world's clock, setup injected."""
-        clock = self.document.world.clock.fixed
         request = LeaseGroupRequest(
             run_id=self.run_id, tenant=self.tenant, pool=self.shape.pool, priority=self.priority,
             endpoint=self.endpoint, snapshot=self.instance.snapshot, memory_mib=self.shape.memory_mib,
             vcpus=self.shape.vcpus, cpu_millicores=self.shape.cpu_millicores, cost_center=self.endpoint,
             ttl_seconds=self.ttl_seconds, host_scoped_licenses=self.shape.host_scoped_licenses,
-            world_time=clock.isoformat() if clock is not None else None,
+            world_time=self.document.world.clock.lease_time(),
             observation_kinds=tuple(self.instance.task.observation))
         lease = self.fleet.lease_group(request)[0]
         try:
