@@ -26,7 +26,7 @@ def main() -> None:
     agent = GuestAgent(
         screen=X11Screen(arguments.display),
         input_runner=DisplayCommandRunner(arguments.display),
-        accessibility=AtspiAccessibility(),
+        accessibility=AtspiAccessibility(arguments.user, arguments.session_bus, arguments.display),
         browser=CdpBrowser(arguments.cdp_endpoint),
         shell=UserShell(arguments.user, account.pw_dir, arguments.display),
         hygiene=SharedKernelHygiene() if arguments.container else SystemHygiene(),

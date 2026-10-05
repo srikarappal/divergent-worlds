@@ -6,6 +6,10 @@ from pathlib import Path
 
 from rlworld.guest.server import DEFAULT_PORT, DEFAULT_VNC_PORT, DEFAULT_VNC_SOCKET
 
+# The desktop session's runtime folder; its session bus answers only the desktop user.
+DESKTOP_RUNTIME_DIRECTORY = "/run/rlworld-desktop"
+DEFAULT_SESSION_BUS = f"unix:path={DESKTOP_RUNTIME_DIRECTORY}/bus"
+
 
 def launcher(text: str) -> tuple[str, str]:
     name, separator, command = text.partition("=")
@@ -38,6 +42,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--container", action="store_true", help="share the host kernel: leave the clock and RNG alone")
     parser.add_argument("--vnc-socket", type=Path, default=DEFAULT_VNC_SOCKET, help="the VNC server's Unix socket")
     parser.add_argument("--vnc-port", type=int, default=DEFAULT_VNC_PORT, help="vsock port for operator takeover")
+    parser.add_argument("--session-bus", default=DEFAULT_SESSION_BUS,
+                        help="the desktop user's session bus, where the accessibility helper finds its bus")
     return parser
 
 

@@ -32,6 +32,7 @@ from rlworld.images.config import (
     LinuxBuildConfig,
     locale_parts,
 )
+from rlworld.guest.options import DESKTOP_RUNTIME_DIRECTORY
 from rlworld.guest.server import DEFAULT_VNC_SOCKET
 from rlworld.images.recipes import DOWNLOAD_PLACEHOLDER, LinuxApp, linux_app
 from rlworld.network.plan import ENV_SUBNET, GATEWAY_ADDRESS, GUEST_ADDRESS
@@ -51,7 +52,7 @@ KEEP_OVERLAY_CONFFILES = 'Dpkg::Options { "--force-confdef"; "--force-confold"; 
 DOWNLOAD_DIRECTORY = "/tmp/rlworld/downloads"
 INPUT_DIRECTORY = "/tmp/rlworld/inputs"
 CA_DIRECTORY = "/usr/local/share/ca-certificates/rlworld"
-RUNTIME_DIRECTORY = "/run/rlworld-desktop"
+RUNTIME_DIRECTORY = DESKTOP_RUNTIME_DIRECTORY
 ACCESSIBILITY_BUS_CONFIG = "/usr/share/defaults/at-spi2/accessibility.conf"
 GUEST_AGENT = "/opt/rlworld/bin/rlworld-guest-agent"
 # The guest agent's Python, with openpyxl, that scripted oracles run as the desktop user.
