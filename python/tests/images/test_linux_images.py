@@ -225,7 +225,7 @@ def test_dev_target_tags_the_same_build_as_a_container_image():
 def test_the_screen_is_served_for_takeover_on_a_root_only_socket():
     plan = plan_for()
     unit = text(plan, "context/rootfs/etc/systemd/system/rlworld-vnc.service")
-    assert "ExecStart=/usr/bin/x11vnc -display :0 -unixsockonly /run/rlworld/vnc.sock" in unit
+    assert "ExecStart=/usr/bin/x11vnc -display :0 -unixsock /run/rlworld/vnc.sock -rfbport 0" in unit
     assert "RuntimeDirectoryMode=0700" in unit and "Requires=rlworld-xvfb.service" in unit
     assert "rlworld-vnc.service" in text(plan, "context/Dockerfile") and "x11vnc" in text(plan, "context/Dockerfile")
     init = text(linux_dev_build_plan(linux_image(), linux_config(), LOCK, {}),

@@ -63,7 +63,9 @@ ENABLED_UNITS = ("rlworld-network.service", "rlworld-xvfb.service", "rlworld-des
                  "rlworld-guest-agent.service", "rlworld-vnc.service")
 SESSION_BUS_COMMAND = (f"/usr/bin/dbus-daemon --session --address=unix:path={RUNTIME_DIRECTORY}/bus"
                        " --nofork --nopidfile")
-VNC_COMMAND = f"/usr/bin/x11vnc -display :0 -unixsockonly {DEFAULT_VNC_SOCKET} -forever -shared -nopw -noxdamage -quiet"
+# x11vnc 0.9.16 listens on the Unix socket alone once -rfbport 0 turns TCP off.
+VNC_COMMAND = (f"/usr/bin/x11vnc -display :0 -unixsock {DEFAULT_VNC_SOCKET} -rfbport 0 -forever -shared -nopw"
+               " -noxdamage -quiet")
 WAIT_FOR_DISPLAY = "while [ ! -S /tmp/.X11-unix/X0 ]; do sleep 0.1; done"
 DEV_TOKEN_FILE = "/run/rlworld/agent.token"
 DEV_AGENT_FLAGS = ("--transport", "tcp", "--token-file", DEV_TOKEN_FILE, "--container")
