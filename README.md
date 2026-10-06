@@ -1,5 +1,7 @@
 # divergent
 
+![divergent architecture: the web console and rollout workers over the control plane, the model gateway and reward service beside it, node agents running the env pools and the factory feeding them](docs/architecture.svg)
+
 divergent manufactures, runs, scores and replays worlds for training and evaluating computer use agents. It launches
 Linux and Windows microVMs from content addressed specs, seeds them with coherent synthetic companies (mail, files,
 chat, identities), lets any policy endpoint drive them and grades every episode with verifiers plus judge endpoints.
@@ -17,7 +19,7 @@ calls itself `rlworld`: the Python package, the Go module, the CLIs and the metr
 | `schemas/` | Shared contracts the Python, Go and TypeScript code is tested against: the spec JSON schema, the API operations and the metrics catalog. |
 | `examples/` | Specs, laptop configs for fleetd and experimentd, model endpoints and a judge rubric. |
 | `observability/` | The Prometheus scrape config, Grafana provisioning and the platform health dashboard. |
-| `docs/` | `DESIGN.md` and `TASKS.md`. |
+| `docs/` | `DESIGN.md`, `TASKS.md` and the architecture diagram above. |
 
 ## What to install
 

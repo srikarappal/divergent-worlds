@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900" viewBox="0 0 1200 900" role="img" aria-labelledby="title description">
+  <title id="title">divergent architecture</title>
+  <desc id="description">The web console and rollout workers call the control plane, made of experimentd and fleetd. Rollout workers act through the model gateway. fleetd forks, pauses and restores envs on node agents. The reward service pulls env state and calls the judge through the gateway. The factory supplies images, worlds and task start states.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#57606a"/>
+    </marker>
+    <style>
+      text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; fill: #424a53; }
+      .heading { font-size: 22px; font-weight: 700; fill: #1f2328; }
+      .subheading { font-size: 14px; fill: #57606a; }
+      .name { font-size: 17px; font-weight: 700; fill: #1f2328; }
+      .tag { font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #57606a; }
+      .body { font-size: 13.5px; }
+      .label { font-size: 13px; font-weight: 600; fill: #57606a; paint-order: stroke; stroke: #ffffff; stroke-width: 5px; stroke-linejoin: round; }
+      .flow { stroke: #57606a; stroke-width: 1.8; fill: none; }
+      .client { fill: #eef4ff; stroke: #4a72d9; }
+      .model { fill: #f5f0ff; stroke: #7b5bd6; }
+      .control { fill: #e8f6f1; stroke: #2f9e7f; }
+      .inner { fill: #ffffff; stroke: #2f9e7f; stroke-dasharray: 4 3; }
+      .hosts { fill: #fff4e8; stroke: #d9822b; }
+      .pool { fill: #ffffff; stroke: #d9822b; }
+      .factory { fill: #f3f4f6; stroke: #6b7280; }
+      rect { stroke-width: 1.5; }
+    </style>
+  </defs>
+
+  <rect x="0.75" y="0.75" width="1198.5" height="898.5" rx="14" fill="#ffffff" stroke="#d0d7de" stroke-width="1.5"/>
+  <text x="40" y="46" class="heading">Architecture</text>
+  <text x="182" y="46" class="subheading">DESIGN.md section 5, with the code that implements each part</text>
+
+  <!-- Row 1: clients and the model gateway -->
+  <rect x="40" y="76" width="290" height="150" rx="10" class="client"/>
+  <text x="58" y="104" class="name">Web console</text>
+  <text x="58" y="124" class="tag">console/ (React)</text>
+  <text x="58" y="154" class="body">configure, preflight, launch</text>
+  <text x="58" y="176" class="body">watch live, take over an env</text>
+  <text x="58" y="198" class="body">review, label, admin</text>
+
+  <rect x="360" y="76" width="290" height="150" rx="10" class="client"/>
+  <text x="378" y="104" class="name">Rollout workers</text>
+  <text x="378" y="124" class="tag">rlworld.rollout</text>
+  <text x="378" y="154" class="body">in trainer jobs for RL runs</text>
+  <text x="378" y="176" class="body">platform hosted for eval and data</text>
+  <text x="378" y="198" class="body">episode loop, groups, forks</text>
+
+  <rect x="800" y="76" width="360" height="150" rx="10" class="model"/>
+  <text x="818" y="104" class="name">Model gateway</text>
+  <text x="818" y="124" class="tag">rlworld.gateway</text>
+  <text x="818" y="154" class="body">policy: own vLLM or SGLang, frontier, BYO</text>
+  <text x="818" y="176" class="body">judge: frontier or custom</text>
+  <text x="818" y="198" class="body">retries, rate limits, caching, metering</text>
+
+  <!-- Row 2: control plane and reward service -->
+  <rect x="40" y="290" width="610" height="196" rx="10" class="control"/>
+  <text x="58" y="318" class="name">Control plane API</text>
+  <rect x="58" y="332" width="300" height="138" rx="8" class="inner"/>
+  <text x="74" y="356" class="tag">experimentd (Python)</text>
+  <text x="74" y="382" class="body">specs, runs, sweeps, launcher</text>
+  <text x="74" y="404" class="body">task registry, curriculum sampler</text>
+  <text x="74" y="426" class="body">identity and license broker</text>
+  <text x="74" y="448" class="body">trajectory store, live streams</text>
+  <rect x="372" y="332" width="262" height="138" rx="8" class="inner"/>
+  <text x="388" y="356" class="tag">fleetd (Go)</text>
+  <text x="388" y="382" class="body">scheduler, leases, quotas</text>
+  <text x="388" y="404" class="body">warm pools, snapshot store</text>
+  <text x="388" y="426" class="body">env API: step, fork, finish</text>
+  <text x="388" y="448" class="body">takeover relay, metrics</text>
+
+  <rect x="800" y="318" width="360" height="152" rx="10" class="model"/>
+  <text x="818" y="346" class="name">Reward service</text>
+  <text x="818" y="366" class="tag">rlworld.rewards, rlworld.judge</text>
+  <text x="818" y="396" class="body">exact, semantic and judge tiers</text>
+  <text x="818" y="418" class="body">side effect gates on world diffs</text>
+  <text x="818" y="440" class="body">reward records with provenance</text>
+
+  <!-- Row 3: node agents and env pools -->
+  <rect x="40" y="552" width="1120" height="192" rx="10" class="hosts"/>
+  <text x="58" y="580" class="name">Node agents on bare metal KVM hosts</text>
+  <text x="378" y="580" class="tag">fleet/internal/nodeagent, rlworld.guest</text>
+  <rect x="58" y="596" width="352" height="96" rx="8" class="pool"/>
+  <text x="74" y="620" class="tag">Firecracker pool</text>
+  <text x="74" y="646" class="body">Linux GUI envs: Xfce, LibreOffice,</text>
+  <text x="74" y="668" class="body">Firefox, Thunderbird, chat</text>
+  <rect x="424" y="596" width="352" height="96" rx="8" class="pool"/>
+  <text x="440" y="620" class="tag">QEMU templated pool</text>
+  <text x="440" y="646" class="body">Windows envs: Excel, Edge</text>
+  <text x="440" y="668" class="body">in session helper for UIA and COM</text>
+  <rect x="790" y="596" width="352" height="96" rx="8" class="pool"/>
+  <text x="806" y="620" class="tag">Docker dev pool</text>
+  <text x="806" y="646" class="body">the same Linux images as containers</text>
+  <text x="806" y="668" class="body">for an end to end loop on a laptop</text>
+  <text x="58" y="722" class="body">per env private network: sidecars, fake DNS and CA, replay proxy, IdP</text>
+
+  <!-- Row 4: factory -->
+  <rect x="40" y="808" width="1120" height="64" rx="10" class="factory"/>
+  <text x="58" y="836" class="name">Factory</text>
+  <text x="58" y="857" class="tag">rlworld.images, rlworld.worlds, rlworld.tasks</text>
+  <text x="430" y="846" class="body">image builder, world generators, task generators, validation gates</text>
+
+  <!-- Flows -->
+  <line x1="185" y1="226" x2="185" y2="288" class="flow" marker-end="url(#arrow)"/>
+  <text x="197" y="263" class="label">API</text>
+
+  <line x1="505" y1="226" x2="505" y2="288" class="flow" marker-end="url(#arrow)"/>
+  <text x="517" y="263" class="label">env API</text>
+
+  <line x1="652" y1="151" x2="798" y2="151" class="flow" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="725" y="141" class="label" text-anchor="middle">act</text>
+
+  <line x1="980" y1="316" x2="980" y2="228" class="flow" marker-end="url(#arrow)"/>
+  <text x="992" y="277" class="label">judge calls</text>
+
+  <line x1="503" y1="486" x2="503" y2="550" class="flow" marker-end="url(#arrow)"/>
+  <text x="515" y="523" class="label">fork, pause, restore</text>
+
+  <line x1="980" y1="552" x2="980" y2="472" class="flow" marker-end="url(#arrow)"/>
+  <text x="992" y="517" class="label">state pull</text>
+
+  <line x1="600" y1="808" x2="600" y2="746" class="flow" marker-end="url(#arrow)"/>
+  <text x="612" y="783" class="label">images, worlds, task start states</text>
+</svg>
