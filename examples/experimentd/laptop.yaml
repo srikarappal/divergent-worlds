@@ -7,7 +7,7 @@ port: 8080
 public_url: http://127.0.0.1:8080
 fleet_url: http://127.0.0.1:8700
 state_dir: /tmp/rlworld/experimentd
-object_store_dir: /tmp/rlworld/objects
+object_store_dir: ../../data/trajectories    # trajectories and frames, beside fleetd's
 endpoints_file: endpoints.yaml
 pools:
   firecracker: {pool: linux, memory_mib: 1536, vcpus: 2}

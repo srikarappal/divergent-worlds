@@ -6,7 +6,7 @@
   "reserved": {"interactive": 1},
   "lease_ttl_seconds": 300,
   "state_dir": "/tmp/rlworld/fleetd",
-  "object_store_dir": "/tmp/rlworld/objects",
+  "object_store_dir": "../../data/trajectories",
   "guest_timeout_seconds": 30,
   "docker": {
     "security_options": ["seccomp=unconfined"],

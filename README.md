@@ -128,7 +128,9 @@ uv run rlworld runs list
 ```
 
 The gates need no model: the oracle and rerun gates play the task's scripted solution in fresh envs and should score
-1.0. The console shows the same runs with their episodes, frames and live takeover. `uv run rlworld --help` lists
+1.0. Trajectories land in `data/trajectories` at the repo root, which git ignores: `runs/<run>/episodes/<episode>/`
+holds each episode and its steps and `blobs/` the frames. The console shows the same runs with their episodes,
+frames and live takeover. `uv run rlworld --help` lists
 every command. `RLWORLD_API_URL` points the CLI and the console at another experimentd; `RLWORLD_FLEET_URL` points
 the console at another fleetd.
 

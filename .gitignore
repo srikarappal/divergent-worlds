@@ -18,6 +18,9 @@ console/dist/
 .env
 .env.*
 
+# Trajectories, frames and other local run data
+data/
+
 # OS and editors
 .DS_Store
 .idea/
