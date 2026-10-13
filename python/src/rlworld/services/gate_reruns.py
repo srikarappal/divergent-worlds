@@ -80,7 +80,8 @@ class GateReruns:
                  fleet: RerunFleet, review_service: ReviewService, shapes: Mapping[str, EnvShape],
                  catalog_service: CatalogService | None = None, judge: JudgeTier | None = None,
                  solvability: SolvabilityProbe | None = None, gate_config: GateConfig | None = None,
-                 worlds: WorldPreparer | None = None, clock: Callable[[], float] = time.time) -> None:
+                 worlds: WorldPreparer | None = None, clock: Callable[[], float] = time.time,
+                 first_run_number: int = 1) -> None:
         self.experiment_service = experiment_service
         self.registry = registry
         self.reports = reports
@@ -93,7 +94,7 @@ class GateReruns:
         self.gate_config = gate_config or GateConfig()
         self.worlds = worlds
         self.clock = clock
-        self.run_numbers = itertools.count(1)
+        self.run_numbers = itertools.count(first_run_number)
         self.failed: dict[tuple[str, str], str] = {}
         self.lock = threading.Lock()
 

@@ -119,6 +119,7 @@ class ExperimentService:
         token_ttl_seconds: float = 7 * 86_400,
         clock: Callable[[], float] = time.time,
         run_snapshots: RunSnapshotPreparer | None = None,
+        first_experiment_number: int = 1,
     ) -> None:
         if not token_secret:
             raise ValueError("run tokens need a signing secret")
@@ -137,7 +138,7 @@ class ExperimentService:
         self.runs: dict[str, RunRecord] = {}
         self.run_documents: dict[str, SpecDocument] = {}
         self.events: dict[str, list[RunEvent]] = {}
-        self.experiment_counter = itertools.count(1)
+        self.experiment_counter = itertools.count(first_experiment_number)
         self.lock = threading.RLock()
 
     def save_spec(self, yaml_text: str) -> str:

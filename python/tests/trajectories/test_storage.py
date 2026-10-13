@@ -10,6 +10,7 @@ from rlworld.trajectories import (
     put_blob,
 )
 from rlworld.trajectories.object_store import blob_key
+from rlworld.trajectories.trajectory_store import first_free_number
 
 
 @pytest.fixture(params=["memory", "filesystem"])
@@ -78,3 +79,13 @@ def test_listing_episodes_per_run(object_store):
     assert [loaded.episode_id for loaded in trajectory_store.iter_episodes("run_1")] == ["episode_a", "episode_b"]
     with pytest.raises(ValueError):
         trajectory_store.list_episode_ids("../run_1")
+
+
+def test_saved_runs_list_and_new_ids_continue_after_the_highest_saved_one(object_store):
+    for run_id in ("dry_run_000004", "experiment_000002_run_001", "dry_run_000011"):
+        object_store.put_bytes(f"runs/{run_id}/episodes/{run_id}_s000_a0/episode.json", b"{}")
+    run_ids = TrajectoryStore(object_store).run_ids()
+    assert run_ids == ["dry_run_000004", "dry_run_000011", "experiment_000002_run_001"]
+    assert first_free_number(run_ids, "dry_run") == 12
+    assert first_free_number(run_ids, "experiment") == 3
+    assert first_free_number(run_ids, "gate_rerun") == 1

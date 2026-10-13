@@ -100,6 +100,16 @@ def test_configs_refuse_unknown_fields_and_secrets_come_only_from_the_environmen
         build_experimentd(vaulted, SECRETS)
 
 
+def test_a_restarted_experimentd_never_reuses_the_run_ids_of_saved_trajectories(tmp_path):
+    for run_id in ("dry_run_000003", "experiment_000007_run_000"):
+        saved = tmp_path / "objects" / "runs" / run_id / "episodes" / f"{run_id}_s000_a0"
+        saved.mkdir(parents=True)
+        (saved / "episode.json").write_text("{}")
+    experimentd = build_experimentd(laptop_config(tmp_path), SECRETS, fleet=FakeFleet(), transport=ScriptedTransport())
+    assert next(experimentd.executor.dry_run_numbers) == 4
+    assert next(experimentd.experiment_service.experiment_counter) == 8
+
+
 def test_experimentd_plays_an_eval_run_from_spec_to_episodes(tmp_path):
     fleet, transport, launches = FakeFleet(), ScriptedTransport(), RecordingLaunches()
     experimentd = build_experimentd(laptop_config(tmp_path), SECRETS, fleet=fleet, transport=transport,

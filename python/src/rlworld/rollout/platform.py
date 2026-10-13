@@ -151,10 +151,10 @@ class PlatformSolvabilityProbe:
     """The solvability gate's strong agent (DESIGN.md 6.10): a strong model plays the task tries times, each try
     in a fresh env forked from the task start state; the gates grade the states it left."""
 
-    def __init__(self, workers: PlatformWorkers, agent: EndpointSpec) -> None:
+    def __init__(self, workers: PlatformWorkers, agent: EndpointSpec, first_run_number: int = 1) -> None:
         self.workers = workers
         self.agent = agent
-        self.run_numbers = itertools.count(1)
+        self.run_numbers = itertools.count(first_run_number)
 
     def attempts(self, document: SpecDocument, instance: TaskInstance, tries: int) -> list[SolutionAttempt]:
         run_id = f"solvability_{next(self.run_numbers):06d}"

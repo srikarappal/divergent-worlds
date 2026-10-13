@@ -329,11 +329,11 @@ WorkerFactory = Callable[[str, SpecDocument], RolloutWorker]
 class PlatformRunExecutor:
     """experimentd's RunExecutor: platform hosted rollout workers for eval and data runs plus dry runs."""
 
-    def __init__(self, build_worker: WorkerFactory) -> None:
+    def __init__(self, build_worker: WorkerFactory, first_dry_run_number: int = 1) -> None:
         self.build_worker = build_worker
         self.workers: dict[str, RolloutWorker] = {}
         self.threads: dict[str, threading.Thread] = {}
-        self.dry_run_numbers = itertools.count(1)
+        self.dry_run_numbers = itertools.count(first_dry_run_number)
         self.lock = threading.Lock()
 
     def start(self, run: RunRecord, document: SpecDocument) -> None:

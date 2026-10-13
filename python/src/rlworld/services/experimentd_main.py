@@ -91,7 +91,7 @@ from rlworld.tasks.registry import (
     default_task_registry,
 )
 from rlworld.trajectories.object_store import FilesystemObjectStore
-from rlworld.trajectories.trajectory_store import TrajectoryStore
+from rlworld.trajectories.trajectory_store import TrajectoryStore, first_free_number
 
 LOGGER = logging.getLogger(__name__)
 GATEWAY_TIMEOUT_SECONDS = 600.0
@@ -407,13 +407,16 @@ def build_experimentd(config: ExperimentdConfig, environment: Mapping[str, str],
     workers = PlatformWorkers(fleet, gateway, trajectory_store, task_registry, snapshots, shapes, default_tenant,
                               judge_secret, rubric_library, simulator, broker, meter, worlds=worlds,
                               screen=benchmark_screen(config.splits), metrics=metrics)
-    executor = PlatformRunExecutor(workers)
+    # Saved trajectories outlive experimentd, so its run ids continue after the highest one already stored.
+    saved_runs = trajectory_store.run_ids()
+    executor = PlatformRunExecutor(workers, first_dry_run_number=first_free_number(saved_runs, "dry_run"))
     launcher = TrainerLauncher(trainer_templates(config), launch_runner or SubprocessCommandRunner(),
                                config.state_dir / "launches")
     run_snapshots = RunSnapshots(fleet, snapshots, shapes, worlds) if config.snapshot_store else None
     experiment_service = ExperimentService(preflight_context, executor, launcher, run_token_secret, config.fleet_url,
                                            config.public_url, config.approval_threshold_usd,
-                                           run_snapshots=run_snapshots)
+                                           run_snapshots=run_snapshots,
+                                           first_experiment_number=first_free_number(saved_runs, "experiment"))
     # The workers and the policy store serve the experiment service they are built for, so it is set on them now.
     workers.control, workers.tenants = experiment_service, experiment_service.tenant_of_run
     policies.tenant_of_run = experiment_service.tenant_of_run
@@ -425,12 +428,15 @@ def build_experimentd(config: ExperimentdConfig, environment: Mapping[str, str],
     retention = RetentionSweeper(views, policies)
     alerts = AlertMonitor(experiment_service, views, review, alert_channels(config, environment, http_client),
                           console_url=config.alerts.console_url)
-    solvability = PlatformSolvabilityProbe(workers, config.strong_agent) if config.strong_agent else None
+    solvability = (PlatformSolvabilityProbe(workers, config.strong_agent,
+                                            first_run_number=first_free_number(saved_runs, "solvability"))
+                   if config.strong_agent else None)
     gate_judge = judge_tier(config, gateway, rubric_library, judge_secret)
     authoring = AuthoringService(experiment_service, task_registry, snapshots, fleet, review, shapes, judge=gate_judge,
                                  solvability=solvability, gate_reports=gate_reports, worlds=worlds)
     reruns = (GateReruns(experiment_service, task_registry, gate_reports, fleet, review, shapes,
-                         catalog_service=catalogs, judge=gate_judge, solvability=solvability, worlds=worlds)
+                         catalog_service=catalogs, judge=gate_judge, solvability=solvability, worlds=worlds,
+                         first_run_number=first_free_number(saved_runs, "gate_rerun"))
               if config.snapshot_store else None)
     app = create_app(experiment_service, catalog_service=catalogs,
                      endpoint_service=EndpointService(registry, vault, probe), trajectory_views=views,

@@ -6,7 +6,7 @@ episodes; finish rewrites it with the reward and the final state.
 
 import json
 import re
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from datetime import datetime, timezone
 from typing import Any
 
@@ -29,6 +29,14 @@ def check_identifier(identifier: str) -> str:
 
 def episode_prefix(run_id: str, episode_id: str) -> str:
     return f"runs/{check_identifier(run_id)}/episodes/{check_identifier(episode_id)}"
+
+
+def first_free_number(run_ids: Iterable[str], prefix: str) -> int:
+    """The number after the highest prefix_<number> run already stored, so ids a restart hands out never overwrite
+    saved trajectories."""
+    pattern = re.compile(rf"{re.escape(prefix)}_(\d+)")
+    numbers = [int(match.group(1)) for run_id in run_ids if (match := pattern.match(run_id))]
+    return max(numbers, default=0) + 1
 
 
 def step_number(step_key: str) -> int:
@@ -82,6 +90,9 @@ class TrajectoryStore:
         if with_steps:
             episode = episode.model_copy(update={"steps": self.load_steps(run_id, episode_id)})
         return episode
+
+    def run_ids(self) -> list[str]:
+        return sorted({run_key.split("/")[1] for run_key in self.object_store.list_keys("runs/")})
 
     def list_episode_ids(self, run_id: str) -> list[str]:
         episode_keys = self.object_store.list_keys(f"runs/{check_identifier(run_id)}/episodes/")
