@@ -36,6 +36,9 @@ from rlworld.actions.models import (
 )
 
 BOX_TOKEN_PATTERN = re.compile(r"<\|box_(?:start|end)\|>")
+# Qwen3 models may repeat their action as a native tool call after the Action line, or give only the tool call.
+TOOL_CALL_PATTERN = re.compile(r"<tool_call>(.*?)(?:</tool_call>|\Z)", re.DOTALL)
+TOOL_PARAMETER_PATTERN = re.compile(r"<parameter=(\w+)>\s*(.*?)\s*</parameter>", re.DOTALL)
 THOUGHT_PATTERN = re.compile(r"Thought:(.*?)(?=\n\s*Action:|\Z)", re.DOTALL)
 NUMBER_PATTERN = re.compile(r"-?\d+(?:\.\d+)?")
 ACTION_MARKER = "Action:"
@@ -108,6 +111,8 @@ class TextActionAdapter:
         if not isinstance(raw_output, str):
             raise ActionParseError("text_actions output must be a string")
         cleaned_text = BOX_TOKEN_PATTERN.sub("", raw_output)
+        tool_calls = TOOL_CALL_PATTERN.findall(cleaned_text)
+        cleaned_text = TOOL_CALL_PATTERN.sub("", cleaned_text)
         thought_match = THOUGHT_PATTERN.search(cleaned_text)
         thought = thought_match.group(1).strip() if thought_match else ""
         if ACTION_MARKER in cleaned_text:
@@ -115,6 +120,9 @@ class TextActionAdapter:
         else:
             action_text = THOUGHT_PATTERN.sub("", cleaned_text)
         call_texts = [call_text.strip() for call_text in split_calls(action_text) if call_text.strip()]
+        if not call_texts:
+            call_texts = [native_call_text(tool_call) for tool_call in tool_calls
+                          if TOOL_PARAMETER_PATTERN.search(tool_call)]
         if not call_texts:
             raise ActionParseError("no action found in model output")
         return [self.parse_call(call_text, thought, geometry) for call_text in call_texts]
@@ -199,6 +207,15 @@ class TextActionAdapter:
             case AskUserAction():
                 return "call_user()"
         raise ActionRenderError(f"text_actions cannot render {action.name}")
+
+
+def native_call_text(tool_call: str) -> str:
+    """A Qwen native tool call, <parameter=action>click</parameter><parameter=start_box>[38, 16]</parameter>, as
+    the text action call click(start_box='[38, 16]')."""
+    parameters = dict(TOOL_PARAMETER_PATTERN.findall(tool_call))
+    function_name = parameters.pop("action", "")
+    arguments = ", ".join(f"{name}={quote_text(value)}" for name, value in parameters.items())
+    return f"{function_name}({arguments})"
 
 
 def split_calls(action_text: str) -> list[str]:

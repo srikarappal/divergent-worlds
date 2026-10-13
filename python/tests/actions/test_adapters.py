@@ -3,7 +3,7 @@
 import pytest
 
 from rlworld.actions.adapters import AdapterCapabilityError, get_adapter, supported_modalities
-from rlworld.actions.models import parse_action
+from rlworld.actions.models import ClickAction, parse_action
 
 FUNCTION_ACTIONS = [
     {"name": "goto", "url": "https://shop.example.com/cart"},
@@ -126,6 +126,31 @@ def test_text_action_space_lists_only_allowed_modalities():
     assert (computer_only["screen_width"], computer_only["screen_height"]) == (1932, 1092)
     assert not any(line.startswith("finished") for line in computer_only["actions"])
     assert any(line.startswith("finished") for line in with_control["actions"])
+
+
+QWEN_REPLY = """Thought: Open the applications menu to find a terminal.
+
+Action: click(start_box='(38, 16)')
+
+<tool_call>
+<function=computer_use>
+<parameter=action>
+click
+</parameter>
+<parameter=start_box>
+[38, 16]
+</parameter>
+</function>
+</tool_call>"""
+
+
+def test_qwen_native_tool_calls_never_double_or_break_text_actions():
+    adapter = get_adapter("text_actions", coordinate_mode="relative_1000")
+    geometry = adapter.model_geometry(1280, 800)
+    expected = [ClickAction(x=49, y=13)]
+    assert adapter.parse_output(QWEN_REPLY, geometry) == expected
+    tool_call_only = QWEN_REPLY.split("Action:", 1)[1].split("\n", 2)[2]
+    assert adapter.parse_output(tool_call_only, geometry) == expected
 
 
 def test_text_actions_cannot_express_terminal_tasks():
