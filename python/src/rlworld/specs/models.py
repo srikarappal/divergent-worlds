@@ -31,6 +31,9 @@ LinuxDesktop = Literal["openbox", "xfce"]
 VmmKind = Literal["firecracker", "qemu_templated", "cloud_windows", "apple_virtualization", "cuttlefish"]
 ActionModality = Literal["computer", "browser", "terminal", "native", "control"]
 ActionFormat = Literal["computer_tool", "typed_actions", "text_actions"]
+# Text action models point in pixels of the resized screenshot (Qwen2.5 VL, UI TARS) or on a 1000 by 1000 grid
+# (Qwen3 VL and later).
+CoordinateMode = Literal["absolute_resized", "relative_1000"]
 ObservationKind = Literal["screenshot", "accessibility_tree", "dom", "terminal", "file_diff"]
 
 VMM_KINDS_BY_OS: dict[str, frozenset[str]] = {
@@ -205,6 +208,7 @@ class EndpointSpec(SpecModel):
     endpoint: str
     model: str
     action_format: ActionFormat | None = None
+    coordinate_mode: CoordinateMode = "absolute_resized"
     token_ids: bool = False
     logprobs: bool = False
     temperature: float = Field(default=1.0, ge=0.0, le=2.0)
@@ -214,6 +218,8 @@ class EndpointSpec(SpecModel):
     def check_pinned_model(self) -> "EndpointSpec":
         if "latest" in self.model.lower():
             raise ValueError(f"model {self.model!r} looks like a moving alias, pin an exact version")
+        if self.coordinate_mode != "absolute_resized" and self.action_format != "text_actions":
+            raise ValueError("coordinate_mode applies to the text_actions format only")
         return self
 
 

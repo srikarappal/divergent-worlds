@@ -35,6 +35,18 @@ def test_linux_images_pick_their_desktop_and_other_images_keep_the_default(examp
     assert_rejected(windows_payload, "desktop xfce only applies to linux images")
 
 
+def test_only_text_action_policies_point_on_a_relative_grid(example_payload):
+    policy = example_payload["run"]["policy"]
+    relative = {**example_payload, "run": {**example_payload["run"],
+                                           "policy": {**policy, "action_format": "text_actions",
+                                                      "coordinate_mode": "relative_1000"}}}
+    assert parse_spec_document(relative).run.policy.coordinate_mode == "relative_1000"
+    typed = {**example_payload, "run": {**example_payload["run"],
+                                        "policy": {**policy, "action_format": "typed_actions",
+                                                   "coordinate_mode": "relative_1000"}}}
+    assert_rejected(typed, "coordinate_mode applies to the text_actions format only")
+
+
 def test_unpinned_base_image_is_rejected(example_payload):
     assert_rejected(set_path(example_payload, "image.base", "windows_server_2025_desktop:stable"), "pinned")
 

@@ -132,6 +132,15 @@
           "default": null,
           "title": "Action Format"
         },
+        "coordinate_mode": {
+          "default": "absolute_resized",
+          "enum": [
+            "absolute_resized",
+            "relative_1000"
+          ],
+          "title": "Coordinate Mode",
+          "type": "string"
+        },
         "endpoint": {
           "title": "Endpoint",
           "type": "string"

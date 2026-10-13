@@ -98,6 +98,16 @@ def test_platform_workers_play_with_the_runs_policy_on_its_images_pool(example_p
     assert runner.episode_runner.npc_simulator is None
 
 
+def test_text_action_policies_point_on_the_grid_their_spec_names(example_payload):
+    payload = copy.deepcopy(example_payload)
+    payload["run"]["policy"] = {**payload["run"]["policy"], "action_format": "text_actions",
+                                "coordinate_mode": "relative_1000"}
+    document = rollout_document(payload, run_updates={"type": "eval", "group_size": 1})
+    runner = platform_workers(document, LeaseRecordingFleet(), ScriptedGateway()).group_runner("run_1", document)
+    assert runner.episode_runner.policy.geometry.model_width == 1000
+    assert runner.episode_runner.policy.geometry.model_height == 1000
+
+
 def test_licensed_images_hold_seats_from_the_broker_while_they_play(example_payload):
     document = eval_document(example_payload, licenses=("windows_server_dc", "office_ltsc"))
     seats = broker()

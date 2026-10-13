@@ -100,7 +100,10 @@ class PlatformWorkers:
                            self.rubric_library, document.run.judge.model, JudgePromptBuilder(self.judge_secret))
 
     def group_runner(self, run_id: str, document: SpecDocument) -> GroupRunner:
-        adapter = get_adapter(document.run.policy.action_format)
+        policy_spec = document.run.policy
+        adapter_options = ({"coordinate_mode": policy_spec.coordinate_mode}
+                           if policy_spec.action_format == "text_actions" else {})
+        adapter = get_adapter(policy_spec.action_format, **adapter_options)
         geometry = adapter.model_geometry(document.image.display.width, document.image.display.height)
         policy = PolicyClient(self.gateway, document.run.policy, adapter, geometry, run_id, document.run.type)
         observer = (EpisodeMetrics(self.metrics, document.image.id, document.world.materialize)
