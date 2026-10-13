@@ -14,6 +14,10 @@ fleet/bin/
 node_modules/
 console/dist/
 
+# Local secrets
+.env
+.env.*
+
 # OS and editors
 .DS_Store
 .idea/
