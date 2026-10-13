@@ -186,6 +186,26 @@ func TestConfigDefaultsAndValidation(t *testing.T) {
 	}
 }
 
+func TestRelativeDirectoriesAreRelativeToTheConfigFile(t *testing.T) {
+	relative := laptopConfig(t)
+	relative["state_dir"] = "state"
+	relative["object_store_dir"] = filepath.Join("..", "shared", "objects")
+	path := writeConfig(t, relative)
+	loaded, err := loadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := filepath.Dir(path)
+	if loaded.StateDir != filepath.Join(base, "state") ||
+		loaded.ObjectStoreDir != filepath.Join(base, "..", "shared", "objects") {
+		t.Fatalf("relative directories: %q %q", loaded.StateDir, loaded.ObjectStoreDir)
+	}
+	absolute, err := loadConfig(writeConfig(t, laptopConfig(t)))
+	if err != nil || !filepath.IsAbs(absolute.StateDir) {
+		t.Fatalf("absolute directories stay as they are: %q %v", absolute.StateDir, err)
+	}
+}
+
 func TestTheLaptopExampleConfigLoads(t *testing.T) {
 	loaded, err := loadConfig(filepath.Join("..", "..", "..", "examples", "fleetd", "laptop.json"))
 	if err != nil {

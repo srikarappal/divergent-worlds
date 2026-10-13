@@ -169,7 +169,19 @@ func loadConfig(path string) (config, error) {
 	if loaded.GuestTimeoutSeconds == 0 {
 		loaded.GuestTimeoutSeconds = 30
 	}
+	loaded.resolveDirectories(filepath.Dir(path))
 	return loaded, loaded.validate()
+}
+
+// resolveDirectories reads relative directories in the file as relative to it, as experimentd reads its config,
+// so both services can name one object store whatever directory they start in.
+func (loaded *config) resolveDirectories(base string) {
+	for _, directory := range []*string{&loaded.StateDir, &loaded.ObjectStoreDir, &loaded.Snapshots.StoreDir,
+		&loaded.Snapshots.CacheDir} {
+		if *directory != "" && !filepath.IsAbs(*directory) {
+			*directory = filepath.Join(base, *directory)
+		}
+	}
 }
 
 func (loaded config) validate() error {
