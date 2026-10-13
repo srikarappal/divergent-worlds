@@ -1,3 +1,4 @@
+import contextlib
 import json
 import socket
 import tempfile
@@ -50,7 +51,8 @@ def test_clients_without_the_token_get_nothing(greeting):
     thread = serve_in_thread(TokenServer(handler, "s3cret"), guest_side)
     with host_side:
         host_side.sendall(greeting)
-        host_side.shutdown(socket.SHUT_WR)
+        with contextlib.suppress(OSError):  # the server may hang up on a bad greeting first, which macOS reports
+            host_side.shutdown(socket.SHUT_WR)
         assert host_side.makefile("rb").read() == b""
     thread.join(timeout=5)
     assert handler.methods == []
@@ -153,6 +155,7 @@ def test_screens_stay_closed_without_a_vnc_socket_or_the_token(vnc_server):
         thread = serve_in_thread(server, guest_side)
         with host_side:
             host_side.sendall(greeting)
-            host_side.shutdown(socket.SHUT_WR)
+            with contextlib.suppress(OSError):  # the server may hang up on a refused greeting first
+                host_side.shutdown(socket.SHUT_WR)
             assert host_side.makefile("rb").read() == b""
         thread.join(timeout=5)

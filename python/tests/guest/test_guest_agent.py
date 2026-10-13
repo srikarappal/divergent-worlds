@@ -1,4 +1,5 @@
 import base64
+import contextlib
 import io
 import json
 import os
@@ -256,7 +257,8 @@ def exchange(lines):
         server_thread = threading.Thread(target=serve_guest_side, args=(guest,))
         server_thread.start()
         host.sendall(b"".join(lines))
-        host.shutdown(socket.SHUT_WR)
+        with contextlib.suppress(OSError):  # the server hangs up after a bad line, maybe before this shutdown
+            host.shutdown(socket.SHUT_WR)
         replies = host.makefile("rb").read().splitlines()
         server_thread.join(5)
     return [json.loads(reply) for reply in replies]
