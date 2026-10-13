@@ -108,7 +108,7 @@ uv run rlworld-experimentd --config ../examples/experimentd/laptop.yaml
 cd console && npm run dev
 ```
 
-The reference spec plays Qwen3.8 Max, its 0902 snapshot, on OpenRouter, as
+The reference spec plays Qwen3.8 Flash on OpenRouter, as
 [`examples/experimentd/endpoints.yaml`](examples/experimentd/endpoints.yaml) registers it. A running experimentd also
 takes the key from stdin: `pbpaste | uv run rlworld endpoints set-key openrouter`. To play a model you serve yourself,
 such as `vllm serve <model> --served-model-name my_policy --port 8000`, set the spec's policy endpoint to
