@@ -209,6 +209,7 @@ class ScriptedGateway:
         replies = self.scripts.get(request.sample_index, GIVING_UP_REPLIES)
         response = ChatResponse(
             text=replies[min(step_index, len(replies) - 1)],
+            reasoning=f"planning step {step_index}",
             served_model=request.model,
             usage=Usage(input_tokens=120, output_tokens=6),
             token_trace=TokenTrace(prompt_token_ids=(1, 2, 3, step_index), completion_token_ids=(7, 8),

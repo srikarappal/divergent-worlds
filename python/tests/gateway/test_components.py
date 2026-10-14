@@ -65,6 +65,14 @@ def test_parse_response_without_token_ids():
     assert parsed["token_trace"] is None
     assert parsed["served_model"] == "requested_model"
     assert parsed["usage"].input_tokens == 0
+    assert parsed["reasoning"] == ""
+
+
+def test_parse_response_keeps_reasoning():
+    openrouter_payload = {"choices": [{"message": {"content": "No", "reasoning": "91 is 7 times 13"}}]}
+    vllm_payload = {"choices": [{"message": {"content": "No", "reasoning_content": "91 is 7 times 13"}}]}
+    assert parse_response(openrouter_payload, "m")["reasoning"] == "91 is 7 times 13"
+    assert parse_response(vllm_payload, "m")["reasoning"] == "91 is 7 times 13"
 
 
 def test_token_bucket_refills_waits_and_times_out():

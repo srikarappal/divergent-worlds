@@ -38,7 +38,8 @@ function step(stepIndex: number, actions: Record<string, unknown>[], outputText:
                                                          image_format: "webp", sha256: `frame${stepIndex}` },
                    accessibility: null, dom: null, terminal: null, file_changes: null, user_reply: null,
                    native_result: null },
-    model_turn: { prompt_ref: "sha256:p", output_text: outputText, tool_calls: [], served_model: "my_policy",
+    model_turn: { prompt_ref: "sha256:p", output_text: outputText, reasoning: `thinking before step ${stepIndex}`,
+                  tool_calls: [], served_model: "my_policy",
                   input_tokens: 0, output_tokens: 0, cost_usd: null },
     actions, parse_error: null, state_changes: [],
     timings: { model_seconds: 1.5, env_seconds: 0.4, settle_seconds: 0.3 }, vm_events: [],
@@ -89,6 +90,7 @@ async function theScrubberShowsActionsOnEachFrame(): Promise<void> {
   render(reviewPage(api, 1));
   expect(await screen.findByAltText("step 1 frame")).toHaveAttribute("src", "/frames/frame1?size=full");
   expect(screen.getByLabelText("step 1")).toHaveTextContent("type(text=1200)");
+  expect(screen.getByLabelText("reasoning")).toHaveTextContent("thinking before step 1");
   fireEvent.change(screen.getByLabelText("step"), { target: { value: "0" } });
   const marker = screen.getByTitle("click");
   expect(marker).toHaveStyle({ left: "50%", top: "50%" });

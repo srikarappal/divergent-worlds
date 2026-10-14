@@ -125,6 +125,7 @@ def test_a_solved_episode_records_every_turn(document):
     assert [step.actions for step in steps] == [({"name": "type", "text": "1250"},), ({"name": "done"},)]
     assert [step.observation.step_index for step in steps] == [0, 1]
     assert steps[0].model_turn.token_trace.completion_token_ids == (7, 8)
+    assert [step.model_turn.reasoning for step in steps] == ["planning step 0", "planning step 1"]
     assert (steps[0].timings.model_seconds, steps[0].timings.env_seconds) == (1.5, 0.4)
     second_prompt = trajectory_store.load_json_blob(steps[1].model_turn.prompt_ref)
     assert second_prompt[2] == {"role": "assistant", "content": SOLVING_REPLIES[0]}

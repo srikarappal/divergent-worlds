@@ -55,6 +55,7 @@ class ChatResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     text: str
+    reasoning: str = ""
     tool_calls: tuple[dict[str, Any], ...] = ()
     served_model: str
     finish_reason: str | None = None

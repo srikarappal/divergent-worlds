@@ -130,6 +130,7 @@ export interface Observation {
 export interface ModelTurn {
   prompt_ref: string | null;
   output_text: string;
+  reasoning: string;
   tool_calls: Record<string, unknown>[];
   served_model: string;
   input_tokens: number;

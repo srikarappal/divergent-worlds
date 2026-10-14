@@ -353,6 +353,15 @@ td {
   font-size: 12px;
 }
 
+.model-reasoning {
+  max-width: 420px;
+  max-height: 280px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 12px;
+  color: #4b5560;
+}
+
 .check-failed {
   color: #c62828;
 }

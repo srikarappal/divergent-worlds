@@ -39,7 +39,12 @@ function stepRow(step: StepRecord): ReactElement {
     <tr key={step.step_index}>
       <td>{step.step_index}</td>
       <td>{actions.join("; ")}</td>
-      <td className="model-output">{step.model_turn.output_text}</td>
+      <td className="model-output">
+        {step.model_turn.reasoning
+          ? <details><summary>Reasoning</summary><div className="model-reasoning">{step.model_turn.reasoning}</div></details>
+          : null}
+        {step.model_turn.output_text}
+      </td>
       <td>{step.parse_error ?? step.vm_events.join(", ")}</td>
       <td>{step.timings.model_seconds.toFixed(1)} s / {step.timings.env_seconds.toFixed(1)} s</td>
     </tr>

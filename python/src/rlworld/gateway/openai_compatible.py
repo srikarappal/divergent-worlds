@@ -113,6 +113,8 @@ def parse_response(payload: dict[str, Any], requested_model: str) -> dict[str, A
     usage_payload = payload.get("usage") or {}
     return {
         "text": message.get("content") or "",
+        # OpenRouter and recent vLLM name the hidden reasoning "reasoning", older vLLM "reasoning_content".
+        "reasoning": message.get("reasoning") or message.get("reasoning_content") or "",
         "tool_calls": tuple(
             {"name": tool_call["function"]["name"], "arguments": tool_call["function"].get("arguments", "{}")}
             for tool_call in message.get("tool_calls") or []

@@ -210,6 +210,7 @@ def model_turn(response: ChatResponse, prompt_ref: str) -> ModelTurn:
     return ModelTurn(
         prompt_ref=prompt_ref,
         output_text=response.text,
+        reasoning=response.reasoning,
         tool_calls=response.tool_calls,
         token_trace=response.token_trace,
         served_model=response.served_model,

@@ -281,6 +281,9 @@ export class EpisodeReviewPage extends Component<EpisodeReviewProps, EpisodeRevi
           : null}
         <dl className="step-details">
           <dt>Actions</dt><dd>{actions.join("; ") || "none"}</dd>
+          {step.model_turn.reasoning
+            ? <><dt>Reasoning</dt><dd className="model-reasoning" aria-label="reasoning">{step.model_turn.reasoning}</dd></>
+            : null}
           <dt>Model output</dt><dd className="model-output">{step.model_turn.output_text}</dd>
           {step.parse_error ? <><dt>Parse error</dt><dd>{step.parse_error}</dd></> : null}
           {step.observation.user_reply !== null ? <><dt>User reply</dt><dd>{step.observation.user_reply}</dd></> : null}

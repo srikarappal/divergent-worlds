@@ -36,6 +36,7 @@ class StepTimings(FrozenModel):
 class ModelTurn(FrozenModel):
     prompt_ref: str | None = None
     output_text: str = ""
+    reasoning: str = ""
     tool_calls: tuple[dict[str, Any], ...] = ()
     token_trace: TokenTrace | None = None
     served_model: str = ""
