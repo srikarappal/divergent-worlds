@@ -150,7 +150,7 @@ export function ConsoleRoutes(props: ConsoleRoutesProps): ReactElement {
   return (
     <div className="console">
       <header className="console-header">
-        <strong>RL World</strong>
+        <strong>divergent</strong>
         <nav>
           <NavLink to="/configure">Configure</NavLink>
           <NavLink to="/catalogs">Catalogs</NavLink>
@@ -298,7 +298,7 @@ export class ConsoleShell extends Component<ShellProps, ShellState> {
     if (this.state.phase === "signed_out") {
       return (
         <div className="sign-in">
-          <h1>RL World</h1>
+          <h1>divergent</h1>
           <ProblemList title="Sign in" problems={this.state.problems} />
           <button type="button" className="primary" onClick={this.handleSignIn}>Sign in</button>
         </div>
