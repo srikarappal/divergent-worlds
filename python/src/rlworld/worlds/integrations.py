@@ -128,8 +128,8 @@ def read_folder(folder_directory: Path) -> list[dict[str, Any]]:
 
 
 class MailIntegration:
-    """A Maildir per address under mail/<address>/<folder>/; mail/current links the agent persona's mailbox, which
-    is the one Dovecot serves to mail clients and the one extract reads."""
+    """The agent persona's Maildir under mail/<address>/<folder>/, linked as mail/current, which Dovecot serves to
+    mail clients and extract reads. Colleagues get no mailbox, so the persona sees only the mail it sent or received."""
 
     app_name = "mail"
     record_model = MailMessage
@@ -137,11 +137,16 @@ class MailIntegration:
     def mail_root(self, target: Path) -> Path:
         return target / "mail"
 
+    def owner_mailbox(self, target: Path) -> Path | None:
+        owner_path = self.mail_root(target) / "owner.txt"
+        return self.mail_root(target) / owner_path.read_text().strip() if owner_path.is_file() else None
+
     def materialize(self, world: World, target: Path) -> None:
         mail_root = self.mail_root(target)
         owner = world.agent_persona
+        owner_mailbox = mail_root / owner.email
         for folder in MAIL_FOLDERS:
-            maildir_folder(mail_root / owner.email / folder)
+            maildir_folder(owner_mailbox / folder)
         (mail_root / "owner.txt").write_text(owner.email)
         (mail_root / "owner_name.txt").write_text(owner.full_name)
         current = mail_root / CURRENT_MAILBOX
@@ -149,26 +154,27 @@ class MailIntegration:
         current.symlink_to(owner.email)
         for message in world.emails:
             if message.is_draft:
-                write_message(message, mail_root / message.sender / "drafts", "DS")
+                if message.sender == owner.email:
+                    write_message(message, owner_mailbox / "drafts", "DS")
                 continue
-            write_message(message, mail_root / message.sender / "sent", "S")
-            for recipient in message.recipients:
-                write_message(message, mail_root / recipient / "inbox")
+            if message.sender == owner.email:
+                write_message(message, owner_mailbox / "sent", "S")
+            if owner.email in message.recipients:
+                write_message(message, owner_mailbox / "inbox")
 
     def deliver(self, message: MailMessage, target: Path) -> None:
-        """A scripted world event: the message lands unread in each recipient's inbox mid task."""
-        for recipient in message.recipients:
-            write_message(message, self.mail_root(target) / recipient / "inbox")
+        """A scripted world event: the message lands unread in the persona's inbox mid task."""
+        owner_mailbox = self.owner_mailbox(target)
+        if owner_mailbox is not None and owner_mailbox.name in message.recipients:
+            write_message(message, owner_mailbox / "inbox")
 
     def delivered_path(self, message: MailMessage) -> str:
         return f"{self.app_name}/inbox/{message.id}"
 
     def extract(self, target: Path) -> dict[str, Any]:
-        mail_root = self.mail_root(target)
-        owner_path = mail_root / "owner.txt"
-        if not owner_path.is_file():
+        owner_mailbox = self.owner_mailbox(target)
+        if owner_mailbox is None:
             return {folder: [] for folder in MAIL_FOLDERS}
-        owner_mailbox = mail_root / owner_path.read_text().strip()
         return {folder: read_folder(owner_mailbox / folder) for folder in MAIL_FOLDERS}
 
     def reset(self, target: Path) -> None:

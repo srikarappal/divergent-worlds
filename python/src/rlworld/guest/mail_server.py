@@ -2,8 +2,8 @@
 
 The desktop user runs this server. Mail clients send through its SMTP port,
 which delivers each message unread to the inbox of every recipient with a world
-mailbox, drops mail for addresses outside the world and files a read copy in the
-sent folder of the mailbox the world links as current, so mail sent from a script
+mailbox, which only the agent persona has, and files a read copy in the sent
+folder of the mailbox the world links as current, so mail sent from a script
 counts like mail sent from Thunderbird, which keeps no copy of its own. Clients
 read through its IMAP port, which hands each connection to Dovecot's imap process
 started as the same user; it greets preauthenticated, so clients keep no password,

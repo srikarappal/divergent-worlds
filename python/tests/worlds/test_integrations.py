@@ -130,6 +130,19 @@ def test_agent_work_shows_up_as_allowed_changes(world, tmp_path):
     assert [violation.path for violation in violations] == ["files/customers.csv"]
 
 
+def test_colleagues_get_no_mailbox_the_agent_could_read(world, tmp_path):
+    materialize_world(world, ["mail"], tmp_path)
+    persona = world.agent_persona
+    mail_root = tmp_path / "mail"
+    assert {path.name for path in mail_root.iterdir()} == {persona.email, "current", "owner.txt", "owner_name.txt"}
+    colleague_email = next(message for message in world.emails if persona.email not in message.recipients).recipients[0]
+    colleague_only = MailMessage(id="mail_colleague_only", thread_id="thread_colleague_only", sender=persona.email,
+                                 recipients=(colleague_email,), subject="Not for the agent", body="hi",
+                                 sent_at=world.base_time)
+    MailIntegration().deliver(colleague_only, tmp_path)
+    assert not (mail_root / colleague_email).exists()
+
+
 def test_scripted_events_deliver_mail_mid_task(world, tmp_path):
     materialize_world(world, ["mail"], tmp_path)
     inbox_before = len(extract_world_state(["mail"], tmp_path)["mail"]["inbox"])
