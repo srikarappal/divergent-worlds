@@ -66,6 +66,9 @@ def short_text(observation: Observation) -> list[str]:
     sections = [f"Step {observation.step_index}."]
     if observation.user_reply is not None:
         sections.append(f"User reply: {observation.user_reply}")
+    if observation.reply_error is not None:
+        sections.append(f"Your last reply played no action: {observation.reply_error}. Nothing changed on screen; "
+                        "answer again with one action from the action space.")
     if observation.terminal is not None:
         terminal = observation.terminal
         sections.append(f"Terminal exit code {terminal.exit_code}\nstdout:\n{terminal.stdout}\n"

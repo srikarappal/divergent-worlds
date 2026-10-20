@@ -134,12 +134,28 @@ def test_a_solved_episode_records_every_turn(document):
     assert trajectory_store.load_episode("run_1", "episode_1", with_steps=False).finished_at is not None
 
 
-def test_unparseable_replies_are_agent_errors(document):
+def test_three_unparseable_replies_in_a_row_are_an_agent_error(document):
     fleet = FakeFleet()
     episode, trajectory_store, _ = run_episode(document, fleet, ScriptedGateway({0: ("I am not sure what to do",)}))
     assert episode.reward.termination == "agent_error" and episode.reward.counts_for_training
-    assert trajectory_store.load_steps("run_1", "episode_1")[-1].parse_error
+    steps = trajectory_store.load_steps("run_1", "episode_1")
+    assert len(steps) == 3 and all(step.parse_error for step in steps)
     assert fleet.calls_named("close")
+
+
+def test_the_policy_sees_why_its_reply_played_nothing_and_answers_again(document):
+    fleet = FakeFleet()
+    gateway = ScriptedGateway({0: ("I am not sure what to do", *SOLVING_REPLIES)})
+    episode, trajectory_store, _ = run_episode(document, fleet, gateway)
+    assert episode.reward.termination == "success"
+    steps = trajectory_store.load_steps("run_1", "episode_1")
+    assert [bool(step.parse_error) for step in steps] == [True, False, False]
+    assert steps[1].observation.reply_error == steps[0].parse_error
+    assert steps[2].observation.reply_error is None
+    retry_prompt = trajectory_store.load_json_blob(steps[1].model_turn.prompt_ref)
+    assert retry_prompt[2] == {"role": "assistant", "content": "I am not sure what to do"}
+    assert "Your last reply played no action" in retry_prompt[3]["content"][0]["text"]
+    assert [call[2] for call in fleet.calls if call[0] == "step"] == ["wait", "type"]
 
 
 def test_disallowed_modalities_are_agent_errors(example_payload):

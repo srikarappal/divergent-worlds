@@ -135,6 +135,7 @@ export interface Observation {
   terminal: { stdout: string; stderr: string; exit_code: number } | null;
   file_changes: Array<{ path: string; change: string }> | null;
   user_reply: string | null;
+  reply_error?: string | null;
   native_result: unknown;
 }
 

@@ -319,5 +319,7 @@ class Observation(FrozenModel):
     terminal: TerminalOutput | None = None
     file_changes: tuple[FileChange, ...] | None = None
     user_reply: str | None = None
+    # Why the policy's previous reply played nothing, so it can answer again.
+    reply_error: str | None = None
     native_result: Any = None
     chat_posts: tuple[ChatPost, ...] | None = None

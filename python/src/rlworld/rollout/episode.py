@@ -15,7 +15,7 @@ are env errors, which are excluded from training.
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal, Protocol
 
 import httpx
@@ -49,6 +49,8 @@ from rlworld.trajectories.trajectory_store import TrajectoryStore, TrajectoryWri
 FLEET_FAILURES = (FleetError, httpx.HTTPError)
 HIDDEN_INTENT_FROM_GENERATOR = "from_generator"
 NO_USER_REPLY = "No user is available to answer; continue on your own."
+# Replies in a row that play no action before the episode ends as an agent error.
+MAX_BAD_REPLIES = 3
 
 
 class EnvFleet(Protocol):
@@ -144,6 +146,12 @@ class TurnResult:
 
 def describe(error: Exception) -> str:
     return f"{type(error).__name__}: {error}"
+
+
+def retry_observation(observation: Observation, reply_error: str) -> Observation:
+    """The screen the policy saw again, with why its reply played nothing in place of the last action's results."""
+    return observation.model_copy(update={"reply_error": reply_error, "user_reply": None, "terminal": None,
+                                          "native_result": None, "file_changes": None})
 
 
 class StepTimingTotals:
@@ -310,6 +318,7 @@ class EpisodeRunner:
         last_turn: TurnResult | None = None
         final_observation: Observation | None = None
         env_error = None
+        bad_replies = 0
         try:
             observation = self.act(lease.lease_id, WaitAction(duration_ms=0)).observation
             script.observe(observation)
@@ -317,6 +326,9 @@ class EpisodeRunner:
                 observation, delivered = self.deliver_world(lease.lease_id, script, len(past_turns), observation)
                 last_turn = self.play_turn(plan, lease.lease_id, keeper, writer, builder, past_turns, observation,
                                            script, delivered)
+                bad_replies = bad_replies + 1 if last_turn.step.parse_error else 0
+                if bad_replies >= MAX_BAD_REPLIES:
+                    last_turn = replace(last_turn, agent_error=last_turn.step.parse_error)
                 writer.write_step(last_turn.step)
                 self.step_timings.add(last_turn.step.timings)
                 final_observation = last_turn.next_observation or last_turn.step.observation
@@ -402,7 +414,7 @@ class EpisodeRunner:
         except (ActionParseError, ActionNotAllowedError) as error:
             step = StepRecord(step_index=turn_index, observation=observation, model_turn=turn, parse_error=str(error),
                               timings=StepTimings(model_seconds=response.latency_seconds), vm_events=delivered)
-            return TurnResult(step, agent_error=str(error))
+            return TurnResult(step, retry_observation(observation, str(error)), assistant_reply(response))
         return self.play_actions(plan, lease_id, actions, observation, turn, response, script, delivered)
 
     def play_actions(
@@ -419,7 +431,7 @@ class EpisodeRunner:
         played: list[dict[str, Any]] = []
         user_replies: list[str] = []
         vm_events = list(delivered)
-        next_observation = observation
+        next_observation = observation.model_copy(update={"reply_error": None})
         env_seconds = settle_seconds = 0.0
         final_action = answer_text = env_error = None
         try:
