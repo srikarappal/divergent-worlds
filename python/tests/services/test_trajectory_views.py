@@ -89,3 +89,25 @@ def test_routes_serve_episodes_the_live_wall_and_frames(stored, example_payload,
     assert thumbnail.mimetype == "image/webp" and "immutable" in thumbnail.headers["Cache-Control"]
     assert client.get(f"/v1/frames/{'0' * 64}").status_code == 404
     assert create_app(service).test_client().get("/v1/runs/run_1/live").status_code == 503
+
+
+def test_saved_runs_are_the_stored_runs_without_a_record(stored):
+    views, _ = stored
+    episode_ids = ["b00000_g00000_s000_a0", "b00000_g00000_s001_a0", "b00000_g00000_s002_a0"]
+    assert [saved_run.model_dump() for saved_run in views.saved_runs(set())] == [
+        {"run_id": "run_1", "episode_ids": episode_ids}]
+    assert views.saved_runs({"run_1"}) == []
+
+
+def test_the_runs_route_adds_saved_runs_unless_it_lists_one_experiment(stored, example_payload, tmp_path):
+    views, _ = stored
+    payload = eval_payload(example_payload)
+    service = build_experiment_service(payload, tmp_path)
+    experiment = service.launch(service.save_spec(dump_spec_document(parse_spec_document(payload))))
+    client = create_app(service, trajectory_views=views).test_client()
+    listing = client.get("/v1/runs").get_json()
+    assert [run["run_id"] for run in listing["runs"]] == experiment.run_ids
+    assert [saved_run["run_id"] for saved_run in listing["saved_runs"]] == ["run_1"]
+    one_experiment = client.get(f"/v1/runs?experiment_id={experiment.experiment_id}").get_json()
+    assert one_experiment["saved_runs"] == []
+    assert create_app(service).test_client().get("/v1/runs").get_json()["saved_runs"] == []

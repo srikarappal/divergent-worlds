@@ -42,7 +42,9 @@ import type {
   ReviewItemFilter,
   ReviewUpdate,
   RunEvent,
+  RunList,
   RunRecord,
+  SavedRun,
   TakeoverSession,
 } from "../api/types";
 
@@ -114,6 +116,7 @@ export class FakeApi implements ConsoleApi {
   endpoints: EndpointView[] = [];
   runSpecs: Record<string, string> = {};
   runs: Record<string, RunRecord> = {};
+  savedRuns: SavedRun[] = [];
   experiments: Record<string, ExperimentRecord> = {};
   events: RunEvent[] = [];
   episodeUpdates: EpisodeRecord[] = [];
@@ -212,7 +215,7 @@ export class FakeApi implements ConsoleApi {
     return approved;
   }
 
-  async listRuns(experimentId?: string): Promise<RunRecord[]> {
+  async listRuns(experimentId?: string): Promise<RunList> {
     this.record("listRuns", experimentId);
     const runs: RunRecord[] = [];
     for (const run of Object.values(this.runs)) {
@@ -220,7 +223,7 @@ export class FakeApi implements ConsoleApi {
         runs.push(run);
       }
     }
-    return runs;
+    return { runs, saved_runs: experimentId === undefined ? this.savedRuns : [] };
   }
 
   async getRun(runId: string): Promise<RunRecord> {

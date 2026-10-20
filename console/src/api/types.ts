@@ -18,6 +18,17 @@ export interface RunRecord {
   created_at: number;
 }
 
+// A run with stored trajectories that experimentd keeps no record of, such as a dry run.
+export interface SavedRun {
+  run_id: string;
+  episode_ids: string[];
+}
+
+export interface RunList {
+  runs: RunRecord[];
+  saved_runs: SavedRun[];
+}
+
 export interface ExperimentRecord {
   experiment_id: string;
   tenant: string;

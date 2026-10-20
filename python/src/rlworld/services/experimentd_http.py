@@ -297,8 +297,14 @@ def approve(experiment_id: str):
 
 
 def list_runs():
-    runs = service().list_runs(request.args.get("experiment_id"))
-    return jsonify({"runs": [run.model_dump(mode="json") for run in runs]})
+    """Without an experiment, saved_runs adds the stored runs this experimentd keeps no record of."""
+    experiment_id = request.args.get("experiment_id")
+    runs = service().list_runs(experiment_id)
+    trajectory_views = current_app.extensions.get(TRAJECTORIES_KEY)
+    saved_runs = ([] if experiment_id is not None or trajectory_views is None
+                  else trajectory_views.saved_runs({run.run_id for run in runs}))
+    return jsonify({"runs": [run.model_dump(mode="json") for run in runs],
+                    "saved_runs": [saved_run.model_dump(mode="json") for saved_run in saved_runs]})
 
 
 def get_run(run_id: str):

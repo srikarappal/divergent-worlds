@@ -35,6 +35,27 @@ async function runsListLinksToDashboards(): Promise<void> {
 
 test("the runs list links every run to its dashboard", runsListLinksToDashboards);
 
+async function savedRunsLinkEachEpisodesReviewAndLiveView(): Promise<void> {
+  const api = apiWithRun();
+  api.savedRuns = [{ run_id: "dry_run_000001", episode_ids: ["dry_run_000001_s000_a0"] }];
+  render(inRouter(<RunsPage api={api} />));
+  const review = await screen.findByRole("link", { name: "dry_run_000001_s000_a0" });
+  expect(review).toHaveAttribute("href", "/runs/dry_run_000001/episodes/dry_run_000001_s000_a0/review");
+  expect(screen.getByRole("link", { name: "live" }))
+    .toHaveAttribute("href", "/runs/dry_run_000001/episodes/dry_run_000001_s000_a0");
+  expect(screen.getByLabelText("runs")).toHaveTextContent(RUN_ID);
+}
+
+test("saved runs link each episode's review and live view", savedRunsLinkEachEpisodesReviewAndLiveView);
+
+async function withoutSavedRunsThereIsNoSavedRunsTable(): Promise<void> {
+  render(inRouter(<RunsPage api={apiWithRun()} />));
+  await screen.findByRole("link", { name: RUN_ID });
+  expect(screen.queryByLabelText("saved runs")).toBeNull();
+}
+
+test("without saved runs there is no saved runs table", withoutSavedRunsThereIsNoSavedRunsTable);
+
 async function experimentsWaitForApproval(): Promise<void> {
   const api = apiWithRun();
   api.experiments.experiment_000001 = experimentRecord({ approved: false, estimated_cost_usd: null });

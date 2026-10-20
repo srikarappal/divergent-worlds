@@ -4,7 +4,7 @@ import { Component, type ReactElement } from "react";
 import { Link } from "react-router-dom";
 
 import type { ConsoleApi } from "../api/client";
-import type { ExperimentRecord, LiveTile, RunRecord } from "../api/types";
+import type { ExperimentRecord, LiveTile, RunRecord, SavedRun } from "../api/types";
 import { failureProblems, ParityPanel, ProblemList } from "../components/common";
 import { formatUsd } from "./LaunchPage";
 
@@ -46,20 +46,60 @@ function runsTable(runs: readonly RunRecord[]): ReactElement {
   );
 }
 
+function savedRunRow(savedRun: SavedRun): ReactElement {
+  const episodes: ReactElement[] = [];
+  for (const episodeId of savedRun.episode_ids) {
+    const episodePath = `/runs/${savedRun.run_id}/episodes/${episodeId}`;
+    episodes.push(
+      <li key={episodeId}>
+        <Link to={`${episodePath}/review`}>{episodeId}</Link> (<Link to={episodePath}>live</Link>)
+      </li>,
+    );
+  }
+  return (
+    <tr key={savedRun.run_id}>
+      <td>{savedRun.run_id}</td>
+      <td><ul className="saved-episodes">{episodes}</ul></td>
+    </tr>
+  );
+}
+
+// Dry runs and runs from before an experimentd restart have trajectories but no run record.
+function savedRunsTable(savedRuns: readonly SavedRun[]): ReactElement | null {
+  if (savedRuns.length === 0) {
+    return null;
+  }
+  const rows: ReactElement[] = [];
+  for (const savedRun of savedRuns) {
+    rows.push(savedRunRow(savedRun));
+  }
+  return (
+    <>
+      <h2>Saved runs</h2>
+      <table aria-label="saved runs">
+        <thead><tr><th>Run</th><th>Episodes</th></tr></thead>
+        <tbody>{rows}</tbody>
+      </table>
+    </>
+  );
+}
+
 interface RunsPageState {
   runs: RunRecord[];
+  savedRuns: SavedRun[];
   problems: string[];
 }
 
 export class RunsPage extends Component<{ api: ConsoleApi }, RunsPageState> {
   constructor(props: { api: ConsoleApi }) {
     super(props);
-    this.state = { runs: [], problems: [] };
+    this.state = { runs: [], savedRuns: [], problems: [] };
   }
 
   async componentDidMount(): Promise<void> {
     try {
-      this.setState({ runs: await this.props.api.listRuns() });
+      const listing = await this.props.api.listRuns();
+      this.setState({ runs: listing.runs, savedRuns: listing.saved_runs });
     } catch (error) {
       this.setState({ problems: failureProblems(error) });
     }
@@ -71,6 +111,7 @@ export class RunsPage extends Component<{ api: ConsoleApi }, RunsPageState> {
         <h1>Runs</h1>
         <ProblemList title="Runs" problems={this.state.problems} />
         {runsTable(this.state.runs)}
+        {savedRunsTable(this.state.savedRuns)}
         <ParityPanel items={[{ name: "list_runs" }]} />
       </div>
     );
@@ -103,7 +144,7 @@ export class ExperimentPage extends Component<ExperimentPageProps, ExperimentPag
     try {
       this.setState({
         experiment: await this.props.api.getExperiment(this.props.experimentId),
-        runs: await this.props.api.listRuns(this.props.experimentId),
+        runs: (await this.props.api.listRuns(this.props.experimentId)).runs,
       });
     } catch (error) {
       this.setState({ problems: failureProblems(error) });

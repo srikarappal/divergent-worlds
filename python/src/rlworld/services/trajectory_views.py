@@ -8,6 +8,7 @@ resolution on demand; thumbnails are made once and cached beside the frames.
 """
 
 import io
+from collections.abc import Collection
 from operator import attrgetter
 from typing import Literal
 
@@ -21,6 +22,13 @@ from rlworld.trajectories.trajectory_store import TrajectoryStore
 
 FrameSize = Literal["full", "thumbnail"]
 FRAME_SIGNATURES = ((b"RIFF", "image/webp"), (b"\x89PNG", "image/png"), (b"\xff\xd8", "image/jpeg"))
+
+
+class SavedRun(BaseModel):
+    """A run with stored trajectories that experimentd keeps no record of, such as a dry run."""
+
+    run_id: str
+    episode_ids: list[str]
 
 
 class LiveTile(BaseModel):
@@ -55,6 +63,11 @@ class TrajectoryViews:
         self.trajectory_store = trajectory_store
         self.thumbnail_width = thumbnail_width
         self.thumbnail_height = thumbnail_height
+
+    def saved_runs(self, recorded_run_ids: Collection[str]) -> list[SavedRun]:
+        """Stored runs missing from recorded_run_ids, newest id first: dry runs and runs from before a restart."""
+        return [SavedRun(run_id=run_id, episode_ids=self.trajectory_store.list_episode_ids(run_id))
+                for run_id in reversed(self.trajectory_store.run_ids()) if run_id not in recorded_run_ids]
 
     def episodes(self, run_id: str, status: Literal["running", "finished"] | None = None) -> list[EpisodeRecord]:
         try:

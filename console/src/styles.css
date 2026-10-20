@@ -476,3 +476,9 @@ td {
 .admin section {
   margin-bottom: 20px;
 }
+
+.saved-episodes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}

@@ -40,6 +40,7 @@ import type {
   ReviewItemFilter,
   ReviewUpdate,
   RunEvent,
+  RunList,
   RunRecord,
   TakeoverSession,
 } from "./types";
@@ -72,7 +73,7 @@ export interface ConsoleApi {
   launch(digest: string, budgetUsd?: number): Promise<ExperimentRecord>;
   getExperiment(experimentId: string): Promise<ExperimentRecord>;
   approveExperiment(experimentId: string): Promise<ExperimentRecord>;
-  listRuns(experimentId?: string): Promise<RunRecord[]>;
+  listRuns(experimentId?: string): Promise<RunList>;
   getRun(runId: string): Promise<RunRecord>;
   getRunSpec(runId: string): Promise<string>;
   controlRun(runId: string, command: string, value?: unknown): Promise<RunRecord>;
@@ -249,8 +250,9 @@ export class ApiClient implements ConsoleApi {
     return this.call("approve_experiment", { path: { experiment_id: experimentId } });
   }
 
-  async listRuns(experimentId?: string): Promise<RunRecord[]> {
-    return (await this.call("list_runs", { query: { experiment_id: experimentId } })).runs;
+  async listRuns(experimentId?: string): Promise<RunList> {
+    const listing = await this.call("list_runs", { query: { experiment_id: experimentId } });
+    return { runs: listing.runs, saved_runs: listing.saved_runs ?? [] };
   }
 
   getRun(runId: string): Promise<RunRecord> {
