@@ -153,6 +153,26 @@ def test_qwen_native_tool_calls_never_double_or_break_text_actions():
     assert adapter.parse_output(tool_call_only, geometry) == expected
 
 
+FUNCTION_NAMED_REPLY = """<tool_call>
+<function=click>
+<parameter=start_box>
+[320, 388]
+</parameter>
+</function>
+</tool_call>"""
+
+
+def test_qwen_native_tool_calls_may_name_the_action_as_the_function():
+    adapter = get_adapter("text_actions", coordinate_mode="relative_1000")
+    geometry = adapter.model_geometry(1280, 800)
+    assert adapter.parse_output(FUNCTION_NAMED_REPLY, geometry) == [ClickAction(x=410, y=310)]
+    assert adapter.parse_output("<tool_call>\n<function=wait>\n</function>\n</tool_call>", geometry)[0].name == "wait"
+    nameless = ("<tool_call>\n<function=computer_use>\n<parameter=start_box>[1, 2]</parameter>\n</function>\n"
+                "</tool_call>")
+    with pytest.raises(ActionParseError, match="no action found"):
+        adapter.parse_output(nameless, geometry)
+
+
 OVER_ESCAPED_REPLY = r"""Let me read the file with Python.
 
 Action: type(content='python3 -c "import pandas as pd; print(pd.read_csv(\\'~/invoices.csv\\', dtype=str))"\n')"""

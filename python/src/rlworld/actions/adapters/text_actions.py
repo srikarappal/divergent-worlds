@@ -39,6 +39,8 @@ BOX_TOKEN_PATTERN = re.compile(r"<\|box_(?:start|end)\|>")
 # Qwen3 models may repeat their action as a native tool call after the Action line, or give only the tool call.
 TOOL_CALL_PATTERN = re.compile(r"<tool_call>(.*?)(?:</tool_call>|\Z)", re.DOTALL)
 TOOL_PARAMETER_PATTERN = re.compile(r"<parameter=(\w+)>\s*(.*?)\s*</parameter>", re.DOTALL)
+TOOL_FUNCTION_PATTERN = re.compile(r"<function=(\w+)>")
+NATIVE_WRAPPER_FUNCTION = "computer_use"
 THOUGHT_PATTERN = re.compile(r"Thought:(.*?)(?=\n\s*Action:|\Z)", re.DOTALL)
 NUMBER_PATTERN = re.compile(r"-?\d+(?:\.\d+)?")
 ACTION_MARKER = "Action:"
@@ -123,8 +125,7 @@ class TextActionAdapter:
             action_text = THOUGHT_PATTERN.sub("", cleaned_text)
         call_texts = [call_text.strip() for call_text in split_calls(action_text) if call_text.strip()]
         if not call_texts:
-            call_texts = [native_call_text(tool_call) for tool_call in tool_calls
-                          if TOOL_PARAMETER_PATTERN.search(tool_call)]
+            call_texts = [native_text for tool_call in tool_calls if (native_text := native_call_text(tool_call))]
         if not call_texts:
             raise ActionParseError("no action found in model output")
         return [self.parse_call(call_text, thought, geometry) for call_text in call_texts]
@@ -211,11 +212,17 @@ class TextActionAdapter:
         raise ActionRenderError(f"text_actions cannot render {action.name}")
 
 
-def native_call_text(tool_call: str) -> str:
-    """A Qwen native tool call, <parameter=action>click</parameter><parameter=start_box>[38, 16]</parameter>, as
-    the text action call click(start_box='[38, 16]')."""
+def native_call_text(tool_call: str) -> str | None:
+    """A Qwen native tool call as the text action call it stands for, or None when it names no action. The action is
+    a parameter of computer_use, <function=computer_use><parameter=action>click</parameter>, or the function itself,
+    <function=click>; with <parameter=start_box>[38, 16]</parameter> either becomes click(start_box='[38, 16]')."""
     parameters = dict(TOOL_PARAMETER_PATTERN.findall(tool_call))
     function_name = parameters.pop("action", "")
+    function_match = TOOL_FUNCTION_PATTERN.search(tool_call)
+    if not function_name and function_match and function_match.group(1) != NATIVE_WRAPPER_FUNCTION:
+        function_name = function_match.group(1)
+    if not function_name:
+        return None
     arguments = ", ".join(f"{name}={quote_text(value)}" for name, value in parameters.items())
     return f"{function_name}({arguments})"
 
