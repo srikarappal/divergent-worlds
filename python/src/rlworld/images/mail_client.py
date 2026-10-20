@@ -5,8 +5,8 @@ guest mail server, which greets preauthenticated, one SMTP server without
 authentication and every first run screen switched off. The launcher writes the
 agent persona's name and address into the profile from the materialized world
 each time Thunderbird starts, so it has to start after task setup, as the
-policy or a task opens it. Sent mail and drafts go to the world mailbox folders
-the verifiers read.
+policy or a task opens it. Drafts go to the world mailbox's drafts folder and
+the mail server files sent mail in its sent folder, so Thunderbird keeps no copy.
 """
 
 from rlworld.guest.mail_server import DEFAULT_IMAP_PORT, DEFAULT_SMTP_PORT, DOVECOT_CONFIG
@@ -60,7 +60,7 @@ COMMON_PREFERENCES = {
     "mail.server.server2.userName": "nobody",
     "mail.server.server2.name": "Local Folders",
     "mail.identity.id1.smtpServer": "smtp1",
-    "mail.identity.id1.fcc_folder_picker_mode": "1",
+    "mail.identity.id1.fcc": False,
     "mail.identity.id1.drafts_folder_picker_mode": "1",
     "mail.identity.id1.valid": True,
     "mail.smtpservers": "smtp1",
@@ -97,7 +97,6 @@ def preference_value(value: bool | int | str) -> str:
 def profile_template(user: str) -> str:
     """The account wiring and first run settings; folders are named by the IMAP user's folder URIs."""
     preferences = {**COMMON_PREFERENCES, "mail.server.server1.userName": user,
-                   "mail.identity.id1.fcc_folder": f"imap://{user}@127.0.0.1/sent",
                    "mail.identity.id1.draft_folder": f"imap://{user}@127.0.0.1/drafts"}
     return "".join(f'user_pref("{name}", {preference_value(value)});\n' for name, value in preferences.items())
 

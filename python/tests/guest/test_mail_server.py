@@ -7,7 +7,7 @@ from email.message import EmailMessage
 
 import pytest
 
-from rlworld.guest.mail_server import ImapSession, MailServer, SmtpSession, command_address, deliver
+from rlworld.guest.mail_server import ImapSession, MailServer, SmtpSession, command_address, deliver, file_sent
 from rlworld.worlds.integrations import maildir_folder
 
 FAKE_IMAP = ("import sys\nsys.stdout.write('* PREAUTH ready\\r\\n')\nsys.stdout.flush()\n"
@@ -29,6 +29,10 @@ def serve(server):
 
 def inbox(mail_root, address):
     return mailbox.Maildir(mail_root / address / "inbox", factory=None, create=False)
+
+
+def sent(mail_root, address):
+    return mailbox.Maildir(mail_root / address / "sent", factory=None, create=False)
 
 
 def test_addresses_come_from_smtp_commands():
@@ -56,6 +60,14 @@ def test_mail_clients_send_through_smtp_to_colleagues_inboxes(mail_root):
     assert refused == {}
     delivered = next(iter(inbox(mail_root, "cfo@fjord.example")))
     assert delivered["Subject"] == "Totals" and ".leading dot survives" in delivered.get_payload()
+    sent_copies = list(sent(mail_root, "agent@fjord.example"))
+    assert [(sent_copy["Subject"], sent_copy.get_subdir(), sent_copy.get_flags())
+            for sent_copy in sent_copies] == [("Totals", "cur", "S")]
+
+
+def test_without_a_current_mailbox_no_sent_copy_is_filed(tmp_path):
+    file_sent(b"Subject: hi\r\n\r\nhello\r\n", tmp_path / "mail")
+    assert not (tmp_path / "mail").exists()
 
 
 def test_imap_connections_go_to_the_imap_process_as_they_are(mail_root):

@@ -21,12 +21,12 @@ def test_thunderbird_installs_beside_dovecot_and_runs_the_world_mail_server():
                                       "usr/local/bin/rlworld-thunderbird", "etc/thunderbird/policies/policies.json"}
 
 
-def test_the_profile_reads_the_world_mailbox_without_a_password_and_files_sent_mail_there():
+def test_the_profile_reads_the_world_mailbox_without_a_password_and_leaves_sent_mail_to_the_server():
     preferences = profile_template("agent")
     assert 'user_pref("mail.server.server1.port", 1143);' in preferences
     assert 'user_pref("mail.smtpserver.smtp1.port", 2525);' in preferences
     assert 'user_pref("mail.smtpserver.smtp1.authMethod", 1);' in preferences
-    assert 'user_pref("mail.identity.id1.fcc_folder", "imap://agent@127.0.0.1/sent");' in preferences
+    assert 'user_pref("mail.identity.id1.fcc", false);' in preferences and "fcc_folder" not in preferences
     assert 'user_pref("mail.shell.checkDefaultClient", false);' in preferences
     assert "mail_location = maildir:~/world/mail/current:LAYOUT=fs:INBOX=~/world/mail/current/inbox" in (
         DOVECOT_IMAP_CONFIG)

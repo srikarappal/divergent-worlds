@@ -2,10 +2,12 @@
 
 The desktop user runs this server. Mail clients send through its SMTP port,
 which delivers each message unread to the inbox of every recipient with a world
-mailbox and drops mail for addresses outside the world. They read through its
-IMAP port, which hands each connection to Dovecot's imap process started as the
-same user; it greets preauthenticated, so clients keep no password, and serves
-the mailbox the world links as current, where clients also file their sent mail.
+mailbox, drops mail for addresses outside the world and files a read copy in the
+sent folder of the mailbox the world links as current, so mail sent from a script
+counts like mail sent from Thunderbird, which keeps no copy of its own. Clients
+read through its IMAP port, which hands each connection to Dovecot's imap process
+started as the same user; it greets preauthenticated, so clients keep no password,
+and serves the current mailbox.
 """
 
 import argparse
@@ -18,7 +20,7 @@ import threading
 from collections.abc import Sequence
 from pathlib import Path
 
-from rlworld.worlds.integrations import USER_WORLD_FOLDER, maildir_folder
+from rlworld.worlds.integrations import CURRENT_MAILBOX, USER_WORLD_FOLDER, maildir_folder
 
 DEFAULT_SMTP_PORT = 2525
 DEFAULT_IMAP_PORT = 1143
@@ -44,6 +46,17 @@ def deliver(message_bytes: bytes, recipients: Sequence[str], mail_root: Path) ->
             maildir_folder(recipient_mailbox / "inbox").add(mailbox.MaildirMessage(message_bytes))
             delivered.append(recipient)
     return delivered
+
+
+def file_sent(message_bytes: bytes, mail_root: Path) -> None:
+    """Files a read copy in the current mailbox's sent folder, as servers that keep sent mail for clients do."""
+    current_mailbox = mail_root / CURRENT_MAILBOX
+    if not current_mailbox.is_dir():
+        return
+    sent_message = mailbox.MaildirMessage(message_bytes)
+    sent_message.set_subdir("cur")
+    sent_message.set_flags("S")
+    maildir_folder(current_mailbox / "sent").add(sent_message)
 
 
 class MailServer(socketserver.ThreadingTCPServer):
@@ -120,7 +133,9 @@ class SmtpSession(socketserver.StreamRequestHandler):
         if size > MAX_MESSAGE_BYTES:
             self.reply("552 message too large")
         else:
-            deliver(b"".join(lines), self.recipients, self.server.mail_root)
+            message_bytes = b"".join(lines)
+            deliver(message_bytes, self.recipients, self.server.mail_root)
+            file_sent(message_bytes, self.server.mail_root)
             self.reply("250 queued")
         self.recipients, self.has_sender = [], False
 
