@@ -47,6 +47,8 @@ CLICK_FUNCTIONS = {"click": ("left", 1), "left_double": ("left", 2), "right_sing
 CLICK_FUNCTION_BY_BUTTON_AND_COUNT = {button_and_count: name for name, button_and_count in CLICK_FUNCTIONS.items()}
 SCROLL_UNITS = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}
 ESCAPES_IN_QUOTES = {"\n": "\\n", "\r": "\\r"}
+# Models escape quotes twice, writing \\' where they mean \', which ends the string early.
+OVER_ESCAPED_QUOTE_PATTERN = re.compile(r"\\\\(['\"])")
 ACTION_SPACE_LINES = {
     "computer": [
         "click(start_box='(x,y)')",
@@ -245,11 +247,20 @@ def split_calls(action_text: str) -> list[str]:
     return calls
 
 
-def parse_call_expression(call_text: str) -> tuple[str, dict[str, Any]]:
+def call_expression(call_text: str) -> ast.expr:
+    """The parsed call; one that parses only with its over escaped quotes undone is read that way."""
     try:
-        expression = ast.parse(call_text, mode="eval").body
+        return ast.parse(call_text, mode="eval").body
     except SyntaxError as error:
-        raise ActionParseError(f"cannot parse action {call_text!r}") from error
+        repaired_text = OVER_ESCAPED_QUOTE_PATTERN.sub(r"\\\1", call_text)
+        try:
+            return ast.parse(repaired_text, mode="eval").body
+        except SyntaxError:
+            raise ActionParseError(f"cannot parse action {call_text!r}") from error
+
+
+def parse_call_expression(call_text: str) -> tuple[str, dict[str, Any]]:
+    expression = call_expression(call_text)
     if not isinstance(expression, ast.Call) or not isinstance(expression.func, ast.Name) or expression.args:
         raise ActionParseError(f"actions must look like name(key='value'), got {call_text!r}")
     arguments: dict[str, Any] = {}

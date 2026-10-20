@@ -2,8 +2,8 @@
 
 import pytest
 
-from rlworld.actions.adapters import AdapterCapabilityError, get_adapter, supported_modalities
-from rlworld.actions.models import ClickAction, parse_action
+from rlworld.actions.adapters import ActionParseError, AdapterCapabilityError, get_adapter, supported_modalities
+from rlworld.actions.models import ClickAction, TypeAction, parse_action
 
 FUNCTION_ACTIONS = [
     {"name": "goto", "url": "https://shop.example.com/cart"},
@@ -151,6 +151,21 @@ def test_qwen_native_tool_calls_never_double_or_break_text_actions():
     assert adapter.parse_output(QWEN_REPLY, geometry) == expected
     tool_call_only = QWEN_REPLY.split("Action:", 1)[1].split("\n", 2)[2]
     assert adapter.parse_output(tool_call_only, geometry) == expected
+
+
+OVER_ESCAPED_REPLY = r"""Let me read the file with Python.
+
+Action: type(content='python3 -c "import pandas as pd; print(pd.read_csv(\\'~/invoices.csv\\', dtype=str))"\n')"""
+
+
+def test_quotes_a_model_escaped_twice_read_as_escaped_once():
+    adapter = get_adapter("text_actions", coordinate_mode="relative_1000")
+    geometry = adapter.model_geometry(1280, 800)
+    assert adapter.parse_output(OVER_ESCAPED_REPLY, geometry) == [
+        TypeAction(text="python3 -c \"import pandas as pd; print(pd.read_csv('~/invoices.csv', dtype=str))\"\n")]
+    assert adapter.parse_output(r"Action: type(content='C:\\')", geometry) == [TypeAction(text="C:\\")]
+    with pytest.raises(ActionParseError):
+        adapter.parse_output(r"Action: type(content='a\\'b\\'c)", geometry)
 
 
 def test_text_actions_cannot_express_terminal_tasks():
