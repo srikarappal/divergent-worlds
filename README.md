@@ -145,7 +145,8 @@ The gates need no model: the oracle and rerun gates play the task's scripted sol
 1.0. The dry run prints its run and episode ids; it takes about 20 minutes and 45 steps and costs under 0.10 USD on
 OpenRouter. Watch it at `http://localhost:5173/runs/<run id>/episodes/<episode id>`. Once it ends, add `/review` to that
 address to scrub through every step: the screenshot with the actions marked, the model's reasoning and reply, the
-state changes and the exact model input. The Runs page lists launched runs only, not dry runs.
+state changes and the exact model input. The Runs page lists launched runs; dry runs appear under Saved runs
+with links to each episode.
 
 To launch the eval run, four episodes two at a time and capped at the budget:
 
@@ -173,8 +174,9 @@ docker rm --force $(docker ps --all --quiet --filter label=rlworld.env)
 * Envs fail to boot within 2 minutes: Docker is short of memory. Check `docker stats` and stop other containers.
 * OpenRouter answers 401: the key in `.env` is wrong or revoked. A 402 means the account is out of credits.
 * experimentd keeps experiments and runs in memory, so a restart forgets launched runs. Their trajectories stay in
-  `data/trajectories` and the review pages still open them.
-* Dev containers can reach the internet; the egress allowlist applies only to VM hosts so far.
+  `data/trajectories` and the Runs page lists them under Saved runs.
+* Nothing in an env reaches the internet: fleetd firewalls each dev container so only loopback traffic and replies to
+  inbound connections leave it. Set `"allow_egress": true` in the `docker` section of fleetd's config to open it.
 
 ## Dashboards
 

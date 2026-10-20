@@ -74,6 +74,7 @@ type dockerConfig struct {
 	ShmSizeMiB          int      `json:"shm_size_mib"`
 	ReadyTimeoutSeconds int      `json:"ready_timeout_seconds"`
 	SnapshotRepository  string   `json:"snapshot_repository"`
+	AllowEgress         bool     `json:"allow_egress"`
 }
 
 type firecrackerConfig struct {
@@ -253,7 +254,7 @@ func newDriver(loaded config, hostTools tools, frames guest.FrameStore) (vmm.Dri
 		driver := docker.NewDriver(docker.Config{Binary: loaded.Docker.Binary, AgentPort: guestAgentPort,
 			SecurityOptions: loaded.Docker.SecurityOptions, ShmSizeMiB: loaded.Docker.ShmSizeMiB,
 			ReadyTimeout:       time.Duration(loaded.Docker.ReadyTimeoutSeconds) * time.Second,
-			SnapshotRepository: loaded.Docker.SnapshotRepository}, hostTools.docker)
+			SnapshotRepository: loaded.Docker.SnapshotRepository, AllowEgress: loaded.Docker.AllowEgress}, hostTools.docker)
 		return driver, guest.NewChannel(guest.TokenDialer{Endpoints: driver},
 			guest.TokenDialer{Endpoints: driver, Greeting: "VNC"}, frames, timeout)
 	case "qemu_templated":

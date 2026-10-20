@@ -62,7 +62,21 @@ type Config struct {
 	ReadyTimeout time.Duration
 	// SnapshotRepository names the images that snapshots commit.
 	SnapshotRepository string
+	// AllowEgress leaves a container's network open. Otherwise each container gets a firewall in its own network
+	// namespace that lets only loopback traffic and replies to inbound connections, such as the agent's, out.
+	AllowEgress bool
 }
+
+// egressRuleset is the nftables ruleset that closes a container's network. A docker exec with --privileged installs it,
+// so the container itself never holds the capability to change it.
+const egressRuleset = `table inet rlworld_egress {
+	chain output {
+		type filter hook output priority filter; policy accept;
+		oif "lo" accept
+		ct state established,related accept
+		reject
+	}
+}`
 
 type container struct {
 	address string
@@ -159,6 +173,9 @@ func (driver *Driver) Restore(ctx context.Context, spec vmm.RestoreSpec) (vmm.VM
 		return vmm.VM{}, fmt.Errorf("start container for %s: %w", spec.VMID, err)
 	}
 	address, err := driver.publishedAddress(ctx, name)
+	if err == nil && !driver.config.AllowEgress {
+		err = driver.blockEgress(ctx, name)
+	}
 	if err == nil {
 		err = driver.waitForAgent(ctx, address, token)
 	}
@@ -175,6 +192,15 @@ func (driver *Driver) Restore(ctx context.Context, spec vmm.RestoreSpec) (vmm.VM
 	driver.containers[spec.VMID] = &container{address: address, token: token, state: state}
 	driver.mu.Unlock()
 	return vmm.VM{ID: spec.VMID, State: state, Driver: driver.Name()}, nil
+}
+
+// blockEgress installs the egress firewall in the container's network namespace before the guest is used.
+func (driver *Driver) blockEgress(ctx context.Context, name string) error {
+	_, err := driver.docker(ctx, "exec", "--privileged", "--user", "0", name, "/usr/sbin/nft", egressRuleset)
+	if err != nil {
+		return fmt.Errorf("block egress: %w", err)
+	}
+	return nil
 }
 
 func (driver *Driver) publishedAddress(ctx context.Context, name string) (string, error) {

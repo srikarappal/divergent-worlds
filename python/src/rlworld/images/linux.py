@@ -43,9 +43,10 @@ from rlworld.specs.digest import spec_digest
 from rlworld.specs.models import DisplaySpec, ImageSpec
 
 BOOT_ARGS = "console=ttyS0 reboot=k panic=1 pci=off"
-BASE_PACKAGES = ("systemd", "systemd-sysv", "dbus", "iproute2", "xvfb", "x11-xserver-utils", "at-spi2-core",
-                 "python3", "python3-venv", "python3-gi", "python3-pyatspi", "xdotool", "x11vnc", "locales",
-                 "ca-certificates", "curl", "unzip", "xz-utils")
+# nftables carries the nft that fleetd's Docker driver runs to close a dev container's network.
+BASE_PACKAGES = ("systemd", "systemd-sysv", "dbus", "iproute2", "nftables", "xvfb", "x11-xserver-utils",
+                 "at-spi2-core", "python3", "python3-venv", "python3-gi", "python3-pyatspi", "xdotool", "x11vnc",
+                 "locales", "ca-certificates", "curl", "unzip", "xz-utils")
 DESKTOP_PACKAGES = {"openbox": ("openbox",),
                     "xfce": ("xfce4-session", "xfwm4", "xfce4-panel", "xfdesktop4", "xfce4-settings", "xfconf",
                              "thunar", "xfce4-terminal", "mousepad", "adwaita-icon-theme")}

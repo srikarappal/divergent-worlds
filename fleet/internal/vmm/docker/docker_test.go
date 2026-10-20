@@ -134,9 +134,18 @@ func TestRestoreStartsABootedPausedContainer(t *testing.T) {
 	if run[len(run)-1] != "rlworld-dev/noble:1" {
 		t.Fatalf("image last: %v", run)
 	}
-	expected := []string{"rm rlworld-env_1", "run rlworld-dev/noble:1", "port 5005/tcp", "pause rlworld-env_1"}
+	expected := []string{"rm rlworld-env_1", "run rlworld-dev/noble:1", "port 5005/tcp", "exec " + egressRuleset,
+		"pause rlworld-env_1"}
 	if !slices.Equal(docker.subcommands(), expected) {
 		t.Fatalf("docker calls: %v", docker.subcommands())
+	}
+	firewall := docker.calls[3]
+	if !slices.Equal(firewall[:7], []string{"docker", "exec", "--privileged", "--user", "0", "rlworld-env_1",
+		"/usr/sbin/nft"}) {
+		t.Fatalf("firewall argv: %v", firewall)
+	}
+	if slices.Contains(run, "--privileged") || slices.Contains(run, "NET_ADMIN") {
+		t.Fatalf("the container itself must not be able to change its firewall: %v", run)
 	}
 	address, token, err := driver.GuestEndpoint("env_1")
 	if err != nil || address != docker.agent.listener.Addr().String() || len(token) != 64 {
@@ -153,6 +162,33 @@ func TestRestoreThatResumesLeavesTheContainerRunning(t *testing.T) {
 	}
 	if slices.Contains(docker.subcommands(), "pause rlworld-env_2") {
 		t.Fatalf("resumed restores must not pause: %v", docker.subcommands())
+	}
+}
+
+func TestContainersThatAllowEgressGetNoFirewall(t *testing.T) {
+	docker := &recordingDocker{agent: startFakeAgent(t)}
+	driver := NewDriver(Config{ReadyTimeout: 2 * time.Second, AllowEgress: true}, docker)
+	_, err := driver.Restore(context.Background(), vmm.RestoreSpec{VMID: "env_6", DiskOverlayPath: "image"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, argv := range docker.calls {
+		if argv[1] == "exec" {
+			t.Fatalf("allow_egress must skip the firewall: %v", docker.subcommands())
+		}
+	}
+}
+
+func TestContainersWhoseFirewallFailsAreRemoved(t *testing.T) {
+	docker := &recordingDocker{agent: startFakeAgent(t), failures: map[string]error{"exec": errors.New("nft: not found")}}
+	_, err := newTestDriver(docker, 2*time.Second).Restore(context.Background(),
+		vmm.RestoreSpec{VMID: "env_7", DiskOverlayPath: "image"})
+	if err == nil || !strings.Contains(err.Error(), "block egress: nft: not found") {
+		t.Fatalf("restore without a firewall: %v", err)
+	}
+	calls := docker.subcommands()
+	if calls[len(calls)-1] != "rm rlworld-env_7" {
+		t.Fatalf("container must be removed: %v", calls)
 	}
 }
 
@@ -206,8 +242,9 @@ func TestPauseResumeSnapshotAndDestroy(t *testing.T) {
 	if err := driver.Destroy(ctx, "env_1"); err != nil {
 		t.Fatal(err)
 	}
-	expected := []string{"rm rlworld-env_1", "run image", "port 5005/tcp", "pause rlworld-env_1",
-		"unpause rlworld-env_1", "pause rlworld-env_1", "commit rlworld-snapshot:env_1_at_42", "rm rlworld-env_1"}
+	expected := []string{"rm rlworld-env_1", "run image", "port 5005/tcp", "exec " + egressRuleset,
+		"pause rlworld-env_1", "unpause rlworld-env_1", "pause rlworld-env_1", "commit rlworld-snapshot:env_1_at_42",
+		"rm rlworld-env_1"}
 	if !slices.Equal(docker.subcommands(), expected) {
 		t.Fatalf("docker calls: %v", docker.subcommands())
 	}
